@@ -5,7 +5,8 @@
 // ============================================
 let currentDate = new Date();
 let currentMonth = new Date();
-let records = {}; // { 'YYYY-MM-DD': { revenue, fuel, expenseName, expenseAmount, memo, tripCount, dayOff } }
+let personalRecords = {}; // 개인택시 기록
+let corporateRecords = {}; // 법인택시 기록
 let corporateInfo = {}; // { carNumber, employeeId }
 let selectedDate = null;
 
@@ -87,6 +88,14 @@ function setupEventListeners() {
 }
 
 // ============================================
+// 현재 기록 가져오기 (택시 유형에 따라)
+// ============================================
+function getCurrentRecords() {
+    const taxiType = document.querySelector('input[name="taxiType"]:checked').value;
+    return taxiType === 'corporate' ? corporateRecords : personalRecords;
+}
+
+// ============================================
 // 택시 유형 변경
 // ============================================
 function updateTaxiType() {
@@ -147,6 +156,7 @@ function calculateDailyProfit() {
 // ============================================
 function loadDayRecord() {
     const dateStr = document.getElementById('recordDate').value;
+    const records = getCurrentRecords();
     const record = records[dateStr];
 
     if (record) {
@@ -185,6 +195,7 @@ function saveRecord() {
         return;
     }
 
+    const records = getCurrentRecords();
     records[dateStr] = {
         revenue,
         fuel,
@@ -247,6 +258,7 @@ function updateCalendar() {
     }
 
     // 날짜 셀
+    const records = getCurrentRecords();
     let currentDate = new Date(startDate);
     while (currentDate <= lastDay) {
         const dateStr = formatDate(currentDate);
@@ -296,6 +308,7 @@ function updateCalendar() {
 // ============================================
 function openDateDetail(dateStr) {
     selectedDate = dateStr;
+    const records = getCurrentRecords();
     const record = records[dateStr];
     const isDayOff = record?.dayOff;
 
@@ -380,6 +393,7 @@ function deleteRecord() {
     const confirmed = confirm('정말 삭제하시겠습니까?\n삭제된 기록은 복구할 수 없습니다.');
     if (!confirmed) return;
 
+    const records = getCurrentRecords();
     delete records[selectedDate];
     saveData();
     closeDetailModal();
@@ -392,6 +406,7 @@ function deleteRecord() {
 // ============================================
 function openDayOffModal(dateStr) {
     selectedDate = dateStr;
+    const records = getCurrentRecords();
     const record = records[dateStr];
     const isDayOff = record?.dayOff;
 
@@ -409,6 +424,7 @@ function closeDayOffModal() {
 function setDayOff() {
     if (!selectedDate) return;
 
+    const records = getCurrentRecords();
     // 이미 운행 기록이 있으면 설정 불가
     if (records[selectedDate] && !records[selectedDate].dayOff) {
         alert('이미 운행 기록이 있는 날짜는 휴무일로 설정할 수 없습니다.');
@@ -435,6 +451,7 @@ function setDayOff() {
 function removeDayOff() {
     if (!selectedDate) return;
 
+    const records = getCurrentRecords();
     delete records[selectedDate];
     saveData();
     closeDayOffModal();
@@ -453,6 +470,7 @@ function updateStats() {
     let totalExpense = 0;
     let totalTrips = 0;
 
+    const records = getCurrentRecords();
     for (const dateStr in records) {
         const [y, m, d] = dateStr.split('-');
         if (parseInt(y) === year && parseInt(m) === month + 1) {
@@ -497,6 +515,7 @@ function closeMenu() {
 function exportToCSV() {
     let csv = '날짜,매출,주유비,기타비용 항목,기타비용,순수익,메모\n';
 
+    const records = getCurrentRecords();
     const sortedDates = Object.keys(records).sort();
     for (const dateStr of sortedDates) {
         const record = records[dateStr];
@@ -534,7 +553,8 @@ function exportToCSV() {
 // ============================================
 function exportBackup() {
     const backup = {
-        records,
+        personalRecords,
+        corporateRecords,
         corporateInfo,
         exportDate: formatDate(new Date())
     };
@@ -561,7 +581,8 @@ function importFromFile(e) {
     reader.onload = function(event) {
         try {
             const backup = JSON.parse(event.target.result);
-            records = backup.records || {};
+            personalRecords = backup.personalRecords || {};
+            corporateRecords = backup.corporateRecords || {};
             corporateInfo = backup.corporateInfo || {};
             saveData();
             updateTaxiType();
@@ -582,7 +603,13 @@ function deleteAllRecords() {
     const confirmed = confirm('정말 모든 기록을 삭제하시겠습니까?\n삭제된 기록은 복구할 수 없습니다.');
     if (!confirmed) return;
 
-    records = {};
+    const taxiType = document.querySelector('input[name="taxiType"]:checked').value;
+    if (taxiType === 'corporate') {
+        corporateRecords = {};
+    } else {
+        personalRecords = {};
+    }
+    
     saveData();
     closeMenu();
     updateCalendar();
@@ -595,7 +622,8 @@ function deleteAllRecords() {
 // ============================================
 function saveData() {
     const data = {
-        records,
+        personalRecords,
+        corporateRecords,
         corporateInfo
     };
     localStorage.setItem('taxiRecordData', JSON.stringify(data));
@@ -609,7 +637,8 @@ function loadData() {
     if (stored) {
         try {
             const data = JSON.parse(stored);
-            records = data.records || {};
+            personalRecords = data.personalRecords || data.records || {};
+            corporateRecords = data.corporateRecords || {};
             corporateInfo = data.corporateInfo || {};
         } catch (error) {
             console.error('데이터 로드 실패:', error);
