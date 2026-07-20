@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>택시 운행 기록장</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 헤더 -->
+        <header class="header">
+            <h1>📱 택시 운행 기록장</h1>
+            <p class="subtitle">오늘의 수익을 기록하세요</p>
+        </header>
+
+        <!-- 택시 유형 선택 -->
+        <div class="tax-type-section">
+            <label>
+                <input type="radio" name="taxiType" value="personal" checked> 개인택시
+            </label>
+            <label>
+                <input type="radio" name="taxiType" value="corporate"> 법인택시
+            </label>
+        </div>
+
+        <!-- 법인택시 초기 설정 -->
+        <div id="corporateSetup" class="setup-section" style="display: none;">
+            <h3>📋 법인택시 정보 입력 (처음 1회만)</h3>
+            <input type="text" id="carNumber" placeholder="차량번호 (예: 서울 12가 1234)" maxlength="20">
+            <input type="text" id="employeeId" placeholder="사번 (예: E001)" maxlength="20">
+            <button id="confirmSetup">확인</button>
+        </div>
+
+        <!-- 오늘 기록 입력 -->
+        <div class="input-section">
+            <div class="input-group">
+                <label>📅 날짜</label>
+                <input type="date" id="recordDate">
+            </div>
+
+            <div class="input-group">
+                <label>💰 오늘 매출</label>
+                <input type="number" id="revenue" placeholder="0" min="0">
+                <span class="unit">원</span>
+            </div>
+
+            <div class="input-group">
+                <label>⛽ 주유비</label>
+                <input type="number" id="fuel" placeholder="0" min="0">
+                <span class="unit">원</span>
+            </div>
+
+            <div class="input-group">
+                <label>💳 기타비용</label>
+                <div class="expense-input">
+                    <input type="text" id="expenseName" placeholder="쓴 곳 (예: 식비)" maxlength="20">
+                    <input type="number" id="expenseAmount" placeholder="금액" min="0">
+                    <span class="unit">원</span>
+                </div>
+            </div>
+
+            <div id="corporateFields" style="display: none;">
+                <div class="input-group">
+                    <label>🚖 오늘 운행 건수</label>
+                    <input type="number" id="tripCount" placeholder="0" min="0">
+                    <span class="unit">건</span>
+                </div>
+            </div>
+
+            <div class="memo-section">
+                <label>📝 메모</label>
+                <textarea id="memo" placeholder="특이사항이나 메모를 적어주세요" rows="3"></textarea>
+            </div>
+
+            <!-- 오늘 순수익 표시 -->
+            <div class="profit-display">
+                <p>오늘 순수익</p>
+                <p class="profit-amount" id="dailyProfit">0원</p>
+            </div>
+
+            <!-- 저장 버튼 -->
+            <button id="saveBtn" class="save-btn">💾 저장</button>
+            <div id="saveMessage" class="save-message"></div>
+        </div>
+
+        <!-- 월별 달력 -->
+        <div class="calendar-section">
+            <div class="calendar-header">
+                <button id="prevMonth">&lt;</button>
+                <h3 id="monthTitle"></h3>
+                <button id="nextMonth">&gt;</button>
+            </div>
+            <div id="calendar" class="calendar-grid"></div>
+        </div>
+
+        <!-- 월간 통계 -->
+        <div class="stats-section">
+            <h3>📊 이번 달 통계</h3>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <p class="stat-label">총 매출</p>
+                    <p class="stat-value" id="monthRevenue">0원</p>
+                </div>
+                <div class="stat-box">
+                    <p class="stat-label">총 비용</p>
+                    <p class="stat-value" id="monthExpense">0원</p>
+                </div>
+                <div class="stat-box">
+                    <p class="stat-label">순수익</p>
+                    <p class="stat-value" id="monthProfit">0원</p>
+                </div>
+                <div id="corporateStats" style="display: none;">
+                    <div class="stat-box">
+                        <p class="stat-label">운행 건수</p>
+                        <p class="stat-value" id="monthTrips">0건</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 메뉴 버튼 -->
+        <div class="menu-section">
+            <button id="menuBtn" class="menu-btn">⚙️ 메뉴</button>
+        </div>
+
+        <!-- 메뉴 모달 -->
+        <div id="menuModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>메뉴</h3>
+                    <button id="closeMenu" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <button id="exportBtn" class="menu-item">📊 엑셀로 보관</button>
+                    <button id="importBtn" class="menu-item">📂 백업 불러오기</button>
+                    <button id="deleteAllBtn" class="menu-item delete-item">🗑️ 모든 기록 삭제</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 날짜별 상세 정보 모달 -->
+        <div id="detailModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="detailDate"></h3>
+                    <button id="closeDetail" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body" id="detailBody"></div>
+                <div class="modal-footer">
+                    <button id="deleteRecordBtn" class="delete-btn">기록 삭제</button>
+                    <button id="closeDetailBtn" class="cancel-btn">닫기</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 휴무일 설정 모달 -->
+        <div id="dayOffModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="dayOffDate"></h3>
+                    <button id="closeDayOff" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p>이 날을 휴무일로 설정하시겠습니까?</p>
+                </div>
+                <div class="modal-footer">
+                    <button id="setDayOffBtn" class="confirm-btn">휴무일 설정</button>
+                    <button id="removeDayOffBtn" class="cancel-btn" style="display: none;">휴무일 해제</button>
+                    <button id="closeDayOffBtn" class="cancel-btn">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
