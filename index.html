@@ -1,178 +1,494 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>택시 운행 기록장</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>K-TAXI 통합 운행기록장 & 안전운행</title>
+  
+  <!-- React & Babel CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #16181C;
+      --card: #1F2227;
+      --card-alt: #262A31;
+      --border: #33373F;
+      --text: #F0EEE8;
+      --dim: #9A9EA6;
+      --amber: #F5B301;
+      --green: #6FBF73;
+      --red: #D9534F;
+      --teal: #4C8C8C;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding-bottom: 70px;
+    }
+    input, select, textarea, button { font-family: inherit; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 12px; font-weight: 700; border: none; cursor: pointer; transition: 0.15s;
+    }
+    .btn-primary { background: var(--amber); color: #111; }
+    .btn-secondary { background: var(--card-alt); color: var(--text); border: 1px solid var(--border); }
+    .btn-danger { background: var(--red); color: #fff; }
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+      display: flex; align-items: center; justify-content: center; z-index: 999; padding: 16px;
+    }
+    .modal-box {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 20px; width: 100%; max-width: 380px; max-height: 85vh;
+      overflow-y: auto; padding: 20px;
+    }
+    .field-label { font-size: 12px; color: var(--dim); font-weight: 600; margin-bottom: 6px; }
+    .input-box {
+      width: 100%; background: var(--card-alt); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px; color: var(--text); font-size: 15px; outline: none; margin-bottom: 12px;
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <!-- 헤더 -->
-        <header class="header">
-            <h1>📱 택시 운행 기록장</h1>
-            <p class="subtitle">오늘의 수익을 기록하세요</p>
-        </header>
+  <div id="root"></div>
 
-        <!-- 택시 유형 선택 -->
-        <div class="tax-type-section">
-            <label>
-                <input type="radio" name="taxiType" value="personal" checked> 개인택시
-            </label>
-            <label>
-                <input type="radio" name="taxiType" value="corporate"> 법인택시
-            </label>
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // 통화 포맷 헬퍼
+    const won = (n) => Math.round(n || 0).toLocaleString("ko-KR") + "원";
+    const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const todayKey = () => {
+      const t = new Date();
+      return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`;
+    };
+
+    // 하버사인 공식 (거리 계산)
+    function getDistanceMeters(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // 기본 단속 카메라 샘플 (천안/아산 주요 거점)
+    const DEFAULT_CAMERAS = [
+      { id: "C1", name: "신호·과속단속 (아산시청 앞)", lat: 36.7898, lng: 127.0019, speedLimit: 50 },
+      { id: "C2", name: "과속단속 60km (천안아산역 부근)", lat: 36.7942, lng: 127.1044, speedLimit: 60 },
+      { id: "C3", name: "신호·과속 50km (불당대로 교차로)", lat: 36.8075, lng: 127.1120, speedLimit: 50 }
+    ];
+
+    function App() {
+      // 탭: 'log'(기록장), 'gps'(안전운행 음성안내), 'report'(연간/통계), 'settings'(설정)
+      const [tab, setTab] = useState("log");
+
+      // 기사 기본 프로필
+      const [profile, setProfile] = useState(() => {
+        const saved = localStorage.getItem("ktaxi_profile");
+        return saved ? JSON.parse(saved) : {
+          type: "corporate", // corporate(법인) | personal(개인)
+          vehicleNumber: "충남12가 3456",
+          employeeNumber: "1004",
+          dailyQuota: 210000,
+          insuranceRate: 9.7
+        };
+      });
+
+      // 일별 운행 기록
+      const [records, setRecords] = useState(() => {
+        const saved = localStorage.getItem("ktaxi_records");
+        return saved ? JSON.parse(saved) : {};
+      });
+
+      // 고정비 & 정비 기록
+      const [fixedCosts, setFixedCosts] = useState(() => {
+        const saved = localStorage.getItem("ktaxi_fixed_costs");
+        return saved ? JSON.parse(saved) : [{ id: 1, name: "통신/GPS비", amount: 25000 }];
+      });
+      const [maintenances, setMaintenances] = useState(() => {
+        const saved = localStorage.getItem("ktaxi_maintenances");
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      // 달력 네비게이션
+      const [viewY, setViewY] = useState(new Date().getFullYear());
+      const [viewM, setViewM] = useState(new Date().getMonth());
+      const [selectedDate, setSelectedDate] = useState(null);
+      const [editModal, setEditModal] = useState(false);
+      const [draft, setDraft] = useState({ revenue: "", fuel: "", tripCount: "", memo: "", holiday: false });
+
+      // GPS & 음성 알림 상태
+      const [isGpsActive, setIsGpsActive] = useState(false);
+      const [curPos, setCurPos] = useState({ lat: null, lng: null, accuracy: null, speed: 0 });
+      const [nearestCam, setNearestCam] = useState(null);
+      const [alertLogs, setAlertLogs] = useState([]);
+      const watchIdRef = useRef(null);
+      const alertedCamIds = useRef(new Set());
+
+      // 로컬 자동 저장
+      useEffect(() => localStorage.setItem("ktaxi_profile", JSON.stringify(profile)), [profile]);
+      useEffect(() => localStorage.setItem("ktaxi_records", JSON.stringify(records)), [records]);
+      useEffect(() => localStorage.setItem("ktaxi_fixed_costs", JSON.stringify(fixedCosts)), [fixedCosts]);
+      useEffect(() => localStorage.setItem("ktaxi_maintenances", JSON.stringify(maintenances)), [maintenances]);
+
+      // 음성 안내 발화 (TTS)
+      const speakVoice = (text) => {
+        if (!("speechSynthesis" in window)) return;
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = "ko-KR";
+        utter.rate = 1.0;
+        window.speechSynthesis.speak(utter);
+      };
+
+      // GPS 추적 로직
+      const toggleGps = () => {
+        if (isGpsActive) {
+          if (watchIdRef.current) navigator.geolocation.clearWatch(watchIdRef.current);
+          setIsGpsActive(false);
+          setNearestCam(null);
+          speakVoice("안전운행 안내를 종료합니다.");
+        } else {
+          if (!("geolocation" in navigator)) {
+            alert("이 기기나 브라우저에서 GPS를 지원하지 않습니다.");
+            return;
+          }
+          speakVoice("안전운행 GPS 안내를 시작합니다.");
+          setIsGpsActive(true);
+          watchIdRef.current = navigator.geolocation.watchPosition(
+            (pos) => {
+              const { latitude, longitude, accuracy, speed } = pos.coords;
+              const curSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
+              setCurPos({ lat: latitude, lng: longitude, accuracy: Math.round(accuracy), speed: curSpeedKmh });
+
+              // 카메라 거리 탐색
+              let closest = null;
+              let minDistance = 999999;
+
+              DEFAULT_CAMERAS.forEach((cam) => {
+                const dist = getDistanceMeters(latitude, longitude, cam.lat, cam.lng);
+                if (dist < minDistance) {
+                  minDistance = dist;
+                  closest = { ...cam, distance: Math.round(dist) };
+                }
+
+                // 300m 이내 진입 시 1회 알림
+                if (dist <= 300 && !alertedCamIds.current.has(cam.id)) {
+                  alertedCamIds.current.add(cam.id);
+                  speakVoice(`전방 ${Math.round(dist)}미터 앞, ${cam.name}입니다. 속도를 줄이세요.`);
+                  setAlertLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${cam.name} 근접 감지 (${Math.round(dist)}m)`, ...prev.slice(0, 10)]);
+                }
+                // 350m 벗어나면 알림 초기화
+                if (dist > 350 && alertedCamIds.current.has(cam.id)) {
+                  alertedCamIds.current.delete(cam.id);
+                }
+              });
+              setNearestCam(closest);
+            },
+            (err) => console.error(err),
+            { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+          );
+        }
+      };
+
+      // 월간 정산 집계
+      const monthStats = useMemo(() => {
+        let rev = 0, fuel = 0, trips = 0, workDays = 0, excessTotal = 0;
+        const prefix = `${viewY}-${pad2(viewM + 1)}`;
+        Object.entries(records).forEach(([k, rec]) => {
+          if (!k.startsWith(prefix) || rec.holiday) return;
+          workDays++;
+          rev += num(rec.revenue);
+          fuel += num(rec.fuel);
+          trips += num(rec.tripCount);
+          if (profile.type === "corporate" && num(profile.dailyQuota) > 0) {
+            excessTotal += Math.max(0, num(rec.revenue) - num(profile.dailyQuota));
+          }
+        });
+        const fixedSum = fixedCosts.reduce((s, f) => s + num(f.amount), 0);
+        let net = 0;
+        if (profile.type === "corporate") {
+          const driverPay = excessTotal * 0.7; // 사납금 초과 70% 수당
+          const insurance = Math.round(driverPay * ((profile.insuranceRate || 9.7) / 100));
+          net = driverPay - insurance - fixedSum;
+        } else {
+          net = rev - fuel - fixedSum;
+        }
+        return { rev, fuel, trips, workDays, excessTotal, net, fixedSum };
+      }, [records, viewY, viewM, profile, fixedCosts]);
+
+      // 달력 날짜 생성
+      const daysInMonth = new Date(viewY, viewM + 1, 0).getDate();
+      const firstDayIndex = new Date(viewY, viewM, 1).getDay();
+      const calendarCells = [];
+      for (let i = 0; i < firstDayIndex; i++) calendarCells.push(null);
+      for (let d = 1; d <= daysInMonth; d++) calendarCells.push(d);
+
+      const openDayModal = (d) => {
+        const key = `${viewY}-${pad2(viewM + 1)}-${pad2(d)}`;
+        setSelectedDate(key);
+        const ex = records[key] || { revenue: "", fuel: "", tripCount: "", memo: "", holiday: false };
+        setDraft({ ...ex });
+        setEditModal(true);
+      };
+
+      const saveDayRecord = () => {
+        setRecords({ ...records, [selectedDate]: { ...draft, revenue: num(draft.revenue), fuel: num(draft.fuel), tripCount: num(draft.tripCount) } });
+        setEditModal(false);
+      };
+
+      // 백업 JSON 내보내기/가져오기
+      const handleBackupExport = () => {
+        const data = { profile, records, fixedCosts, maintenances };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `K-TAXI_통합백업_${todayKey()}.json`;
+        a.click();
+      };
+
+      const handleBackupImport = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const data = JSON.parse(evt.target.result);
+            if (data.profile) setProfile(data.profile);
+            if (data.records) setRecords(data.records);
+            if (data.fixedCosts) setFixedCosts(data.fixedCosts);
+            if (data.maintenances) setMaintenances(data.maintenances);
+            alert("백업 데이터를 성공적으로 복원했습니다!");
+          } catch(err) { alert("유효하지 않은 백업 파일입니다."); }
+        };
+        reader.readAsText(file);
+      };
+
+      return (
+        <div style={{ maxWidth: 440, margin: "0 auto", padding: "16px 14px" }}>
+          {/* 상단 헤더 */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div>
+              <span style={{ fontSize: 20, fontWeight: 900, color: "var(--amber)", letterSpacing: 0.5 }}>K-TAXI</span>
+              <span style={{ fontSize: 12, color: "var(--dim)", marginLeft: 8 }}>{profile.vehicleNumber} ({profile.type === 'corporate' ? '법인' : '개인'})</span>
+            </div>
+            <button className="btn btn-secondary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => setTab("settings")}>⚙ 설정</button>
+          </div>
+
+          {/* 탭 네비게이션 */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 14 }}>
+            <button className={`btn ${tab === 'log' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("log")}>📅 운행장부</button>
+            <button className={`btn ${tab === 'gps' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("gps")}>📍 안전운행 GPS</button>
+            <button className={`btn ${tab === 'report' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("report")}>📊 통계·백업</button>
+          </div>
+
+          {/* --- [TAB 1: 운행장부 & 달력] --- */}
+          {tab === "log" && (
+            <div>
+              {/* 월간 요약 카드 */}
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "16px", marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <button className="btn btn-secondary" style={{ padding: "4px 10px" }} onClick={() => { if(viewM===0){setViewM(11);setViewY(viewY-1);}else{setViewM(viewM-1);} }}>◀</button>
+                  <span style={{ fontWeight: 800, fontSize: 16 }}>{viewY}년 {viewM + 1}월</span>
+                  <button className="btn btn-secondary" style={{ padding: "4px 10px" }} onClick={() => { if(viewM===11){setViewM(0);setViewY(viewY+1);}else{setViewM(viewM+1);} }}>▶</button>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--dim)" }}>총 매출</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>{won(monthStats.rev)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--dim)" }}>예상 순수령액</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "var(--green)" }}>{won(monthStats.net)}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 8 }}>운행 {monthStats.workDays}일 · {profile.type === 'corporate' ? `콜 ${monthStats.trips}건` : `연료비 ${won(monthStats.fuel)}`}</div>
+              </div>
+
+              {/* 달력 그리드 */}
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "12px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, textAlign: "center", fontSize: 11, fontWeight: 700, color: "var(--dim)", marginBottom: 6 }}>
+                  <span style={{ color: "var(--red)" }}>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span style={{ color: "#4A90E2" }}>토</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+                  {calendarCells.map((day, idx) => {
+                    if (!day) return <div key={`empty-${idx}`} style={{ minHeight: 48, background: "rgba(255,255,255,0.02)", borderRadius: 8 }} />;
+                    const key = `${viewY}-${pad2(viewM + 1)}-${pad2(day)}`;
+                    const rec = records[key];
+                    const isToday = key === todayKey();
+                    return (
+                      <div
+                        key={day}
+                        onClick={() => openDayModal(day)}
+                        style={{
+                          minHeight: 48, padding: 4, borderRadius: 8, cursor: "pointer",
+                          background: isToday ? "rgba(245, 179, 1, 0.12)" : "var(--card-alt)",
+                          border: isToday ? "1px solid var(--amber)" : "1px solid var(--border)",
+                          display: "flex", flexDirection: "column", justifyContent: "space-between"
+                        }}
+                      >
+                        <span style={{ fontSize: 11, fontWeight: 700, color: idx%7===0 ? "var(--red)" : idx%7===6 ? "#4A90E2" : "var(--text)" }}>{day}</span>
+                        {rec && (
+                          rec.holiday ? (
+                            <span style={{ fontSize: 9, color: "var(--red)", fontWeight: 700 }}>휴무</span>
+                          ) : (
+                            <span style={{ fontSize: 9, color: "var(--amber)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{Math.round(rec.revenue/10000)}만</span>
+                          )
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- [TAB 2: 실시간 GPS & 음성 알림 HUD] --- */}
+          {tab === "gps" && (
+            <div>
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "18px", marginBottom: 14, textAlign: "center" }}>
+                <div style={{ fontSize: 12, color: "var(--dim)", marginBottom: 6 }}>현재 주행 속도</div>
+                <div style={{ fontSize: 48, fontWeight: 900, color: isGpsActive ? "var(--amber)" : "var(--dim)" }}>
+                  {isGpsActive ? curPos.speed : 0} <span style={{ fontSize: 16 }}>km/h</span>
+                </div>
+                <button
+                  className={`btn ${isGpsActive ? 'btn-danger' : 'btn-primary'}`}
+                  style={{ width: "100%", padding: "14px 0", marginTop: 12, fontSize: 15 }}
+                  onClick={toggleGps}
+                >
+                  {isGpsActive ? "🛑 안전운행 안내 끄기" : "📍 실시간 GPS 음성안내 켜기"}
+                </button>
+              </div>
+
+              {/* 근접 단속 카메라 경보 카드 */}
+              {isGpsActive && nearestCam && (
+                <div style={{ background: nearestCam.distance <= 300 ? "rgba(217,83,79,0.2)" : "var(--card)", border: `1px solid ${nearestCam.distance <= 300 ? 'var(--red)' : 'var(--border)'}`, borderRadius: 16, padding: "14px", marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, color: nearestCam.distance <= 300 ? "var(--red)" : "var(--dim)", fontWeight: 700 }}>⚠️ 전방 감지 카메라</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, marginTop: 4 }}>{nearestCam.name}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}>
+                    <span>남은 거리: <b style={{ color: "var(--amber)" }}>{nearestCam.distance}m</b></span>
+                    <span>제한 속도: <b>{nearestCam.speedLimit}km/h</b></span>
+                  </div>
+                </div>
+              )}
+
+              {/* 음성 테스트 버튼 & 로그 */}
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--dim)" }}>실시간 안내 기록</span>
+                  <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => speakVoice("음성 안내 시스템이 정상 작동 중입니다.")}>🔊 스피커 테스트</button>
+                </div>
+                <div style={{ background: "var(--card-alt)", borderRadius: 10, padding: 10, fontSize: 11, color: "var(--dim)", maxHeight: 120, overflowY: "auto", lineHeight: 1.6 }}>
+                  {alertLogs.length > 0 ? alertLogs.map((log, i) => <div key={i}>{log}</div>) : "카메라 감지 대기 중..."}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- [TAB 3: 통계 & 백업] --- */}
+          {tab === "report" && (
+            <div>
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "16px", marginBottom: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>💾 데이터 안전 백업 / 복원</div>
+                <button className="btn btn-secondary" style={{ width: "100%", padding: "12px 0", marginBottom: 8, fontSize: 13 }} onClick={handleBackupExport}>
+                  📥 백업 파일 저장하기 (JSON)
+                </button>
+                <label className="btn btn-secondary" style={{ width: "100%", padding: "12px 0", fontSize: 13, cursor: "pointer", display: "flex" }}>
+                  📤 백업 파일 불러오기 (복원)
+                  <input type="file" accept=".json" onChange={handleBackupImport} style={{ display: "none" }} />
+                </label>
+              </div>
+
+              {/* 고정비 목록 */}
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "16px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>🔧 월 고정비 지출 관리</div>
+                {fixedCosts.map((item) => (
+                  <div key={item.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+                    <span>{item.name}</span>
+                    <span style={{ fontWeight: 700, color: "var(--amber)" }}>{won(item.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* --- [TAB 4: 설정 모달] --- */}
+          {tab === "settings" && (
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "18px" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 14 }}>⚙️ 기사 기본 정보 설정</div>
+              <div className="field-label">운행 형태</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                <button className={`btn ${profile.type==='corporate'?'btn-primary':'btn-secondary'}`} style={{ padding: "10px 0" }} onClick={() => setProfile({...profile, type: "corporate"})}>법인택시</button>
+                <button className={`btn ${profile.type==='personal'?'btn-primary':'btn-secondary'}`} style={{ padding: "10px 0" }} onClick={() => setProfile({...profile, type: "personal"})}>개인택시</button>
+              </div>
+
+              <div className="field-label">차량번호</div>
+              <input className="input-box" value={profile.vehicleNumber} onChange={(e) => setProfile({...profile, vehicleNumber: e.target.value})} />
+
+              {profile.type === "corporate" && (
+                <>
+                  <div className="field-label">1일 기본 사납금 (원)</div>
+                  <input className="input-box" type="number" value={profile.dailyQuota} onChange={(e) => setProfile({...profile, dailyQuota: num(e.target.value)})} />
+                  <div className="field-label">4대보험 추정 공제율 (%)</div>
+                  <input className="input-box" type="number" value={profile.insuranceRate} onChange={(e) => setProfile({...profile, insuranceRate: num(e.target.value)})} />
+                </>
+              )}
+              <button className="btn btn-primary" style={{ width: "100%", padding: "12px 0", marginTop: 6 }} onClick={() => setTab("log")}>저장 완료</button>
+            </div>
+          )}
+
+          {/* --- [일별 기록 입력 모달] --- */}
+          {editModal && (
+            <div className="modal-overlay" onClick={() => setEditModal(false)}>
+              <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <span style={{ fontWeight: 800, fontSize: 16 }}>{selectedDate} 기록</span>
+                  <button className="btn btn-secondary" style={{ padding: "4px 8px" }} onClick={() => setDraft({...draft, holiday: !draft.holiday})}>
+                    {draft.holiday ? "🔴 휴무 해제" : "🌴 휴무 지정"}
+                  </button>
+                </div>
+
+                {!draft.holiday ? (
+                  <>
+                    <div className="field-label">총 매출 (원)</div>
+                    <input className="input-box" type="number" placeholder="예: 250000" value={draft.revenue} onChange={(e) => setDraft({...draft, revenue: e.target.value})} />
+                    <div className="field-label">연료비 / 충전비 (원)</div>
+                    <input className="input-box" type="number" placeholder="예: 35000" value={draft.fuel} onChange={(e) => setDraft({...draft, fuel: e.target.value})} />
+                    {profile.type === "corporate" && (
+                      <>
+                        <div className="field-label">운행 콜 수</div>
+                        <input className="input-box" type="number" placeholder="예: 16" value={draft.tripCount} onChange={(e) => setDraft({...draft, tripCount: e.target.value})} />
+                      </>
+                    )}
+                    <div className="field-label">특이사항 메모</div>
+                    <textarea className="input-box" rows="2" placeholder="정비, 세차, 날씨 등" value={draft.memo} onChange={(e) => setDraft({...draft, memo: e.target.value})} />
+                  </>
+                ) : (
+                  <div style={{ textAlign: "center", padding: "20px 0", color: "var(--red)", fontWeight: 700 }}>휴무일로 지정되었습니다.</div>
+                )}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <button className="btn btn-secondary" style={{ flex: 1, padding: "12px 0" }} onClick={() => setEditModal(false)}>취소</button>
+                  <button className="btn btn-primary" style={{ flex: 1, padding: "12px 0" }} onClick={saveDayRecord}>저장</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
+      );
+    }
 
-        <!-- 법인택시 초기 설정 -->
-        <div id="corporateSetup" class="setup-section" style="display: none;">
-            <h3>📋 법인택시 정보 입력 (처음 1회만)</h3>
-            <input type="text" id="carNumber" placeholder="차량번호 (예: 서울 12가 1234)" maxlength="20">
-            <input type="text" id="employeeId" placeholder="사번 (예: E001)" maxlength="20">
-            <button id="confirmSetup">확인</button>
-        </div>
-
-        <!-- 오늘 기록 입력 -->
-        <div class="input-section">
-            <div class="input-group">
-                <label>📅 날짜</label>
-                <input type="date" id="recordDate">
-            </div>
-
-            <div class="input-group">
-                <label>💰 오늘 매출</label>
-                <input type="number" id="revenue" placeholder="0" min="0">
-                <span class="unit">원</span>
-            </div>
-
-            <div class="input-group">
-                <label>⛽ 주유비</label>
-                <input type="number" id="fuel" placeholder="0" min="0">
-                <span class="unit">원</span>
-            </div>
-
-            <div class="input-group">
-                <label>💳 기타비용</label>
-                <div class="expense-input">
-                    <input type="text" id="expenseName" placeholder="쓴 곳 (예: 식비)" maxlength="20">
-                    <input type="number" id="expenseAmount" placeholder="금액" min="0">
-                    <span class="unit">원</span>
-                </div>
-            </div>
-
-            <div id="corporateFields" style="display: none;">
-                <div class="input-group">
-                    <label>🚖 오늘 운행 건수</label>
-                    <input type="number" id="tripCount" placeholder="0" min="0">
-                    <span class="unit">건</span>
-                </div>
-            </div>
-
-            <div class="memo-section">
-                <label>📝 메모</label>
-                <textarea id="memo" placeholder="특이사항이나 메모를 적어주세요" rows="3"></textarea>
-            </div>
-
-            <!-- 오늘 순수익 표시 -->
-            <div class="profit-display">
-                <p>오늘 순수익</p>
-                <p class="profit-amount" id="dailyProfit">0원</p>
-            </div>
-
-            <!-- 저장 버튼 -->
-            <button id="saveBtn" class="save-btn">💾 저장</button>
-            <div id="saveMessage" class="save-message"></div>
-        </div>
-
-        <!-- 월별 달력 -->
-        <div class="calendar-section">
-            <div class="calendar-header">
-                <button id="prevMonth">&lt;</button>
-                <h3 id="monthTitle"></h3>
-                <button id="nextMonth">&gt;</button>
-            </div>
-            <div id="calendar" class="calendar-grid"></div>
-        </div>
-
-        <!-- 월간 통계 -->
-        <div class="stats-section">
-            <h3>📊 이번 달 통계</h3>
-            <div class="stats-grid">
-                <div class="stat-box">
-                    <p class="stat-label">총 매출</p>
-                    <p class="stat-value" id="monthRevenue">0원</p>
-                </div>
-                <div class="stat-box">
-                    <p class="stat-label">총 비용</p>
-                    <p class="stat-value" id="monthExpense">0원</p>
-                </div>
-                <div class="stat-box">
-                    <p class="stat-label">순수익</p>
-                    <p class="stat-value" id="monthProfit">0원</p>
-                </div>
-                <div id="corporateStats" style="display: none;">
-                    <div class="stat-box">
-                        <p class="stat-label">운행 건수</p>
-                        <p class="stat-value" id="monthTrips">0건</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 메뉴 버튼 -->
-        <div class="menu-section">
-            <button id="menuBtn" class="menu-btn">⚙️ 메뉴</button>
-        </div>
-
-        <!-- 메뉴 모달 -->
-        <div id="menuModal" class="modal" style="display: none;">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>메뉴</h3>
-                    <button id="closeMenu" class="close-btn">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <button id="exportBtn" class="menu-item">📊 엑셀로 보관</button>
-                    <button id="importBtn" class="menu-item">📂 백업 불러오기</button>
-                    <button id="deleteAllBtn" class="menu-item delete-item">🗑️ 모든 기록 삭제</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 날짜별 상세 정보 모달 -->
-        <div id="detailModal" class="modal" style="display: none;">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3 id="detailDate"></h3>
-                    <button id="closeDetail" class="close-btn">&times;</button>
-                </div>
-                <div class="modal-body" id="detailBody"></div>
-                <div class="modal-footer">
-                    <button id="deleteRecordBtn" class="delete-btn">기록 삭제</button>
-                    <button id="closeDetailBtn" class="cancel-btn">닫기</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 휴무일 설정 모달 -->
-        <div id="dayOffModal" class="modal" style="display: none;">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3 id="dayOffDate"></h3>
-                    <button id="closeDayOff" class="close-btn">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <p>이 날을 휴무일로 설정하시겠습니까?</p>
-                </div>
-                <div class="modal-footer">
-                    <button id="setDayOffBtn" class="confirm-btn">휴무일 설정</button>
-                    <button id="removeDayOffBtn" class="cancel-btn" style="display: none;">휴무일 해제</button>
-                    <button id="closeDayOffBtn" class="cancel-btn">취소</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="script.js"></script>
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
 </body>
 </html>
