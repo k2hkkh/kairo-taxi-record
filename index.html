@@ -87,7 +87,7 @@
     ];
 
     function App() {
-      // 탭: 'log'(기록장), 'gps'(안전운행 음성안내), 'report'(연간/통계), 'settings'(설정)
+      // 탭: 'log'(기록장), 'gps'(안전운행 음성안내), 'report'(통계/고정비/백업), 'settings'(설정)
       const [tab, setTab] = useState("log");
 
       // 기사 기본 프로필
@@ -108,11 +108,19 @@
         return saved ? JSON.parse(saved) : {};
       });
 
-      // 고정비 & 정비 기록
+      // 월 고정비 목록
       const [fixedCosts, setFixedCosts] = useState(() => {
         const saved = localStorage.getItem("ktaxi_fixed_costs");
-        return saved ? JSON.parse(saved) : [{ id: 1, name: "통신/GPS비", amount: 25000 }];
+        return saved ? JSON.parse(saved) : [
+          { id: 1, name: "통신/GPS비", amount: 25000 }
+        ];
       });
+
+      // 고정비 직접 추가를 위한 입력창 상태
+      const [newCostName, setNewCostName] = useState("");
+      const [newCostAmount, setNewCostAmount] = useState("");
+
+      // 차량 정비 기록
       const [maintenances, setMaintenances] = useState(() => {
         const saved = localStorage.getItem("ktaxi_maintenances");
         return saved ? JSON.parse(saved) : [];
@@ -138,6 +146,32 @@
       useEffect(() => localStorage.setItem("ktaxi_records", JSON.stringify(records)), [records]);
       useEffect(() => localStorage.setItem("ktaxi_fixed_costs", JSON.stringify(fixedCosts)), [fixedCosts]);
       useEffect(() => localStorage.setItem("ktaxi_maintenances", JSON.stringify(maintenances)), [maintenances]);
+
+      // 고정비 추가/삭제 함수
+      const handleAddFixedCost = () => {
+        if (!newCostName.trim()) {
+          alert("항목 이름을 입력해 주세요. (예: 조합비, 세차비 등)");
+          return;
+        }
+        if (!newCostAmount || num(newCostAmount) <= 0) {
+          alert("올바른 금액을 입력해 주세요.");
+          return;
+        }
+        const newCost = {
+          id: Date.now(),
+          name: newCostName.trim(),
+          amount: num(newCostAmount)
+        };
+        setFixedCosts([...fixedCosts, newCost]);
+        setNewCostName("");
+        setNewCostAmount("");
+      };
+
+      const handleDeleteFixedCost = (id) => {
+        if (confirm("이 고정비 항목을 삭제하시겠습니까?")) {
+          setFixedCosts(fixedCosts.filter(item => item.id !== id));
+        }
+      };
 
       // 음성 안내 발화 (TTS)
       const speakVoice = (text) => {
@@ -169,7 +203,6 @@
               const curSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
               setCurPos({ lat: latitude, lng: longitude, accuracy: Math.round(accuracy), speed: curSpeedKmh });
 
-              // 카메라 거리 탐색
               let closest = null;
               let minDistance = 999999;
 
@@ -180,13 +213,11 @@
                   closest = { ...cam, distance: Math.round(dist) };
                 }
 
-                // 300m 이내 진입 시 1회 알림
                 if (dist <= 300 && !alertedCamIds.current.has(cam.id)) {
                   alertedCamIds.current.add(cam.id);
                   speakVoice(`전방 ${Math.round(dist)}미터 앞, ${cam.name}입니다. 속도를 줄이세요.`);
                   setAlertLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${cam.name} 근접 감지 (${Math.round(dist)}m)`, ...prev.slice(0, 10)]);
                 }
-                // 350m 벗어나면 알림 초기화
                 if (dist > 350 && alertedCamIds.current.has(cam.id)) {
                   alertedCamIds.current.delete(cam.id);
                 }
@@ -199,7 +230,7 @@
         }
       };
 
-      // 월간 정산 집계
+      // 월간 정산 집계 (고정비 자동 반영)
       const monthStats = useMemo(() => {
         let rev = 0, fuel = 0, trips = 0, workDays = 0, excessTotal = 0;
         const prefix = `${viewY}-${pad2(viewM + 1)}`;
@@ -216,7 +247,7 @@
         const fixedSum = fixedCosts.reduce((s, f) => s + num(f.amount), 0);
         let net = 0;
         if (profile.type === "corporate") {
-          const driverPay = excessTotal * 0.7; // 사납금 초과 70% 수당
+          const driverPay = excessTotal * 0.7; // 사납금 초과 70% 성과급
           const insurance = Math.round(driverPay * ((profile.insuranceRate || 9.7) / 100));
           net = driverPay - insurance - fixedSum;
         } else {
@@ -288,7 +319,7 @@
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 14 }}>
             <button className={`btn ${tab === 'log' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("log")}>📅 운행장부</button>
             <button className={`btn ${tab === 'gps' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("gps")}>📍 안전운행 GPS</button>
-            <button className={`btn ${tab === 'report' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("report")}>📊 통계·백업</button>
+            <button className={`btn ${tab === 'report' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("report")}>📊 고정비·백업</button>
           </div>
 
           {/* --- [TAB 1: 운행장부 & 달력] --- */}
@@ -311,7 +342,9 @@
                     <div style={{ fontSize: 18, fontWeight: 800, color: "var(--green)" }}>{won(monthStats.net)}</div>
                   </div>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 8 }}>운행 {monthStats.workDays}일 · {profile.type === 'corporate' ? `콜 ${monthStats.trips}건` : `연료비 ${won(monthStats.fuel)}`}</div>
+                <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 8 }}>
+                  운행 {monthStats.workDays}일 · 고정비 합계 -{won(monthStats.fixedSum)}
+                </div>
               </div>
 
               {/* 달력 그리드 */}
@@ -394,10 +427,62 @@
             </div>
           )}
 
-          {/* --- [TAB 3: 통계 & 백업] --- */}
+          {/* --- [TAB 3: 고정비 직접 관리 & 백업] --- */}
           {tab === "report" && (
             <div>
+              {/* 고정비 직접 관리 카드 */}
               <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "16px", marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800 }}>🔧 월 고정 지출 항목 관리</div>
+                  <span style={{ fontSize: 12, color: "var(--amber)", fontWeight: 700 }}>총 {won(monthStats.fixedSum)}</span>
+                </div>
+                
+                {/* 등록된 고정비 목록 & 삭제 버튼 */}
+                <div style={{ marginBottom: 12 }}>
+                  {fixedCosts.length === 0 ? (
+                    <div style={{ fontSize: 12, color: "var(--dim)", textAlign: "center", padding: "12px 0" }}>등록된 고정비가 없습니다. 아래에서 추가해 보세요!</div>
+                  ) : (
+                    fixedCosts.map((item) => (
+                      <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+                        <span>{item.name}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontWeight: 700, color: "var(--amber)" }}>{won(item.amount)}</span>
+                          <button 
+                            onClick={() => handleDeleteFixedCost(item.id)}
+                            style={{ background: "rgba(217,83,79,0.2)", color: "var(--red)", border: "none", borderRadius: 6, padding: "3px 7px", fontSize: 11, cursor: "pointer", fontWeight: 700 }}
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* 고정비 신규 추가 입력폼 */}
+                <div style={{ background: "var(--card-alt)", borderRadius: 12, padding: "10px", border: "1px dashed var(--border)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", marginBottom: 6 }}>+ 새 고정비 항목 추가</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 60px", gap: 6 }}>
+                    <input 
+                      placeholder="항목명 (예: 조합비)" 
+                      value={newCostName} 
+                      onChange={(e) => setNewCostName(e.target.value)} 
+                      style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px", color: "var(--text)", fontSize: 12, outline: "none" }}
+                    />
+                    <input 
+                      type="number" 
+                      placeholder="금액 (원)" 
+                      value={newCostAmount} 
+                      onChange={(e) => setNewCostAmount(e.target.value)} 
+                      style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px", color: "var(--text)", fontSize: 12, outline: "none" }}
+                    />
+                    <button className="btn btn-primary" style={{ padding: "0", fontSize: 12 }} onClick={handleAddFixedCost}>추가</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 백업/복원 카드 */}
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "16px" }}>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>💾 데이터 안전 백업 / 복원</div>
                 <button className="btn btn-secondary" style={{ width: "100%", padding: "12px 0", marginBottom: 8, fontSize: 13 }} onClick={handleBackupExport}>
                   📥 백업 파일 저장하기 (JSON)
@@ -406,17 +491,6 @@
                   📤 백업 파일 불러오기 (복원)
                   <input type="file" accept=".json" onChange={handleBackupImport} style={{ display: "none" }} />
                 </label>
-              </div>
-
-              {/* 고정비 목록 */}
-              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "16px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>🔧 월 고정비 지출 관리</div>
-                {fixedCosts.map((item) => (
-                  <div key={item.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-                    <span>{item.name}</span>
-                    <span style={{ fontWeight: 700, color: "var(--amber)" }}>{won(item.amount)}</span>
-                  </div>
-                ))}
               </div>
             </div>
           )}
