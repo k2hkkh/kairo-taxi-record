@@ -30,10 +30,10 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    // --- 유틸리티 함수 ---
+    // --- 유틸리티 함수 (3자리 콤마 표기) ---
     const formatMoney = (val) => {
       const num = Number(val) || 0;
-      return num.toLocaleString('ko-KR') + '원';
+      return num.toLocaleString('ko-KR');
     };
 
     const formatShortMoney = (val) => {
@@ -84,13 +84,13 @@
       { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '어린이보호구역 스쿨존 단속' }
     ];
 
-    // 스토리지 스키마 (법인/개인 격리)
+    // 스토리지 스키마 (법인/개인 격리 및 고정비 지출 설정)
     const DEFAULT_STORAGE = {
       activeTab: 'corporate', // 'corporate' | 'private'
       corporate: {
         carNumber: '',
-        baseDeposit: 201000,
-        fixedIncomes: 0,
+        baseDeposit: 201000,   // 기본 사납금
+        fixedExpenses: 0,      // 고정비 지출 (노조비, 상조회비 등)
         records: {}
       },
       private: {
@@ -102,7 +102,7 @@
 
     function App() {
       const [appData, setAppData] = useState(() => {
-        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V5');
+        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V6');
         if (saved) {
           try { return JSON.parse(saved); } catch (e) { return DEFAULT_STORAGE; }
         }
@@ -133,7 +133,7 @@
 
       // 스토리지 동기화
       useEffect(() => {
-        localStorage.setItem('K_TAXI_RECORD_DATA_V5', JSON.stringify(appData));
+        localStorage.setItem('K_TAXI_RECORD_DATA_V6', JSON.stringify(appData));
       }, [appData]);
 
       // TTS 발화
@@ -162,7 +162,7 @@
         }
       };
 
-      // GPS Watcher
+      // GPS 감시 및 과속 감지
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -242,6 +242,7 @@
         }));
       };
 
+      // 법인 설정 변경 (기본 사납금, 고정비 지출)
       const handleCorporateConfigChange = (key, val) => {
         setAppData(prev => ({
           ...prev,
@@ -313,17 +314,22 @@
             }
           });
 
-          const fixedIncomes = Number(appData.corporate.fixedIncomes || 0);
-          const grossSalary = totalRevenue + fixedIncomes;
-          const netIncome = grossSalary - totalDriverExpense;
+          const baseDeposit = Number(appData.corporate.baseDeposit || 0);
+          const fixedExpenses = Number(appData.corporate.fixedExpenses || 0);
+          // 월수령액(월급여) = 기본사납금 - 고정비 (예: 상조회비, 노조비)
+          const monthlySalary = baseDeposit - fixedExpenses;
+          // 최종 실제 순수입 = 월수령액(월급여) + 총매출 - 기사경비
+          const netIncome = monthlySalary + totalRevenue - totalDriverExpense;
 
           return {
             workDays,
             holidayDays,
+            baseDeposit,
+            fixedExpenses,
+            monthlySalary,
             totalRevenue,
             totalGasCompany,
             totalDriverExpense,
-            grossSalary,
             netIncome
           };
         } else {
@@ -368,10 +374,10 @@
         }
       }, [appData, currentYearMonth]);
 
-      // 월간 달력 날짜 생성 함수
+      // 월간 달력 날짜 생성
       const calendarCells = useMemo(() => {
         const [y, m] = currentYearMonth.split('-').map(Number);
-        const firstDayWeekIndex = new Date(y, m - 1, 1).getDay(); // 0(일) ~ 6(토)
+        const firstDayWeekIndex = new Date(y, m - 1, 1).getDay();
         const totalDaysInMonth = new Date(y, m, 0).getDate();
 
         const cells = [];
@@ -441,7 +447,6 @@
         reader.readAsText(file);
       };
 
-      // 달력 날짜 터치 시 즉시 모달 오픈
       const openModalForDate = (dateStr) => {
         setSelectedDate(dateStr);
         setShowDailyModal(true);
@@ -593,28 +598,22 @@
                 {appData.activeTab === 'corporate' && (
                   <div className="pt-2 border-t border-gray-700 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">기본 사납금 (기사 직접기입)</span>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          value={appData.corporate.baseDeposit}
-                          onChange={(e) => handleCorporateConfigChange('baseDeposit', e.target.value)}
-                          className="bg-gray-900 border border-gray-700 px-2 py-0.5 text-xs rounded text-right w-24 text-white"
-                        />
-                        <span className="text-xs text-gray-400">원</span>
-                      </div>
+                      <span className="text-xs text-gray-400">기본 사납금 (기사 직접입력)</span>
+                      <input
+                        type="number"
+                        value={appData.corporate.baseDeposit}
+                        onChange={(e) => handleCorporateConfigChange('baseDeposit', e.target.value)}
+                        className="bg-gray-900 border border-gray-700 px-2 py-0.5 text-xs rounded text-right w-28 text-white focus:outline-none focus:border-yellow-500"
+                      />
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">고정수당 (총매출 합산용)</span>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          value={appData.corporate.fixedIncomes}
-                          onChange={(e) => handleCorporateConfigChange('fixedIncomes', e.target.value)}
-                          className="bg-gray-900 border border-gray-700 px-2 py-0.5 text-xs rounded text-right w-24 text-white"
-                        />
-                        <span className="text-xs text-gray-400">원</span>
-                      </div>
+                      <span className="text-xs text-gray-400">고정비 지출 (노조비·상조회비 등)</span>
+                      <input
+                        type="number"
+                        value={appData.corporate.fixedExpenses}
+                        onChange={(e) => handleCorporateConfigChange('fixedExpenses', e.target.value)}
+                        className="bg-gray-900 border border-gray-700 px-2 py-0.5 text-xs rounded text-right w-28 text-white focus:outline-none focus:border-yellow-500"
+                      />
                     </div>
                   </div>
                 )}
@@ -648,27 +647,43 @@
                 </button>
               </div>
 
-              {/* 월간 종합 정산 카드 */}
+              {/* 월간 정산 카드 */}
               {appData.activeTab === 'corporate' ? (
                 <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 space-y-3">
                   <div className="flex justify-between items-center text-xs pb-2 border-b border-gray-700">
                     <span className="text-gray-400">회사 전액 부담 가스비</span>
-                    <span className="text-gray-300 font-semibold">{formatMoney(currentMonthStats.totalGasCompany)} (지원)</span>
+                    <span className="text-gray-300 font-semibold">{formatMoney(currentMonthStats.totalGasCompany)} (회사지원)</span>
                   </div>
 
+                  {/* 기본사납금 - 고정비 = 월수령액(월급여) */}
+                  <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800 space-y-1.5">
+                    <div className="flex justify-between text-xs text-gray-400">
+                      <span>기본 사납금:</span>
+                      <span className="text-gray-200">{formatMoney(currentMonthStats.baseDeposit)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-orange-400">
+                      <span>- 고정비 (상조회비/노조비):</span>
+                      <span>-{formatMoney(currentMonthStats.fixedExpenses)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-bold pt-1 border-t border-gray-800">
+                      <span className="text-blue-400">= 월수령액 (월급여):</span>
+                      <span className="text-blue-300 text-sm">{formatMoney(currentMonthStats.monthlySalary)}</span>
+                    </div>
+                  </div>
+
+                  {/* 매출 및 기사경비 */}
                   <div className="grid grid-cols-2 gap-2.5">
                     <div className="bg-gray-900/90 p-2.5 rounded-xl">
-                      <span className="text-[11px] text-blue-400 block font-semibold">총매출 + 고정수당</span>
-                      <span className="text-base font-bold text-blue-300 block mt-0.5">{formatMoney(currentMonthStats.grossSalary)}</span>
-                      <span className="text-[9px] text-gray-500 block">(월급여 산정액)</span>
+                      <span className="text-[11px] text-green-400 block font-semibold">이번 달 총매출 합산</span>
+                      <span className="text-base font-bold text-green-300 block mt-0.5">{formatMoney(currentMonthStats.totalRevenue)}</span>
                     </div>
                     <div className="bg-gray-900/90 p-2.5 rounded-xl">
-                      <span className="text-[11px] text-orange-400 block font-semibold">기타 기사 지출합산</span>
-                      <span className="text-base font-bold text-orange-300 block mt-0.5">{formatMoney(currentMonthStats.totalDriverExpense)}</span>
-                      <span className="text-[9px] text-gray-500 block">(기사 자부담 경비)</span>
+                      <span className="text-[11px] text-red-400 block font-semibold">기타 기사경비 합산</span>
+                      <span className="text-base font-bold text-red-300 block mt-0.5">{formatMoney(currentMonthStats.totalDriverExpense)}</span>
                     </div>
                   </div>
 
+                  {/* 실제 순수입 확인 버튼 */}
                   <button
                     onClick={() => setShowCorporateNet(!showCorporateNet)}
                     className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold rounded-xl text-xs transition"
@@ -677,9 +692,9 @@
                   </button>
 
                   {showCorporateNet && (
-                    <div className="bg-indigo-950 border border-indigo-500 p-3 rounded-xl text-center">
-                      <span className="text-[11px] text-indigo-300 block">월급여 - 기사 자부담 경비</span>
-                      <span className="text-xl font-black text-yellow-300 mt-1 block">
+                    <div className="bg-indigo-950 border border-indigo-500 p-3 rounded-xl text-center space-y-1">
+                      <span className="text-[11px] text-indigo-300 block">월수령액(월급여) + 총매출 - 기사경비</span>
+                      <span className="text-xl font-black text-yellow-300 block">
                         {formatMoney(currentMonthStats.netIncome)}
                       </span>
                     </div>
@@ -713,14 +728,13 @@
                 </div>
               )}
 
-              {/* 월간 캘린더 (날짜 터치 시 즉시 수정 모달 오픈) */}
+              {/* 월간 캘린더 */}
               <div className="bg-gray-800/80 p-3.5 rounded-2xl border border-gray-700/60 space-y-2">
                 <div className="flex justify-between items-center pb-1">
                   <h3 className="text-xs font-bold text-gray-200">월간 운행 달력</h3>
                   <span className="text-[10px] text-yellow-400 font-medium">※ 날짜 터치 시 기록/수정</span>
                 </div>
 
-                {/* 요일 헤더 */}
                 <div className="grid grid-cols-7 text-center text-[11px] font-bold text-gray-400 pb-1 border-b border-gray-700/60">
                   <span className="text-red-400">일</span>
                   <span>월</span>
@@ -731,7 +745,6 @@
                   <span className="text-blue-400">토</span>
                 </div>
 
-                {/* 날짜 그리드 */}
                 <div className="grid grid-cols-7 gap-1">
                   {calendarCells.map((dateStr, idx) => {
                     if (!dateStr) {
@@ -778,7 +791,7 @@
                 </div>
               </div>
 
-              {/* 월별 일자별 운행 상세 목록 (한눈에 보기) */}
+              {/* 월별 일자별 운행 상세 목록 */}
               <div className="bg-gray-800/80 p-3.5 rounded-2xl border border-gray-700/60 space-y-2">
                 <div className="flex justify-between items-center">
                   <h3 className="text-xs font-bold text-gray-200">
