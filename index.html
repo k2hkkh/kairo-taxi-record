@@ -85,16 +85,21 @@
       { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 과속단속' },
       { id: 3, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 신호·과속 단속' },
       { id: 4, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 신호·과속 단속' },
-      { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '어린이보호구역 스쿨존 단속' }
+      { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '스쿨존 어린이보호구역 단속' }
     ];
 
-    // 스토리지 기본값
+    // 스토리지 기본 스키마
     const DEFAULT_STORAGE = {
       activeTab: 'corporate',
       corporate: {
         carNumber: '',
-        baseDeposit: 201000,
-        fixedExpenses: 0,
+        dailyDeposit: 201000,         // 1일 기본 사납금
+        baseFixedSalary: 1367700,     // 기본급(1,181,700)+승무(130,000)+교육(21,000)+법정휴일(35,000)
+        deductionRate: 9.0,           // 4대보험/세금 평균 공제율 (%)
+        fixedExpenseItems: [          // 항목별 고정비 리스트
+          { id: 1, name: '노조비', amount: 25000 },
+          { id: 2, name: '상조회비', amount: 0 }
+        ],
         records: {}
       },
       private: {
@@ -104,7 +109,7 @@
       speedingLogs: []
     };
 
-    // --- 스마트 금액 입력 컴포넌트 (원터치 선택 + 일괄 지움 ✕ 지원) ---
+    // --- 스마트 금액 입력 컴포넌트 ---
     function SmartMoneyInput({ value, onChange, placeholder = "0", className = "", colorClass = "text-white" }) {
       const numVal = Number(value) || 0;
       const displayVal = numVal > 0 ? numVal.toLocaleString('ko-KR') : '';
@@ -139,7 +144,7 @@
 
     function App() {
       const [appData, setAppData] = useState(() => {
-        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V8');
+        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V9');
         if (saved) {
           try { return JSON.parse(saved); } catch (e) { return DEFAULT_STORAGE; }
         }
@@ -153,11 +158,14 @@
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       });
 
+      // 모달 상태
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
       const [showSpeedLogModal, setShowSpeedLogModal] = useState(false);
       const [showCorporateNet, setShowCorporateNet] = useState(false);
+      const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
 
+      // GPS & HUD 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [nearestCamera, setNearestCamera] = useState(null);
       const [hudMirrored, setHudMirrored] = useState(false);
@@ -167,7 +175,7 @@
       const lastLoggedCamRef = useRef(null);
 
       useEffect(() => {
-        localStorage.setItem('K_TAXI_RECORD_DATA_V8', JSON.stringify(appData));
+        localStorage.setItem('K_TAXI_RECORD_DATA_V9', JSON.stringify(appData));
       }, [appData]);
 
       const speak = (text) => {
@@ -281,6 +289,40 @@
         }));
       };
 
+      // 고정비 항목 추가/수정/삭제
+      const handleAddFixedExpense = () => {
+        const newItem = { id: Date.now(), name: '항목추가', amount: 0 };
+        setAppData(prev => ({
+          ...prev,
+          corporate: {
+            ...prev.corporate,
+            fixedExpenseItems: [...(prev.corporate.fixedExpenseItems || []), newItem]
+          }
+        }));
+      };
+
+      const handleUpdateFixedExpense = (id, field, value) => {
+        setAppData(prev => ({
+          ...prev,
+          corporate: {
+            ...prev.corporate,
+            fixedExpenseItems: (prev.corporate.fixedExpenseItems || []).map(item =>
+              item.id === id ? { ...item, [field]: field === 'amount' ? Number(value) : value } : item
+            )
+          }
+        }));
+      };
+
+      const handleDeleteFixedExpense = (id) => {
+        setAppData(prev => ({
+          ...prev,
+          corporate: {
+            ...prev.corporate,
+            fixedExpenseItems: (prev.corporate.fixedExpenseItems || []).filter(item => item.id !== id)
+          }
+        }));
+      };
+
       const handleSaveRecord = (dateKey, recordData) => {
         const tab = appData.activeTab;
         setAppData(prev => ({
@@ -320,6 +362,13 @@
         }
       };
 
+      // 고정비 항목 자동합산
+      const totalFixedExpenses = useMemo(() => {
+        const items = appData.corporate.fixedExpenseItems || [];
+        return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      }, [appData.corporate.fixedExpenseItems]);
+
+      // 월별 정산 통계 (급여명세서 공식 완벽 반영)
       const currentMonthStats = useMemo(() => {
         const tab = appData.activeTab;
         const records = appData[tab].records || {};
@@ -329,38 +378,60 @@
         let holidayDays = 0;
 
         if (tab === 'corporate') {
+          const dailyDeposit = Number(appData.corporate.dailyDeposit || 201000);
+          const baseFixedSalary = Number(appData.corporate.baseFixedSalary || 1367700);
+          const deductionRate = Number(appData.corporate.deductionRate || 9.0) / 100;
+
           let totalRevenue = 0;
           let totalGasCompany = 0;
           let totalDriverExpense = 0;
+          let totalIncentive = 0; // 초과수당(70%) 합계
 
           entries.forEach(([_, r]) => {
             if (r.isHoliday) {
               holidayDays++;
             } else {
               workDays++;
-              totalRevenue += Number(r.revenue || 0);
+              const rev = Number(r.revenue || 0);
+              totalRevenue += rev;
               totalGasCompany += Number(r.gas || 0);
               totalDriverExpense += Number(r.driverExpense || 0);
+
+              // 1일 사납금(201,000원) 초과분의 70% 성과급 계산
+              const dailyOver = Math.max(0, rev - dailyDeposit);
+              totalIncentive += Math.round(dailyOver * 0.7);
             }
           });
 
-          const baseDeposit = Number(appData.corporate.baseDeposit || 0);
-          const fixedExpenses = Number(appData.corporate.fixedExpenses || 0);
-          const monthlySalary = baseDeposit - fixedExpenses;
-          const netIncome = monthlySalary + totalRevenue - totalDriverExpense;
+          // 총 지급액 (세전 급여) = 기본 고정급여 + 70% 초과 성과급
+          const grossSalary = baseFixedSalary + totalIncentive;
+          // 세금 및 4대보험 공제 추정액
+          const taxAndInsurance = Math.round(grossSalary * deductionRate);
+          // 총 공제액 = 세금/보험료 + 고정비(노조비/상조회비 등)
+          const totalDeductions = taxAndInsurance + totalFixedExpenses;
+          // 회사 실지급액 (세후 실수령 급여)
+          const netSalaryFromCompany = grossSalary - totalDeductions;
+          // 기사 최종 실제 순수입 = 회사 실지급액 - 기사 자부담 경비(식대/세차 등)
+          const finalNetIncome = netSalaryFromCompany - totalDriverExpense;
 
           return {
             workDays,
             holidayDays,
-            baseDeposit,
-            fixedExpenses,
-            monthlySalary,
+            dailyDeposit,
+            baseFixedSalary,
             totalRevenue,
             totalGasCompany,
+            totalIncentive,
+            grossSalary,
+            taxAndInsurance,
+            totalFixedExpenses,
+            totalDeductions,
+            netSalaryFromCompany,
             totalDriverExpense,
-            netIncome
+            finalNetIncome
           };
         } else {
+          // 개인택시
           let cardTotal = 0;
           let cashTotal = 0;
           let gasTotal = 0;
@@ -400,7 +471,7 @@
             netIncome
           };
         }
-      }, [appData, currentYearMonth]);
+      }, [appData, currentYearMonth, totalFixedExpenses]);
 
       const calendarCells = useMemo(() => {
         const [y, m] = currentYearMonth.split('-').map(Number);
@@ -486,7 +557,7 @@
       return (
         <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-900 border-x border-gray-800">
           
-          {/* 상단 헤더 */}
+          {/* 헤더 */}
           <header className="p-4 bg-gray-950 border-b border-gray-800 flex items-center justify-between sticky top-0 z-30">
             <div className="flex items-center gap-2">
               <span className="bg-yellow-500 text-black text-xs font-black px-2 py-0.5 rounded">K-TAXI</span>
@@ -608,7 +679,7 @@
                 </button>
               </div>
 
-              {/* 차량번호 및 기준 설정 카드 */}
+              {/* 기본 설정 카드 */}
               <div className="bg-gray-800/80 p-3.5 rounded-2xl border border-gray-700/60 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs text-gray-400 font-semibold">차량 번호</label>
@@ -625,25 +696,27 @@
                 {appData.activeTab === 'corporate' && (
                   <div className="pt-2 border-t border-gray-700 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-gray-400 whitespace-nowrap">기본 사납금 (기사 직접입력)</span>
+                      <span className="text-xs text-gray-400 whitespace-nowrap">1일 기준 사납금</span>
                       <div className="w-32">
                         <SmartMoneyInput
-                          value={appData.corporate.baseDeposit}
-                          onChange={(val) => handleCorporateConfigChange('baseDeposit', val)}
+                          value={appData.corporate.dailyDeposit}
+                          onChange={(val) => handleCorporateConfigChange('dailyDeposit', val)}
                           placeholder="201,000"
                         />
                       </div>
                     </div>
+
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-gray-400 whitespace-nowrap">고정비 지출 (노조비·상조회비 등)</span>
-                      <div className="w-32">
-                        <SmartMoneyInput
-                          value={appData.corporate.fixedExpenses}
-                          onChange={(val) => handleCorporateConfigChange('fixedExpenses', val)}
-                          placeholder="0"
-                          colorClass="text-orange-400"
-                        />
+                      <div>
+                        <span className="text-xs text-gray-400 block leading-tight">회사 고정비 지출 목록</span>
+                        <span className="text-[10px] text-orange-400">노조비·상조회비 등 자동합산</span>
                       </div>
+                      <button
+                        onClick={() => setShowFixedExpenseModal(true)}
+                        className="px-3 py-1.5 bg-gray-900 border border-orange-500/40 text-orange-300 rounded-xl text-xs font-bold hover:bg-gray-800"
+                      >
+                        {formatMoney(totalFixedExpenses)} ({appData.corporate.fixedExpenseItems?.length || 0}개 항목) ⚙️
+                      </button>
                     </div>
                   </div>
                 )}
@@ -677,7 +750,7 @@
                 </button>
               </div>
 
-              {/* 월간 정산 카드 */}
+              {/* 월간 정산 카드 (급여명세서 공식 반영) */}
               {appData.activeTab === 'corporate' ? (
                 <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 space-y-3">
                   <div className="flex justify-between items-center text-xs pb-2 border-b border-gray-700">
@@ -685,49 +758,65 @@
                     <span className="text-gray-300 font-semibold">{formatMoney(currentMonthStats.totalGasCompany)} (회사지원)</span>
                   </div>
 
-                  <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800 space-y-1.5">
+                  {/* 1. 지급 내역 (세전 급여) */}
+                  <div className="bg-gray-950/90 p-3 rounded-xl border border-gray-800 space-y-1.5">
+                    <span className="text-[11px] font-bold text-blue-400 block border-b border-gray-800 pb-1">1. 회사 지급 내역 (세전 급여)</span>
+                    <div className="flex justify-between text-xs text-gray-300">
+                      <span>기본 고정급여(기본급·승무·교육·휴일):</span>
+                      <span className="font-semibold">{formatMoney(currentMonthStats.baseFixedSalary)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-yellow-400">
+                      <span>+ 사납금 초과수당 합산 (70%):</span>
+                      <span className="font-bold">+{formatMoney(currentMonthStats.totalIncentive)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-bold pt-1 border-t border-gray-800 text-white">
+                      <span>= 월 지급총액 (세전):</span>
+                      <span className="text-blue-300 text-sm">{formatMoney(currentMonthStats.grossSalary)}</span>
+                    </div>
+                  </div>
+
+                  {/* 2. 공제 내역 및 회사 실지급액 */}
+                  <div className="bg-gray-950/90 p-3 rounded-xl border border-gray-800 space-y-1.5">
+                    <span className="text-[11px] font-bold text-orange-400 block border-b border-gray-800 pb-1">2. 공제 내역 및 회사 실수령액</span>
                     <div className="flex justify-between text-xs text-gray-400">
-                      <span>기본 사납금:</span>
-                      <span className="text-gray-200">{formatMoney(currentMonthStats.baseDeposit)}</span>
+                      <span>4대보험 및 세금 (추정 약 9%):</span>
+                      <span>-{formatMoney(currentMonthStats.taxAndInsurance)}</span>
                     </div>
                     <div className="flex justify-between text-xs text-orange-400">
-                      <span>- 고정비 (상조회비/노조비):</span>
-                      <span>-{formatMoney(currentMonthStats.fixedExpenses)}</span>
+                      <span>회사 고정비 합산 (노조비/상조비 등):</span>
+                      <span>-{formatMoney(currentMonthStats.totalFixedExpenses)}</span>
                     </div>
-                    <div className="flex justify-between text-xs font-bold pt-1 border-t border-gray-800">
-                      <span className="text-blue-400">= 월수령액 (월급여):</span>
-                      <span className="text-blue-300 text-sm">{formatMoney(currentMonthStats.monthlySalary)}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div className="bg-gray-900/90 p-2.5 rounded-xl">
-                      <span className="text-[11px] text-green-400 block font-semibold">이번 달 총매출 합산</span>
-                      <span className="text-base font-bold text-green-300 block mt-0.5">{formatMoney(currentMonthStats.totalRevenue)}</span>
-                    </div>
-                    <div className="bg-gray-900/90 p-2.5 rounded-xl">
-                      <span className="text-[11px] text-red-400 block font-semibold">기타 기사경비 합산</span>
-                      <span className="text-base font-bold text-red-300 block mt-0.5">{formatMoney(currentMonthStats.totalDriverExpense)}</span>
+                    <div className="flex justify-between text-xs font-bold pt-1 border-t border-gray-800 text-green-400">
+                      <span>= 회사 실지급액 (통장입금 월급):</span>
+                      <span className="text-green-300 text-sm font-black">{formatMoney(currentMonthStats.netSalaryFromCompany)}</span>
                     </div>
                   </div>
 
+                  {/* 3. 기사 자부담 경비 */}
+                  <div className="bg-gray-900 p-2.5 rounded-xl flex justify-between items-center text-xs">
+                    <span className="text-gray-400">당월 기사 자부담 경비 (식대/세차/통행료 등):</span>
+                    <span className="text-red-400 font-bold">{formatMoney(currentMonthStats.totalDriverExpense)}</span>
+                  </div>
+
+                  {/* 최종 순수입 버튼 */}
                   <button
                     onClick={() => setShowCorporateNet(!showCorporateNet)}
                     className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold rounded-xl text-xs transition"
                   >
-                    {showCorporateNet ? '순수입 숨기기' : '이번 달 실제 순수입 계산 / 확인'}
+                    {showCorporateNet ? '순수입 숨기기' : '이번 달 기사 최종 순수입 계산 / 확인'}
                   </button>
 
                   {showCorporateNet && (
                     <div className="bg-indigo-950 border border-indigo-500 p-3 rounded-xl text-center space-y-1">
-                      <span className="text-[11px] text-indigo-300 block">월수령액(월급여) + 총매출 - 기사경비</span>
-                      <span className="text-xl font-black text-yellow-300 block">
-                        {formatMoney(currentMonthStats.netIncome)}
+                      <span className="text-[11px] text-indigo-300 block">회사 실지급액(세후 월급) - 기사 자부담 경비</span>
+                      <span className="text-2xl font-black text-yellow-300 block">
+                        {formatMoney(currentMonthStats.finalNetIncome)}
                       </span>
                     </div>
                   )}
                 </div>
               ) : (
+                /* 개인택시 요약 */
                 <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 space-y-3">
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-gray-900 p-2.5 rounded-xl">
@@ -818,7 +907,7 @@
                 </div>
               </div>
 
-              {/* 일별 기록 목록 */}
+              {/* 월별 일별 기록 목록 */}
               <div className="bg-gray-800/80 p-3.5 rounded-2xl border border-gray-700/60 space-y-2">
                 <div className="flex justify-between items-center">
                   <h3 className="text-xs font-bold text-gray-200">
@@ -895,6 +984,70 @@
                   데이터 복원 (열기)
                   <input type="file" accept=".json" onChange={importBackup} className="hidden" />
                 </label>
+              </div>
+            </div>
+          )}
+
+          {/* 고정비 항목 관리 모달 (다중 추가 / 자동합산) */}
+          {showFixedExpenseModal && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4 max-h-[85vh] flex flex-col">
+                <div className="flex justify-between items-center pb-2 border-b border-gray-800">
+                  <div>
+                    <h3 className="text-sm font-bold text-orange-400">회사 고정비 항목 관리</h3>
+                    <span className="text-[11px] text-gray-400">노조비, 상조회비 등 월 공제 항목</span>
+                  </div>
+                  <button onClick={() => setShowFixedExpenseModal(false)} className="text-gray-400 text-lg font-bold">✕</button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+                  {(appData.corporate.fixedExpenseItems || []).map((item) => (
+                    <div key={item.id} className="bg-gray-950 p-2.5 rounded-xl border border-gray-800 flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => handleUpdateFixedExpense(item.id, 'name', e.target.value)}
+                        placeholder="항목명"
+                        className="bg-gray-900 border border-gray-700 px-2 py-1 text-xs rounded-lg text-white w-24 font-semibold"
+                      />
+                      <div className="flex-1">
+                        <SmartMoneyInput
+                          value={item.amount}
+                          onChange={(val) => handleUpdateFixedExpense(item.id, 'amount', val)}
+                          placeholder="0"
+                          colorClass="text-orange-400"
+                        />
+                      </div>
+                      <button
+                        onClick={() => handleDeleteFixedExpense(item.id)}
+                        className="text-gray-500 hover:text-red-400 text-xs px-1"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-2 border-t border-gray-800 space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-400">고정비 총 합산액:</span>
+                    <span className="text-base font-bold text-orange-400">{formatMoney(totalFixedExpenses)}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAddFixedExpense}
+                      className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-yellow-400 font-bold rounded-xl text-xs border border-gray-700"
+                    >
+                      + 항목 추가
+                    </button>
+                    <button
+                      onClick={() => setShowFixedExpenseModal(false)}
+                      className="px-5 py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs"
+                    >
+                      완료
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}
