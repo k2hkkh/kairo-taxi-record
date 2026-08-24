@@ -44,6 +44,13 @@
       return `${y}-${m}-${d}`;
     };
 
+    const getNowTimestamp = () => {
+      const now = new Date();
+      const date = getTodayKey();
+      const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      return `${date} ${time}`;
+    };
+
     // 하버사인 거리 계산 공식 (단위: 미터)
     const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371e3;
@@ -59,41 +66,42 @@
       return R * c;
     };
 
-    // 기본 단속 카메라 데이터베이스 (예시 DB)
+    // 단속 카메라 데이터베이스 (신호/과속 겸용 및 고정식)
     const SAMPLE_CAMERAS = [
-      { id: 1, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 단속' },
-      { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 단속' },
-      { id: 3, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 단속' },
-      { id: 4, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 단속' }
+      { id: 1, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 신호·과속 단속' },
+      { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 과속단속' },
+      { id: 3, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 신호·과속 단속' },
+      { id: 4, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 신호·과속 단속' },
+      { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '어린이보호구역 스쿨존 단속' }
     ];
 
-    // 스토리지 초기 상태 (법인/개인 완전 분리 구조)
+    // 기본 스토리지 스키마 (법인/개인 분리 및 과속단속기록부 추가)
     const DEFAULT_STORAGE = {
       activeTab: 'corporate', // 'corporate' | 'private'
       corporate: {
         carNumber: '',
         baseDeposit: 201000,
         fixedIncomes: 0,
-        records: {} // 'YYYY-MM-DD': { revenue: 0, gas: 0, driverExpense: 0, memo: '', isHoliday: false }
+        records: {}
       },
       private: {
         carNumber: '',
-        records: {} // 'YYYY-MM-DD': { cardRev: 0, cashRev: 0, gas: 0, toll: 0, maint: 0, other: 0, memo: '', isHoliday: false }
-      }
+        records: {}
+      },
+      speedingLogs: [] // 과속 단속 의심 이력 [{ id, timestamp, desc, limitSpeed, passSpeed, overSpeed }]
     };
 
     function App() {
-      // 데이터 로드 및 초기화
+      // 로컬 스토리지 데이터 로드
       const [appData, setAppData] = useState(() => {
-        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V3');
+        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V4');
         if (saved) {
           try { return JSON.parse(saved); } catch (e) { return DEFAULT_STORAGE; }
         }
         return DEFAULT_STORAGE;
       });
 
-      // UI 뷰 모드 ('record' | 'hud')
-      const [viewMode, setViewMode] = useState('record');
+      const [viewMode, setViewMode] = useState('record'); // 'record' | 'hud'
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
         const now = new Date();
@@ -103,6 +111,7 @@
       // 모달 상태
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
+      const [showSpeedLogModal, setShowSpeedLogModal] = useState(false);
       const [showCorporateNet, setShowCorporateNet] = useState(false);
 
       // GPS & HUD 상태
@@ -110,14 +119,16 @@
       const [nearestCamera, setNearestCamera] = useState(null);
       const [hudMirrored, setHudMirrored] = useState(false);
       const [audioReady, setAudioReady] = useState(false);
+      
       const lastAlertedCamRef = useRef(null);
+      const lastLoggedCamRef = useRef(null); // 중복 기록 방지용 Ref
 
-      // 상태 변경 시 localStorage 동기화
+      // 데이터 저장 동기화
       useEffect(() => {
-        localStorage.setItem('K_TAXI_RECORD_DATA_V3', JSON.stringify(appData));
+        localStorage.setItem('K_TAXI_RECORD_DATA_V4', JSON.stringify(appData));
       }, [appData]);
 
-      // TTS 발화 (블루투스 오디오 대응 및 최대 볼륨)
+      // TTS 음성 경고 (블루투스 출력 및 최고 음량)
       const speak = (text) => {
         if (!('speechSynthesis' in window)) return;
         window.speechSynthesis.cancel();
@@ -125,7 +136,7 @@
         utterance.lang = 'ko-KR';
         utterance.rate = 1.05;
         utterance.pitch = 1.0;
-        utterance.volume = 1.0; // 최대 볼륨
+        utterance.volume = 1.0;
 
         const voices = window.speechSynthesis.getVoices();
         const koVoice = voices.find(v => v.lang.includes('ko'));
@@ -134,17 +145,17 @@
         window.speechSynthesis.speak(utterance);
       };
 
-      // 오디오/블루투스 채널 활성화
+      // 오디오/블루투스 채널 선점 활성화
       const initAudioChannel = () => {
         if ('speechSynthesis' in window) {
           const dummy = new SpeechSynthesisUtterance('');
           window.speechSynthesis.speak(dummy);
           setAudioReady(true);
-          speak('안전운행 음성 안내가 시작됩니다.');
+          speak('안전운행 음성 안내가 활성화되었습니다.');
         }
       };
 
-      // GPS Watcher
+      // GPS 감시 및 과속 단속 의심 이력 자동 기록 로직
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -169,20 +180,44 @@
 
             setNearestCamera(closest);
 
-            // 카메라 음성 알림 (500m / 300m 구간)
             if (closest) {
-              if (closest.distance <= 300 && lastAlertedCamRef.current !== `${closest.id}-300`) {
+              // 1. 사전 음성 알림 (500m / 300m 구간)
+              if (closest.distance <= 300 && closest.distance > 60 && lastAlertedCamRef.current !== `${closest.id}-300`) {
                 speak(`전방 300미터 앞 제한속도 ${closest.limitSpeed}킬로미터 단속 구간입니다.`);
                 lastAlertedCamRef.current = `${closest.id}-300`;
               } else if (closest.distance > 300 && closest.distance <= 500 && lastAlertedCamRef.current !== `${closest.id}-500`) {
                 speak(`전방에 ${closest.limitSpeed}킬로미터 단속 카메라가 있습니다.`);
                 lastAlertedCamRef.current = `${closest.id}-500`;
               }
+
+              // 2. 단속 카메라 초근접 통과 시(반경 45m 이내) 과속 단속 의심 이력 자동 저장
+              if (closest.distance <= 45 && speedKmh > closest.limitSpeed) {
+                if (lastLoggedCamRef.current !== closest.id) {
+                  const overKm = speedKmh - closest.limitSpeed;
+                  const newLog = {
+                    id: Date.now(),
+                    timestamp: getNowTimestamp(),
+                    desc: closest.desc,
+                    limitSpeed: closest.limitSpeed,
+                    passSpeed: speedKmh,
+                    overSpeed: overKm
+                  };
+
+                  setAppData(prev => ({
+                    ...prev,
+                    speedingLogs: [newLog, ...(prev.speedingLogs || [])]
+                  }));
+
+                  speak(`제한속도 ${overKm}킬로미터 초과! 단속 의심 내역에 기록되었습니다.`);
+                  lastLoggedCamRef.current = closest.id;
+                }
+              }
             } else {
               lastAlertedCamRef.current = null;
+              lastLoggedCamRef.current = null;
             }
           },
-          (err) => console.warn('GPS Error:', err.message),
+          (err) => console.warn('GPS Info:', err.message),
           { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
         );
 
@@ -207,7 +242,7 @@
         }));
       };
 
-      // 법인 설정 변경 (기본 사납금, 고정비/고정수당)
+      // 법인 설정 변경
       const handleCorporateConfigChange = (key, val) => {
         setAppData(prev => ({
           ...prev,
@@ -234,6 +269,21 @@
         setShowDailyModal(false);
       };
 
+      // 단속 기록 개별 삭제
+      const handleDeleteSpeedLog = (id) => {
+        setAppData(prev => ({
+          ...prev,
+          speedingLogs: prev.speedingLogs.filter(item => item.id !== id)
+        }));
+      };
+
+      // 단속 기록 전체 삭제
+      const handleClearAllSpeedLogs = () => {
+        if (confirm('모든 단속 의심 이력을 삭제하시겠습니까?')) {
+          setAppData(prev => ({ ...prev, speedingLogs: [] }));
+        }
+      };
+
       // 현재 선택된 월의 통계 계산
       const currentMonthStats = useMemo(() => {
         const tab = appData.activeTab;
@@ -242,8 +292,8 @@
 
         if (tab === 'corporate') {
           let totalRevenue = 0;
-          let totalGasCompany = 0; // 전액 회사 부담
-          let totalDriverExpense = 0; // 기사 개인 경비
+          let totalGasCompany = 0;
+          let totalDriverExpense = 0;
 
           entries.forEach(([_, r]) => {
             if (!r.isHoliday) {
@@ -254,7 +304,7 @@
           });
 
           const fixedIncomes = Number(appData.corporate.fixedIncomes || 0);
-          const grossSalary = totalRevenue + fixedIncomes; // 총매출 + 고정비 = 월급여
+          const grossSalary = totalRevenue + fixedIncomes;
           const netIncome = grossSalary - totalDriverExpense;
 
           return {
@@ -265,7 +315,6 @@
             netIncome
           };
         } else {
-          // 개인택시
           let cardTotal = 0;
           let cashTotal = 0;
           let gasTotal = 0;
@@ -302,7 +351,7 @@
         }
       }, [appData, currentYearMonth]);
 
-      // 개인택시 세무서 제출 텍스트 생성
+      // 개인택시 세무서 제출 텍스트
       const taxReportText = useMemo(() => {
         if (appData.activeTab !== 'private') return '';
         const stats = currentMonthStats;
@@ -329,7 +378,7 @@
 ※ 본 자료는 K-TAXI에서 부가가치세 및 종합소득세 신고를 위해 자동 산출된 자료입니다.`;
       }, [appData, currentMonthStats, currentYearMonth]);
 
-      // 데이터 백업 (JSON 내보내기)
+      // JSON 백업 다운로드
       const exportBackup = () => {
         const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -339,7 +388,7 @@
         a.click();
       };
 
-      // 데이터 복원 (JSON 불러오기)
+      // JSON 백업 복원
       const importBackup = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -369,7 +418,17 @@
               <span className="bg-yellow-500 text-black text-xs font-black px-2 py-0.5 rounded">K-TAXI</span>
               <h1 className="text-base font-bold tracking-tight">운행기록 & HUD</h1>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowSpeedLogModal(true)}
+                className="px-2 py-1 bg-red-950/80 border border-red-800 text-red-300 text-[11px] font-bold rounded-lg relative"
+              >
+                단속의심 {appData.speedingLogs && appData.speedingLogs.length > 0 && (
+                  <span className="ml-1 bg-red-500 text-white px-1.5 py-0.2 rounded-full text-[9px]">
+                    {appData.speedingLogs.length}
+                  </span>
+                )}
+              </button>
               <button
                 onClick={() => setViewMode(viewMode === 'hud' ? 'record' : 'hud')}
                 className={`px-3 py-1 text-xs font-bold rounded-lg transition ${
@@ -381,7 +440,7 @@
             </div>
           </header>
 
-          {/* 메인 뷰: HUD 모드 */}
+          {/* 메인 뷰 1: HUD 모드 */}
           {viewMode === 'hud' ? (
             <div className="flex-1 flex flex-col p-4 bg-black justify-between select-none">
               <div className="flex justify-between items-center">
@@ -406,10 +465,10 @@
                 )}
               </div>
 
-              {/* HUD 디스플레이 */}
+              {/* HUD 디스플레이 본체 */}
               <div className={`flex flex-col items-center justify-center my-auto transition-transform ${hudMirrored ? 'hud-mirror' : ''}`}>
                 
-                {/* 상단 단속 알림 텍스트 */}
+                {/* 상단 단속 감지 텍스트 */}
                 <div className="h-10 flex items-center text-center">
                   {nearestCamera ? (
                     <span className="text-yellow-400 font-bold text-lg animate-pulse-slow">
@@ -420,9 +479,8 @@
                   )}
                 </div>
 
-                {/* 중앙: 제한속도 표지판 & 현재 속도 */}
+                {/* 중앙: 대형 제한속도 원형 표지판 & 주행속도 */}
                 <div className="flex items-center justify-center gap-6 my-6">
-                  {/* 대형 제한속도 원형 뱃지 */}
                   <div className="flex flex-col items-center justify-center w-24 h-24 rounded-full border-4 border-red-600 bg-white text-black shadow-2xl flex-shrink-0">
                     <span className="text-[11px] font-black text-red-600 leading-none">제한</span>
                     <span className="text-3xl font-black leading-tight tracking-tight">
@@ -431,7 +489,6 @@
                     <span className="text-[9px] font-bold text-gray-500 leading-none">km/h</span>
                   </div>
 
-                  {/* 현재 속도 */}
                   <div className="flex items-baseline">
                     <span className={`text-8xl font-black tracking-tighter ${
                       nearestCamera && gpsSpeed > nearestCamera.limitSpeed ? 'text-red-500 animate-bounce' : 'text-green-400'
@@ -442,23 +499,23 @@
                   </div>
                 </div>
 
-                {/* 속도 경고 메시지 바 */}
+                {/* 속도 초과 경고 바 */}
                 {nearestCamera && gpsSpeed > nearestCamera.limitSpeed && (
                   <div className="w-full bg-red-600/90 text-white text-center py-1.5 rounded-xl font-bold text-sm">
-                    속도 초과! 감속하십시오 ({gpsSpeed - nearestCamera.limitSpeed} km/h 초과)
+                    속도 초과! 단속 의심 기록 중 (+{gpsSpeed - nearestCamera.limitSpeed} km/h 초과)
                   </div>
                 )}
               </div>
 
               <div className="text-center text-xs text-gray-600 pb-2">
-                GPS 위성 신호 기반 작동 중 · 차량 유리창 반사 거치 가능
+                카메라 초근접 통과 시 속도 초과분은 [단속 의심 내역]에 자동 저장됩니다.
               </div>
             </div>
           ) : (
-            /* 메인 뷰: 운행기록장 모드 */
+            /* 메인 뷰 2: 운행기록장 모드 */
             <div className="flex-1 p-4 space-y-4 overflow-y-auto">
               
-              {/* 법인 / 개인 탭 선택 (완전 독립) */}
+              {/* 법인 / 개인 탭 선택 */}
               <div className="grid grid-cols-2 p-1 bg-gray-950 rounded-xl border border-gray-800">
                 <button
                   onClick={() => setTab('corporate')}
@@ -482,7 +539,7 @@
                 </button>
               </div>
 
-              {/* 기본 정보 설정 카드 (차량번호 및 기준값) */}
+              {/* 차량번호 및 기준 설정 카드 */}
               <div className="bg-gray-800/80 p-4 rounded-2xl border border-gray-700/60 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs text-gray-400 font-semibold">차량 번호</label>
@@ -495,11 +552,10 @@
                   />
                 </div>
 
-                {/* 법인 전용 고정비/고정수당 설정 */}
                 {appData.activeTab === 'corporate' && (
                   <div className="pt-2 border-t border-gray-700 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">기본 사납금 (기사입력)</span>
+                      <span className="text-xs text-gray-400">기본 사납금 (기사 직접기입)</span>
                       <div className="flex items-center gap-1">
                         <input
                           type="number"
@@ -551,9 +607,9 @@
                 </button>
               </div>
 
-              {/* 정산 요약 카드 */}
+              {/* 월 정산 요약 카드 */}
               {appData.activeTab === 'corporate' ? (
-                /* 법인택시 월 정산 */
+                /* 법인택시 요약 */
                 <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 space-y-3">
                   <div className="flex justify-between items-center text-xs pb-2 border-b border-gray-700">
                     <span className="text-gray-400">회사 전액 부담 가스비</span>
@@ -573,7 +629,6 @@
                     </div>
                   </div>
 
-                  {/* 기사 순수입 확인 버튼 */}
                   <button
                     onClick={() => setShowCorporateNet(!showCorporateNet)}
                     className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold rounded-xl text-xs transition"
@@ -591,7 +646,7 @@
                   )}
                 </div>
               ) : (
-                /* 개인택시 월 정산 */
+                /* 개인택시 요약 */
                 <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 space-y-3">
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-gray-900 p-2.5 rounded-xl">
@@ -619,11 +674,11 @@
                 </div>
               )}
 
-              {/* 간편 달력 / 일별 목록 트리거 */}
+              {/* 일별 기록 입력 영역 */}
               <div className="bg-gray-800/60 p-4 rounded-2xl border border-gray-700/50 space-y-2">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs font-bold text-gray-300">일별 운행 기록 입력</span>
-                  <span className="text-[11px] text-gray-500">날짜를 눌러 상세 입력</span>
+                  <span className="text-[11px] text-gray-500">날짜 선택 후 입력</span>
                 </div>
 
                 <div className="flex gap-2">
@@ -641,7 +696,6 @@
                   </button>
                 </div>
 
-                {/* 해당 일자 요약 미리보기 */}
                 {(() => {
                   const r = appData[appData.activeTab].records[selectedDate];
                   if (!r) {
@@ -666,7 +720,7 @@
                 })()}
               </div>
 
-              {/* 데이터 백업 / 복원 섹션 */}
+              {/* 백업 / 원복 버튼 */}
               <div className="pt-2 flex gap-2">
                 <button
                   onClick={exportBackup}
@@ -726,11 +780,62 @@
               </div>
             </div>
           )}
+
+          {/* 과속 단속 의심 이력 조회 모달 */}
+          {showSpeedLogModal && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4 max-h-[85vh] flex flex-col">
+                <div className="flex justify-between items-center pb-2 border-b border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-red-400">과속 단속 의심 이력</h3>
+                    <span className="text-xs text-gray-500">({appData.speedingLogs?.length || 0}건)</span>
+                  </div>
+                  <button onClick={() => setShowSpeedLogModal(false)} className="text-gray-400 text-lg font-bold">✕</button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+                  {(!appData.speedingLogs || appData.speedingLogs.length === 0) ? (
+                    <div className="text-center py-10 text-xs text-gray-500">
+                      기록된 단속 의심 이력이 없습니다.
+                    </div>
+                  ) : (
+                    appData.speedingLogs.map((log) => (
+                      <div key={log.id} className="bg-gray-950 p-3 rounded-xl border border-red-950/80 space-y-1">
+                        <div className="flex justify-between items-start">
+                          <span className="text-xs font-bold text-gray-200">{log.desc}</span>
+                          <button
+                            onClick={() => handleDeleteSpeedLog(log.id)}
+                            className="text-[10px] text-gray-500 hover:text-red-400 ml-2"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                        <div className="text-[11px] text-gray-400">{log.timestamp}</div>
+                        <div className="flex items-center justify-between pt-1 text-xs">
+                          <span className="text-gray-400">제한 {log.limitSpeed}km/h · 통과 <span className="text-white font-bold">{log.passSpeed}km/h</span></span>
+                          <span className="text-red-400 font-black">+{log.overSpeed} km/h 초과</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {appData.speedingLogs && appData.speedingLogs.length > 0 && (
+                  <button
+                    onClick={handleClearAllSpeedLogs}
+                    className="w-full py-2 bg-red-950/80 hover:bg-red-900 text-red-300 font-bold rounded-xl text-xs border border-red-800"
+                  >
+                    이력 전체 삭제
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       );
     }
 
-    // --- 일별 운행기록 작성 모달 컴포넌트 ---
+    // --- 일별 운행기록 작성 서브 모달 ---
     function DailyRecordModal({ activeTab, dateKey, existingData, onSave, onClose }) {
       const [isHoliday, setIsHoliday] = useState(existingData.isHoliday || false);
       const [memo, setMemo] = useState(existingData.memo || '');
@@ -779,7 +884,6 @@
               <button onClick={onClose} className="text-gray-400 font-bold text-lg">✕</button>
             </div>
 
-            {/* 휴무 체크 */}
             <label className="flex items-center gap-2 bg-gray-950 p-2.5 rounded-xl border border-gray-800 cursor-pointer">
               <input
                 type="checkbox"
@@ -793,7 +897,6 @@
             {!isHoliday && (
               <div className="space-y-3">
                 {activeTab === 'corporate' ? (
-                  /* 법인택시 입력 폼 */
                   <>
                     <div>
                       <label className="text-xs text-gray-400 block mb-1">당일 운행 매출액</label>
@@ -827,7 +930,6 @@
                     </div>
                   </>
                 ) : (
-                  /* 개인택시 입력 폼 */
                   <>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
