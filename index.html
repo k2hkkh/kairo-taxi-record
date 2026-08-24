@@ -30,7 +30,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    // --- 유틸리티 함수 ---
+    // --- 통화 포맷팅 유틸리티 ---
     const formatMoney = (val) => {
       const num = Number(String(val).replace(/[^0-9]/g, '')) || 0;
       return num.toLocaleString('ko-KR');
@@ -64,7 +64,7 @@
       return `${date} ${time}`;
     };
 
-    // 하버사인 거리 계산
+    // 하버사인 거리 계산 (단위: m)
     const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371e3;
       const φ1 = (lat1 * Math.PI) / 180;
@@ -79,7 +79,7 @@
       return R * c;
     };
 
-    // 단속 카메라 DB
+    // 기본 단속 카메라 DB
     const SAMPLE_CAMERAS = [
       { id: 1, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 신호·과속 단속' },
       { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 과속단속' },
@@ -88,20 +88,20 @@
       { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '스쿨존 어린이보호구역 단속' }
     ];
 
-    // 스토리지 기본 스키마 (각종 수당 & 고정비 다중 관리 완비)
+    // 스토리지 기본 데이터 (급여명세서 3개월 실데이터 기반 기본값 세팅)
     const DEFAULT_STORAGE = {
       activeTab: 'corporate',
       corporate: {
         carNumber: '',
-        dailyDeposit: 201000,         // 1일 기본 사납금
-        deductionRate: 9.7,           // 4대보험/세금 기본 공제율 (9.7%)
-        fixedAllowanceItems: [        // 각종 고정 수당 목록
+        dailyDeposit: 201000,         // 1일 기준 사납금
+        deductionRate: 9.0,           // 4대보험/세금 평균 공제율 (8.8~9.3% 중간값 9.0% 기본 세팅)
+        fixedAllowanceItems: [        // 급여명세서 실데이터 수당 세트 (총 1,367,700원)
           { id: 1, name: '기본급', amount: 1181700 },
           { id: 2, name: '승무수당', amount: 130000 },
           { id: 3, name: '교육수당', amount: 21000 },
           { id: 4, name: '법정휴일수당', amount: 35000 }
         ],
-        fixedExpenseItems: [          // 회사 고정비 공제 목록
+        fixedExpenseItems: [          // 급여명세서 실데이터 공제 항목
           { id: 1, name: '노조비', amount: 25000 },
           { id: 2, name: '상조회비', amount: 0 }
         ],
@@ -114,7 +114,7 @@
       speedingLogs: []
     };
 
-    // --- 스마트 금액 입력 컴포넌트 ---
+    // 스마트 금액 입력 컴포넌트 (원터치 전체선택 + 지움 ✕ 지원)
     function SmartMoneyInput({ value, onChange, placeholder = "0", className = "", colorClass = "text-white" }) {
       const numVal = Number(value) || 0;
       const displayVal = numVal > 0 ? numVal.toLocaleString('ko-KR') : '';
@@ -149,15 +149,12 @@
 
     function App() {
       const [appData, setAppData] = useState(() => {
-        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V10');
+        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V11');
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
             if (!parsed.corporate.fixedAllowanceItems) {
               parsed.corporate.fixedAllowanceItems = DEFAULT_STORAGE.corporate.fixedAllowanceItems;
-            }
-            if (parsed.corporate.deductionRate === undefined) {
-              parsed.corporate.deductionRate = 9.7;
             }
             return parsed;
           } catch (e) {
@@ -192,9 +189,10 @@
       const lastLoggedCamRef = useRef(null);
 
       useEffect(() => {
-        localStorage.setItem('K_TAXI_RECORD_DATA_V10', JSON.stringify(appData));
+        localStorage.setItem('K_TAXI_RECORD_DATA_V11', JSON.stringify(appData));
       }, [appData]);
 
+      // TTS 발화
       const speak = (text) => {
         if (!('speechSynthesis' in window)) return;
         window.speechSynthesis.cancel();
@@ -306,7 +304,7 @@
         }));
       };
 
-      // 1. 고정 수당 항목 추가/수정/삭제
+      // 1. 고정 수당 목록 관리
       const handleAddFixedAllowance = () => {
         const newItem = { id: Date.now(), name: '수당추가', amount: 0 };
         setAppData(prev => ({
@@ -340,7 +338,7 @@
         }));
       };
 
-      // 2. 회사 고정비 지출 항목 추가/수정/삭제
+      // 2. 회사 고정비 공제 목록 관리
       const handleAddFixedExpense = () => {
         const newItem = { id: Date.now(), name: '항목추가', amount: 0 };
         setAppData(prev => ({
@@ -413,19 +411,19 @@
         }
       };
 
-      // 각종 고정 수당 자동 합산
+      // 고정 수당 총 합계
       const totalFixedAllowances = useMemo(() => {
         const items = appData.corporate.fixedAllowanceItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       }, [appData.corporate.fixedAllowanceItems]);
 
-      // 회사 고정비 지출 자동 합산
+      // 회사 고정비 총 합계
       const totalFixedExpenses = useMemo(() => {
         const items = appData.corporate.fixedExpenseItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       }, [appData.corporate.fixedExpenseItems]);
 
-      // 월별 정산 통계 (수당 다중합산 + 9.7% 공제율 적용)
+      // 월별 정산 통계
       const currentMonthStats = useMemo(() => {
         const tab = appData.activeTab;
         const records = appData[tab].records || {};
@@ -436,7 +434,7 @@
 
         if (tab === 'corporate') {
           const dailyDeposit = Number(appData.corporate.dailyDeposit || 201000);
-          const deductionRate = Number(appData.corporate.deductionRate || 9.7) / 100;
+          const deductionRate = Number(appData.corporate.deductionRate || 9.0) / 100;
 
           let totalRevenue = 0;
           let totalGasCompany = 0;
@@ -458,11 +456,11 @@
             }
           });
 
-          // 총 지급액 (세전) = 고정 수당 합계 + 사납금 초과 수당(70%)
+          // 총 지급액 (세전 급여) = 고정 수당 합계 + 70% 초과 성과급
           const grossSalary = totalFixedAllowances + totalIncentive;
-          // 4대보험 및 세금 공제액 (9.7%)
+          // 세금 및 4대보험 공제 추정액
           const taxAndInsurance = Math.round(grossSalary * deductionRate);
-          // 총 공제액 = 세금/보험료 + 회사 고정비(노조비 등)
+          // 총 공제액 = 세금/보험료 + 고정비(노조비 등)
           const totalDeductions = taxAndInsurance + totalFixedExpenses;
           // 회사 실지급액 (통장 실수령액)
           const netSalaryFromCompany = grossSalary - totalDeductions;
@@ -611,7 +609,7 @@
       return (
         <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-900 border-x border-gray-800">
           
-          {/* 헤더 */}
+          {/* 상단 헤더 */}
           <header className="p-4 bg-gray-950 border-b border-gray-800 flex items-center justify-between sticky top-0 z-30">
             <div className="flex items-center gap-2">
               <span className="bg-yellow-500 text-black text-xs font-black px-2 py-0.5 rounded">K-TAXI</span>
@@ -639,7 +637,7 @@
             </div>
           </header>
 
-          {/* HUD 모드 */}
+          {/* 메인 뷰: HUD 모드 */}
           {viewMode === 'hud' ? (
             <div className="flex-1 flex flex-col p-4 bg-black justify-between select-none">
               <div className="flex justify-between items-center">
@@ -706,7 +704,7 @@
               </div>
             </div>
           ) : (
-            /* 운행기록장 모드 */
+            /* 메인 뷰: 운행기록장 모드 */
             <div className="flex-1 p-4 space-y-4 overflow-y-auto">
               
               {/* 법인 / 개인 탭 */}
@@ -761,7 +759,7 @@
                       </div>
                     </div>
 
-                    {/* 각종 고정 수당 목록 (기본급, 승무, 교육, 휴일수당 등) */}
+                    {/* 각종 고정 수당 목록 */}
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <span className="text-xs text-gray-400 block leading-tight">각종 고정 수당 목록</span>
@@ -775,7 +773,7 @@
                       </button>
                     </div>
 
-                    {/* 회사 고정비 지출 목록 (노조비, 상조회비 등) */}
+                    {/* 회사 고정비 공제 목록 */}
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <span className="text-xs text-gray-400 block leading-tight">회사 고정비 지출 목록</span>
@@ -789,7 +787,7 @@
                       </button>
                     </div>
 
-                    {/* 4대보험/세금 공제율 (9.7%) */}
+                    {/* 4대보험/세금 공제율 */}
                     <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-700/50">
                       <span className="text-xs text-gray-400">4대보험 및 세금 공제율</span>
                       <div className="flex items-center gap-1">
@@ -1071,7 +1069,7 @@
             </div>
           )}
 
-          {/* 1. 각종 고정 수당 관리 모달 (기본급, 승무수당 등) */}
+          {/* 1. 각종 고정 수당 목록 관리 모달 */}
           {showFixedAllowanceModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4 max-h-[85vh] flex flex-col">
@@ -1135,7 +1133,7 @@
             </div>
           )}
 
-          {/* 2. 회사 고정비 관리 모달 (노조비, 상조회비 등) */}
+          {/* 2. 회사 고정비 공제 관리 모달 */}
           {showFixedExpenseModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4 max-h-[85vh] flex flex-col">
