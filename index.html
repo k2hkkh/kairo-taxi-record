@@ -3,560 +3,725 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>K-TAXI 통합 운행기록장 & 안전운행</title>
-  
-  <!-- React & Babel CDN -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <title>K-TAXI 운행기록장 & 안전운행 HUD</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel CDN -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
   <style>
-    :root {
-      --bg: #16181C;
-      --card: #1F2227;
-      --card-alt: #262A31;
-      --border: #33373F;
-      --text: #F0EEE8;
-      --dim: #9A9EA6;
-      --amber: #F5B301;
-      --green: #6FBF73;
-      --red: #D9534F;
-      --teal: #4C8C8C;
+    @keyframes pulse-slow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
     }
-    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      padding-bottom: 70px;
+    .animate-pulse-slow {
+      animation: pulse-slow 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
-    input, select, textarea, button { font-family: inherit; }
-    .btn {
-      display: inline-flex; align-items: center; justify-content: center;
-      border-radius: 12px; font-weight: 700; border: none; cursor: pointer; transition: 0.15s;
-    }
-    .btn-primary { background: var(--amber); color: #111; }
-    .btn-secondary { background: var(--card-alt); color: var(--text); border: 1px solid var(--border); }
-    .btn-danger { background: var(--red); color: #fff; }
-    .modal-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.75);
-      display: flex; align-items: center; justify-content: center; z-index: 999; padding: 16px;
-    }
-    .modal-box {
-      background: var(--card); border: 1px solid var(--border);
-      border-radius: 20px; width: 100%; max-width: 380px; max-height: 85vh;
-      overflow-y: auto; padding: 20px;
-    }
-    .field-label { font-size: 12px; color: var(--dim); font-weight: 600; margin-bottom: 6px; }
-    .input-box {
-      width: 100%; background: var(--card-alt); border: 1px solid var(--border);
-      border-radius: 10px; padding: 12px; color: var(--text); font-size: 15px; outline: none; margin-bottom: 12px;
+    .hud-mirror {
+      transform: scaleY(-1);
     }
   </style>
 </head>
-<body>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-sans select-none antialiased">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useRef, useMemo } = React;
 
-    // 통화 포맷 헬퍼
-    const won = (n) => Math.round(n || 0).toLocaleString("ko-KR") + "원";
-    const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
-    const pad2 = (n) => String(n).padStart(2, "0");
-    const todayKey = () => {
-      const t = new Date();
-      return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`;
+    // --- 유틸리티 함수 ---
+    const formatMoney = (val) => {
+      const num = Number(val) || 0;
+      return num.toLocaleString('ko-KR') + '원';
     };
 
-    // 하버사인 공식 (거리 계산)
-    function getDistanceMeters(lat1, lon1, lat2, lon2) {
-      const R = 6371000;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2)**2;
-      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    }
+    const getTodayKey = () => {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
 
-    // 기본 단속 카메라 샘플 (천안/아산 주요 거점)
-    const DEFAULT_CAMERAS = [
-      { id: "C1", name: "신호·과속단속 (아산시청 앞)", lat: 36.7898, lng: 127.0019, speedLimit: 50 },
-      { id: "C2", name: "과속단속 60km (천안아산역 부근)", lat: 36.7942, lng: 127.1044, speedLimit: 60 },
-      { id: "C3", name: "신호·과속 50km (불당대로 교차로)", lat: 36.8075, lng: 127.1120, speedLimit: 50 }
+    // 하버사인 거리 계산 공식 (단위: 미터)
+    const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
+      const R = 6371e3;
+      const φ1 = (lat1 * Math.PI) / 180;
+      const φ2 = (lat2 * Math.PI) / 180;
+      const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+      const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+      const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
+
+    // 기본 단속 카메라 데이터베이스 (예시 DB)
+    const SAMPLE_CAMERAS = [
+      { id: 1, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 단속' },
+      { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 단속' },
+      { id: 3, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 단속' },
+      { id: 4, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 단속' }
     ];
 
+    // 스토리지 초기 상태 (법인/개인 완전 분리 구조)
+    const DEFAULT_STORAGE = {
+      activeTab: 'corporate', // 'corporate' | 'private'
+      corporate: {
+        carNumber: '',
+        baseDeposit: 201000,
+        fixedIncomes: 0,
+        records: {} // 'YYYY-MM-DD': { revenue: 0, gas: 0, driverExpense: 0, memo: '', isHoliday: false }
+      },
+      private: {
+        carNumber: '',
+        records: {} // 'YYYY-MM-DD': { cardRev: 0, cashRev: 0, gas: 0, toll: 0, maint: 0, other: 0, memo: '', isHoliday: false }
+      }
+    };
+
     function App() {
-      // 탭: 'log'(기록장), 'gps'(안전운행 음성안내), 'report'(고정비/통계/백업), 'settings'(설정)
-      const [tab, setTab] = useState("log");
-
-      // 기사 기본 프로필
-      const [profile, setProfile] = useState(() => {
-        const saved = localStorage.getItem("ktaxi_profile");
-        return saved ? JSON.parse(saved) : {
-          type: "corporate", // corporate(법인) | personal(개인)
-          vehicleNumber: "충남12가 3456",
-          employeeNumber: "1004",
-          dailyQuota: 210000,
-          insuranceRate: 9.7
-        };
-      });
-
-      // 일별 운행 기록
-      const [records, setRecords] = useState(() => {
-        const saved = localStorage.getItem("ktaxi_records");
-        return saved ? JSON.parse(saved) : {};
-      });
-
-      // 월 고정비 목록
-      const [fixedCosts, setFixedCosts] = useState(() => {
-        const saved = localStorage.getItem("ktaxi_fixed_costs");
-        return saved ? JSON.parse(saved) : [
-          { id: 1, name: "통신/GPS비", amount: 25000 }
-        ];
-      });
-
-      // 고정비 추가 폼 상태
-      const [newCostName, setNewCostName] = useState("");
-      const [newCostAmount, setNewCostAmount] = useState("");
-
-      // 차량 정비 기록
-      const [maintenances, setMaintenances] = useState(() => {
-        const saved = localStorage.getItem("ktaxi_maintenances");
-        return saved ? JSON.parse(saved) : [];
-      });
-
-      // 달력 네비게이션
-      const [viewY, setViewY] = useState(new Date().getFullYear());
-      const [viewM, setViewM] = useState(new Date().getMonth());
-      const [selectedDate, setSelectedDate] = useState(null);
-      const [editModal, setEditModal] = useState(false);
-      const [draft, setDraft] = useState({ revenue: "", fuel: "", tripCount: "", memo: "", holiday: false });
-
-      // GPS & 음성 알림 상태
-      const [isGpsActive, setIsGpsActive] = useState(false);
-      const [curPos, setCurPos] = useState({ lat: null, lng: null, accuracy: null, speed: 0 });
-      const [nearestCam, setNearestCam] = useState(null);
-      const [alertLogs, setAlertLogs] = useState([]);
-      const watchIdRef = useRef(null);
-      const alertedCamIds = useRef(new Set());
-
-      // 로컬 자동 저장
-      useEffect(() => localStorage.setItem("ktaxi_profile", JSON.stringify(profile)), [profile]);
-      useEffect(() => localStorage.setItem("ktaxi_records", JSON.stringify(records)), [records]);
-      useEffect(() => localStorage.setItem("ktaxi_fixed_costs", JSON.stringify(fixedCosts)), [fixedCosts]);
-      useEffect(() => localStorage.setItem("ktaxi_maintenances", JSON.stringify(maintenances)), [maintenances]);
-
-      // 고정비 추가/삭제 로직
-      const handleAddFixedCost = () => {
-        if (!newCostName.trim()) {
-          alert("항목 이름을 입력해 주세요. (예: 조합비, 세차비)");
-          return;
+      // 데이터 로드 및 초기화
+      const [appData, setAppData] = useState(() => {
+        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V3');
+        if (saved) {
+          try { return JSON.parse(saved); } catch (e) { return DEFAULT_STORAGE; }
         }
-        if (!newCostAmount || num(newCostAmount) <= 0) {
-          alert("올바른 금액을 입력해 주세요.");
-          return;
-        }
-        const newCost = {
-          id: Date.now(),
-          name: newCostName.trim(),
-          amount: num(newCostAmount)
-        };
-        setFixedCosts([...fixedCosts, newCost]);
-        setNewCostName("");
-        setNewCostAmount("");
-      };
+        return DEFAULT_STORAGE;
+      });
 
-      const handleDeleteFixedCost = (id) => {
-        if (confirm("이 고정비 항목을 삭제하시겠습니까?")) {
-          setFixedCosts(fixedCosts.filter(item => item.id !== id));
-        }
-      };
+      // UI 뷰 모드 ('record' | 'hud')
+      const [viewMode, setViewMode] = useState('record');
+      const [selectedDate, setSelectedDate] = useState(getTodayKey());
+      const [currentYearMonth, setCurrentYearMonth] = useState(() => {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      });
 
-      // 음성 안내 발화 (TTS)
-      const speakVoice = (text) => {
-        if (!("speechSynthesis" in window)) return;
+      // 모달 상태
+      const [showDailyModal, setShowDailyModal] = useState(false);
+      const [showTaxModal, setShowTaxModal] = useState(false);
+      const [showCorporateNet, setShowCorporateNet] = useState(false);
+
+      // GPS & HUD 상태
+      const [gpsSpeed, setGpsSpeed] = useState(0);
+      const [nearestCamera, setNearestCamera] = useState(null);
+      const [hudMirrored, setHudMirrored] = useState(false);
+      const [audioReady, setAudioReady] = useState(false);
+      const lastAlertedCamRef = useRef(null);
+
+      // 상태 변경 시 localStorage 동기화
+      useEffect(() => {
+        localStorage.setItem('K_TAXI_RECORD_DATA_V3', JSON.stringify(appData));
+      }, [appData]);
+
+      // TTS 발화 (블루투스 오디오 대응 및 최대 볼륨)
+      const speak = (text) => {
+        if (!('speechSynthesis' in window)) return;
         window.speechSynthesis.cancel();
-        const utter = new SpeechSynthesisUtterance(text);
-        utter.lang = "ko-KR";
-        utter.rate = 1.0;
-        window.speechSynthesis.speak(utter);
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ko-KR';
+        utterance.rate = 1.05;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0; // 최대 볼륨
+
+        const voices = window.speechSynthesis.getVoices();
+        const koVoice = voices.find(v => v.lang.includes('ko'));
+        if (koVoice) utterance.voice = koVoice;
+
+        window.speechSynthesis.speak(utterance);
       };
 
-      // GPS 추적 로직
-      const toggleGps = () => {
-        if (isGpsActive) {
-          if (watchIdRef.current) navigator.geolocation.clearWatch(watchIdRef.current);
-          setIsGpsActive(false);
-          setNearestCam(null);
-          speakVoice("안전운행 안내를 종료합니다.");
-        } else {
-          if (!("geolocation" in navigator)) {
-            alert("이 기기나 브라우저에서 GPS를 지원하지 않습니다.");
-            return;
-          }
-          speakVoice("안전운행 GPS 안내를 시작합니다.");
-          setIsGpsActive(true);
-          watchIdRef.current = navigator.geolocation.watchPosition(
-            (pos) => {
-              const { latitude, longitude, accuracy, speed } = pos.coords;
-              const curSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
-              setCurPos({ lat: latitude, lng: longitude, accuracy: Math.round(accuracy), speed: curSpeedKmh });
-
-              let closest = null;
-              let minDistance = 999999;
-
-              DEFAULT_CAMERAS.forEach((cam) => {
-                const dist = getDistanceMeters(latitude, longitude, cam.lat, cam.lng);
-                if (dist < minDistance) {
-                  minDistance = dist;
-                  closest = { ...cam, distance: Math.round(dist) };
-                }
-
-                if (dist <= 300 && !alertedCamIds.current.has(cam.id)) {
-                  alertedCamIds.current.add(cam.id);
-                  speakVoice(`전방 ${Math.round(dist)}미터 앞, ${cam.name}입니다. 속도를 줄이세요.`);
-                  setAlertLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${cam.name} 근접 감지 (${Math.round(dist)}m)`, ...prev.slice(0, 10)]);
-                }
-                if (dist > 350 && alertedCamIds.current.has(cam.id)) {
-                  alertedCamIds.current.delete(cam.id);
-                }
-              });
-              setNearestCam(closest);
-            },
-            (err) => console.error(err),
-            { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
-          );
+      // 오디오/블루투스 채널 활성화
+      const initAudioChannel = () => {
+        if ('speechSynthesis' in window) {
+          const dummy = new SpeechSynthesisUtterance('');
+          window.speechSynthesis.speak(dummy);
+          setAudioReady(true);
+          speak('안전운행 음성 안내가 시작됩니다.');
         }
       };
 
-      // 월간 정산 집계
-      const monthStats = useMemo(() => {
-        let rev = 0, fuel = 0, trips = 0, workDays = 0, excessTotal = 0;
-        const prefix = `${viewY}-${pad2(viewM + 1)}`;
-        Object.entries(records).forEach(([k, rec]) => {
-          if (!k.startsWith(prefix) || rec.holiday) return;
-          workDays++;
-          rev += num(rec.revenue);
-          fuel += num(rec.fuel);
-          trips += num(rec.tripCount);
-          if (profile.type === "corporate" && num(profile.dailyQuota) > 0) {
-            excessTotal += Math.max(0, num(rec.revenue) - num(profile.dailyQuota));
+      // GPS Watcher
+      useEffect(() => {
+        if (!navigator.geolocation) return;
+
+        const watchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            const speedKmh = pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0;
+            setGpsSpeed(speedKmh);
+
+            const userLat = pos.coords.latitude;
+            const userLon = pos.coords.longitude;
+
+            let closest = null;
+            let minDist = Infinity;
+
+            SAMPLE_CAMERAS.forEach((cam) => {
+              const dist = getDistanceMeters(userLat, userLon, cam.lat, cam.lon);
+              if (dist < 600 && dist < minDist) {
+                minDist = Math.round(dist);
+                closest = { ...cam, distance: minDist };
+              }
+            });
+
+            setNearestCamera(closest);
+
+            // 카메라 음성 알림 (500m / 300m 구간)
+            if (closest) {
+              if (closest.distance <= 300 && lastAlertedCamRef.current !== `${closest.id}-300`) {
+                speak(`전방 300미터 앞 제한속도 ${closest.limitSpeed}킬로미터 단속 구간입니다.`);
+                lastAlertedCamRef.current = `${closest.id}-300`;
+              } else if (closest.distance > 300 && closest.distance <= 500 && lastAlertedCamRef.current !== `${closest.id}-500`) {
+                speak(`전방에 ${closest.limitSpeed}킬로미터 단속 카메라가 있습니다.`);
+                lastAlertedCamRef.current = `${closest.id}-500`;
+              }
+            } else {
+              lastAlertedCamRef.current = null;
+            }
+          },
+          (err) => console.warn('GPS Error:', err.message),
+          { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+        );
+
+        return () => navigator.geolocation.clearWatch(watchId);
+      }, []);
+
+      // 탭 전환 핸들러
+      const setTab = (tab) => {
+        setAppData(prev => ({ ...prev, activeTab: tab }));
+        setShowCorporateNet(false);
+      };
+
+      // 차량번호 수정
+      const handleCarNumberChange = (val) => {
+        const tab = appData.activeTab;
+        setAppData(prev => ({
+          ...prev,
+          [tab]: {
+            ...prev[tab],
+            carNumber: val
           }
-        });
-        const fixedSum = fixedCosts.reduce((s, f) => s + num(f.amount), 0);
-        let net = 0;
-        if (profile.type === "corporate") {
-          const driverPay = excessTotal * 0.7;
-          const insurance = Math.round(driverPay * ((profile.insuranceRate || 9.7) / 100));
-          net = driverPay - insurance - fixedSum;
+        }));
+      };
+
+      // 법인 설정 변경 (기본 사납금, 고정비/고정수당)
+      const handleCorporateConfigChange = (key, val) => {
+        setAppData(prev => ({
+          ...prev,
+          corporate: {
+            ...prev.corporate,
+            [key]: Number(val) || 0
+          }
+        }));
+      };
+
+      // 일별 기록 저장
+      const handleSaveRecord = (dateKey, recordData) => {
+        const tab = appData.activeTab;
+        setAppData(prev => ({
+          ...prev,
+          [tab]: {
+            ...prev[tab],
+            records: {
+              ...prev[tab].records,
+              [dateKey]: recordData
+            }
+          }
+        }));
+        setShowDailyModal(false);
+      };
+
+      // 현재 선택된 월의 통계 계산
+      const currentMonthStats = useMemo(() => {
+        const tab = appData.activeTab;
+        const records = appData[tab].records || {};
+        const entries = Object.entries(records).filter(([date]) => date.startsWith(currentYearMonth));
+
+        if (tab === 'corporate') {
+          let totalRevenue = 0;
+          let totalGasCompany = 0; // 전액 회사 부담
+          let totalDriverExpense = 0; // 기사 개인 경비
+
+          entries.forEach(([_, r]) => {
+            if (!r.isHoliday) {
+              totalRevenue += Number(r.revenue || 0);
+              totalGasCompany += Number(r.gas || 0);
+              totalDriverExpense += Number(r.driverExpense || 0);
+            }
+          });
+
+          const fixedIncomes = Number(appData.corporate.fixedIncomes || 0);
+          const grossSalary = totalRevenue + fixedIncomes; // 총매출 + 고정비 = 월급여
+          const netIncome = grossSalary - totalDriverExpense;
+
+          return {
+            totalRevenue,
+            totalGasCompany,
+            totalDriverExpense,
+            grossSalary,
+            netIncome
+          };
         } else {
-          net = rev - fuel - fixedSum;
+          // 개인택시
+          let cardTotal = 0;
+          let cashTotal = 0;
+          let gasTotal = 0;
+          let tollTotal = 0;
+          let maintTotal = 0;
+          let otherTotal = 0;
+
+          entries.forEach(([_, r]) => {
+            if (!r.isHoliday) {
+              cardTotal += Number(r.cardRev || 0);
+              cashTotal += Number(r.cashRev || 0);
+              gasTotal += Number(r.gas || 0);
+              tollTotal += Number(r.toll || 0);
+              maintTotal += Number(r.maint || 0);
+              otherTotal += Number(r.other || 0);
+            }
+          });
+
+          const totalRevenue = cardTotal + cashTotal;
+          const totalExpense = gasTotal + tollTotal + maintTotal + otherTotal;
+          const netIncome = totalRevenue - totalExpense;
+
+          return {
+            cardTotal,
+            cashTotal,
+            totalRevenue,
+            gasTotal,
+            tollTotal,
+            maintTotal,
+            otherTotal,
+            totalExpense,
+            netIncome
+          };
         }
-        return { rev, fuel, trips, workDays, excessTotal, net, fixedSum };
-      }, [records, viewY, viewM, profile, fixedCosts]);
+      }, [appData, currentYearMonth]);
 
-      // 달력 날짜 생성
-      const daysInMonth = new Date(viewY, viewM + 1, 0).getDate();
-      const firstDayIndex = new Date(viewY, viewM, 1).getDay();
-      const calendarCells = [];
-      for (let i = 0; i < firstDayIndex; i++) calendarCells.push(null);
-      for (let d = 1; d <= daysInMonth; d++) calendarCells.push(d);
+      // 개인택시 세무서 제출 텍스트 생성
+      const taxReportText = useMemo(() => {
+        if (appData.activeTab !== 'private') return '';
+        const stats = currentMonthStats;
+        const carNum = appData.private.carNumber || '미등록';
 
-      const openDayModal = (d) => {
-        const key = `${viewY}-${pad2(viewM + 1)}-${pad2(d)}`;
-        setSelectedDate(key);
-        const ex = records[key] || { revenue: "", fuel: "", tripCount: "", memo: "", holiday: false };
-        setDraft({ ...ex });
-        setEditModal(true);
-      };
+        return `[세무서 제출용 간편 소득 요약서]
+■ 귀속기간: ${currentYearMonth}
+■ 차량번호: ${carNum}
+------------------------------------
+1. 총 수입금액 (매출)
+ - 카드 및 앱 매출: ${formatMoney(stats.cardTotal)}
+ - 현금 결제 매출: ${formatMoney(stats.cashTotal)}
+ * 매출 총 합계: ${formatMoney(stats.totalRevenue)}
 
-      const saveDayRecord = () => {
-        setRecords({ ...records, [selectedDate]: { ...draft, revenue: num(draft.revenue), fuel: num(draft.fuel), tripCount: num(draft.tripCount) } });
-        setEditModal(false);
-      };
+2. 필요경비 합계 (지출)
+ - 가스비 (유류비): ${formatMoney(stats.gasTotal)}
+ - 도로 통행료: ${formatMoney(stats.tollTotal)}
+ - 차량 정비/유지비: ${formatMoney(stats.maintTotal)}
+ - 기타 사업경비: ${formatMoney(stats.otherTotal)}
+ * 필요경비 총 합계: ${formatMoney(stats.totalExpense)}
+------------------------------------
+3. 소득금액 (과세표준 대상): ${formatMoney(stats.netIncome)}
+------------------------------------
+※ 본 자료는 K-TAXI에서 부가가치세 및 종합소득세 신고를 위해 자동 산출된 자료입니다.`;
+      }, [appData, currentMonthStats, currentYearMonth]);
 
-      // 백업 JSON 내보내기/가져오기
-      const handleBackupExport = () => {
-        const data = { profile, records, fixedCosts, maintenances };
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      // 데이터 백업 (JSON 내보내기)
+      const exportBackup = () => {
+        const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
+        const a = document.createElement('a');
         a.href = url;
-        a.download = `K-TAXI_통합백업_${todayKey()}.json`;
+        a.download = `K-TAXI_BACKUP_${getTodayKey()}.json`;
         a.click();
       };
 
-      const handleBackupImport = (e) => {
+      // 데이터 복원 (JSON 불러오기)
+      const importBackup = (e) => {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
         reader.onload = (evt) => {
           try {
-            const data = JSON.parse(evt.target.result);
-            if (data.profile) setProfile(data.profile);
-            if (data.records) setRecords(data.records);
-            if (data.fixedCosts) setFixedCosts(data.fixedCosts);
-            if (data.maintenances) setMaintenances(data.maintenances);
-            alert("백업 데이터를 성공적으로 복원했습니다!");
-          } catch(err) { alert("유효하지 않은 백업 파일입니다."); }
+            const parsed = JSON.parse(evt.target.result);
+            if (parsed.corporate && parsed.private) {
+              setAppData(parsed);
+              alert('데이터 복원이 완료되었습니다.');
+            } else {
+              alert('올바른 백업 파일 형식이 아닙니다.');
+            }
+          } catch (err) {
+            alert('파일을 읽는 중 오류가 발생했습니다.');
+          }
         };
         reader.readAsText(file);
       };
 
       return (
-        <div style={{ maxWidth: 440, margin: "0 auto", padding: "16px 14px" }}>
+        <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-900 border-x border-gray-800">
+          
           {/* 상단 헤더 */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <div>
-              <span style={{ fontSize: 20, fontWeight: 900, color: "var(--amber)", letterSpacing: 0.5 }}>K-TAXI</span>
-              <span style={{ fontSize: 12, color: "var(--dim)", marginLeft: 8 }}>{profile.vehicleNumber} ({profile.type === 'corporate' ? '법인' : '개인'})</span>
+          <header className="p-4 bg-gray-950 border-b border-gray-800 flex items-center justify-between sticky top-0 z-30">
+            <div className="flex items-center gap-2">
+              <span className="bg-yellow-500 text-black text-xs font-black px-2 py-0.5 rounded">K-TAXI</span>
+              <h1 className="text-base font-bold tracking-tight">운행기록 & HUD</h1>
             </div>
-            <button className="btn btn-secondary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => setTab("settings")}>⚙ 설정</button>
-          </div>
-
-          {/* 탭 네비게이션 */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 14 }}>
-            <button className={`btn ${tab === 'log' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("log")}>📅 운행장부</button>
-            <button className={`btn ${tab === 'gps' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("gps")}>📍 안전운행 GPS</button>
-            <button className={`btn ${tab === 'report' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: "10px 0", fontSize: 13 }} onClick={() => setTab("report")}>📊 고정비·백업</button>
-          </div>
-
-          {/* --- [TAB 1: 운행장부 & 달력] --- */}
-          {tab === "log" && (
-            <div>
-              {/* 월간 요약 카드 */}
-              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "16px", marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <button className="btn btn-secondary" style={{ padding: "4px 10px" }} onClick={() => { if(viewM===0){setViewM(11);setViewY(viewY-1);}else{setViewM(viewM-1);} }}>◀</button>
-                  <span style={{ fontWeight: 800, fontSize: 16 }}>{viewY}년 {viewM + 1}월</span>
-                  <button className="btn btn-secondary" style={{ padding: "4px 10px" }} onClick={() => { if(viewM===11){setViewM(0);setViewY(viewY+1);}else{setViewM(viewM+1);} }}>▶</button>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: "var(--dim)" }}>총 매출</div>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: "var(--amber)" }}>{won(monthStats.rev)}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 11, color: "var(--dim)" }}>예상 순수령액</div>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: "var(--green)" }}>{won(monthStats.net)}</div>
-                  </div>
-                </div>
-                <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 8 }}>
-                  운행 {monthStats.workDays}일 · 고정비 합계 -{won(monthStats.fixedSum)}
-                </div>
-              </div>
-
-              {/* 달력 그리드 */}
-              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "12px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, textAlign: "center", fontSize: 11, fontWeight: 700, color: "var(--dim)", marginBottom: 6 }}>
-                  <span style={{ color: "var(--red)" }}>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span style={{ color: "#4A90E2" }}>토</span>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
-                  {calendarCells.map((day, idx) => {
-                    if (!day) return <div key={`empty-${idx}`} style={{ minHeight: 48, background: "rgba(255,255,255,0.02)", borderRadius: 8 }} />;
-                    const key = `${viewY}-${pad2(viewM + 1)}-${pad2(day)}`;
-                    const rec = records[key];
-                    const isToday = key === todayKey();
-                    return (
-                      <div
-                        key={day}
-                        onClick={() => openDayModal(day)}
-                        style={{
-                          minHeight: 48, padding: 4, borderRadius: 8, cursor: "pointer",
-                          background: isToday ? "rgba(245, 179, 1, 0.12)" : "var(--card-alt)",
-                          border: isToday ? "1px solid var(--amber)" : "1px solid var(--border)",
-                          display: "flex", flexDirection: "column", justifyContent: "space-between"
-                        }}
-                      >
-                        <span style={{ fontSize: 11, fontWeight: 700, color: idx%7===0 ? "var(--red)" : idx%7===6 ? "#4A90E2" : "var(--text)" }}>{day}</span>
-                        {rec && (
-                          rec.holiday ? (
-                            <span style={{ fontSize: 9, color: "var(--red)", fontWeight: 700 }}>휴무</span>
-                          ) : (
-                            <span style={{ fontSize: 9, color: "var(--amber)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{Math.round(rec.revenue/10000)}만</span>
-                          )
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setViewMode(viewMode === 'hud' ? 'record' : 'hud')}
+                className={`px-3 py-1 text-xs font-bold rounded-lg transition ${
+                  viewMode === 'hud' ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-800 text-yellow-400 border border-yellow-500/30'
+                }`}
+              >
+                {viewMode === 'hud' ? '기록장 닫기' : '안전운행 HUD'}
+              </button>
             </div>
-          )}
+          </header>
 
-          {/* --- [TAB 2: 실시간 GPS & 음성 알림 HUD] --- */}
-          {tab === "gps" && (
-            <div>
-              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "18px", marginBottom: 14, textAlign: "center" }}>
-                <div style={{ fontSize: 12, color: "var(--dim)", marginBottom: 6 }}>현재 주행 속도</div>
-                <div style={{ fontSize: 48, fontWeight: 900, color: isGpsActive ? "var(--amber)" : "var(--dim)" }}>
-                  {isGpsActive ? curPos.speed : 0} <span style={{ fontSize: 16 }}>km/h</span>
-                </div>
+          {/* 메인 뷰: HUD 모드 */}
+          {viewMode === 'hud' ? (
+            <div className="flex-1 flex flex-col p-4 bg-black justify-between select-none">
+              <div className="flex justify-between items-center">
                 <button
-                  className={`btn ${isGpsActive ? 'btn-danger' : 'btn-primary'}`}
-                  style={{ width: "100%", padding: "14px 0", marginTop: 12, fontSize: 15 }}
-                  onClick={toggleGps}
+                  onClick={() => setHudMirrored(!hudMirrored)}
+                  className="text-xs px-3 py-1.5 bg-gray-800 text-gray-300 rounded-lg"
                 >
-                  {isGpsActive ? "🛑 안전운행 안내 끄기" : "📍 실시간 GPS 음성안내 켜기"}
+                  {hudMirrored ? '미러 모드 켜짐 (HUD)' : '일반 모드'}
+                </button>
+                {!audioReady ? (
+                  <button
+                    onClick={initAudioChannel}
+                    className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold animate-bounce"
+                  >
+                    🔊 블루투스/음성 켜기
+                  </button>
+                ) : (
+                  <span className="text-xs text-green-400 flex items-center gap-1 font-semibold">
+                    <span className="w-2 h-2 bg-green-400 rounded-full animate-ping"></span>
+                    음성 알림 활성
+                  </span>
+                )}
+              </div>
+
+              {/* HUD 디스플레이 */}
+              <div className={`flex flex-col items-center justify-center my-auto transition-transform ${hudMirrored ? 'hud-mirror' : ''}`}>
+                
+                {/* 상단 단속 알림 텍스트 */}
+                <div className="h-10 flex items-center text-center">
+                  {nearestCamera ? (
+                    <span className="text-yellow-400 font-bold text-lg animate-pulse-slow">
+                      ⚠️ {nearestCamera.distance}m 앞 [{nearestCamera.limitSpeed}km/h] {nearestCamera.desc}
+                    </span>
+                  ) : (
+                    <span className="text-gray-500 text-sm">안전 속도를 준수하십시오</span>
+                  )}
+                </div>
+
+                {/* 중앙: 제한속도 표지판 & 현재 속도 */}
+                <div className="flex items-center justify-center gap-6 my-6">
+                  {/* 대형 제한속도 원형 뱃지 */}
+                  <div className="flex flex-col items-center justify-center w-24 h-24 rounded-full border-4 border-red-600 bg-white text-black shadow-2xl flex-shrink-0">
+                    <span className="text-[11px] font-black text-red-600 leading-none">제한</span>
+                    <span className="text-3xl font-black leading-tight tracking-tight">
+                      {nearestCamera ? nearestCamera.limitSpeed : 50}
+                    </span>
+                    <span className="text-[9px] font-bold text-gray-500 leading-none">km/h</span>
+                  </div>
+
+                  {/* 현재 속도 */}
+                  <div className="flex items-baseline">
+                    <span className={`text-8xl font-black tracking-tighter ${
+                      nearestCamera && gpsSpeed > nearestCamera.limitSpeed ? 'text-red-500 animate-bounce' : 'text-green-400'
+                    }`}>
+                      {gpsSpeed}
+                    </span>
+                    <span className="text-2xl font-bold ml-2 text-gray-400">km/h</span>
+                  </div>
+                </div>
+
+                {/* 속도 경고 메시지 바 */}
+                {nearestCamera && gpsSpeed > nearestCamera.limitSpeed && (
+                  <div className="w-full bg-red-600/90 text-white text-center py-1.5 rounded-xl font-bold text-sm">
+                    속도 초과! 감속하십시오 ({gpsSpeed - nearestCamera.limitSpeed} km/h 초과)
+                  </div>
+                )}
+              </div>
+
+              <div className="text-center text-xs text-gray-600 pb-2">
+                GPS 위성 신호 기반 작동 중 · 차량 유리창 반사 거치 가능
+              </div>
+            </div>
+          ) : (
+            /* 메인 뷰: 운행기록장 모드 */
+            <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+              
+              {/* 법인 / 개인 탭 선택 (완전 독립) */}
+              <div className="grid grid-cols-2 p-1 bg-gray-950 rounded-xl border border-gray-800">
+                <button
+                  onClick={() => setTab('corporate')}
+                  className={`py-2 text-sm font-bold rounded-lg transition ${
+                    appData.activeTab === 'corporate'
+                      ? 'bg-yellow-500 text-black shadow-md'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  법인 택시
+                </button>
+                <button
+                  onClick={() => setTab('private')}
+                  className={`py-2 text-sm font-bold rounded-lg transition ${
+                    appData.activeTab === 'private'
+                      ? 'bg-yellow-500 text-black shadow-md'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  개인 택시
                 </button>
               </div>
 
-              {/* 근접 단속 카메라 경보 카드 */}
-              {isGpsActive && nearestCam && (
-                <div style={{ background: nearestCam.distance <= 300 ? "rgba(217,83,79,0.2)" : "var(--card)", border: `1px solid ${nearestCam.distance <= 300 ? 'var(--red)' : 'var(--border)'}`, borderRadius: 16, padding: "14px", marginBottom: 14 }}>
-                  <div style={{ fontSize: 12, color: nearestCam.distance <= 300 ? "var(--red)" : "var(--dim)", fontWeight: 700 }}>⚠️ 전방 감지 카메라</div>
-                  <div style={{ fontSize: 16, fontWeight: 800, marginTop: 4 }}>{nearestCam.name}</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}>
-                    <span>남은 거리: <b style={{ color: "var(--amber)" }}>{nearestCam.distance}m</b></span>
-                    <span>제한 속도: <b>{nearestCam.speedLimit}km/h</b></span>
+              {/* 기본 정보 설정 카드 (차량번호 및 기준값) */}
+              <div className="bg-gray-800/80 p-4 rounded-2xl border border-gray-700/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-gray-400 font-semibold">차량 번호</label>
+                  <input
+                    type="text"
+                    placeholder="예: 서울31사 1234"
+                    value={appData[appData.activeTab].carNumber}
+                    onChange={(e) => handleCarNumberChange(e.target.value)}
+                    className="bg-gray-900 border border-gray-700 px-3 py-1 text-sm rounded-lg text-right w-44 font-semibold text-white focus:border-yellow-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* 법인 전용 고정비/고정수당 설정 */}
+                {appData.activeTab === 'corporate' && (
+                  <div className="pt-2 border-t border-gray-700 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">기본 사납금 (기사입력)</span>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          value={appData.corporate.baseDeposit}
+                          onChange={(e) => handleCorporateConfigChange('baseDeposit', e.target.value)}
+                          className="bg-gray-900 border border-gray-700 px-2 py-1 text-xs rounded text-right w-24 text-white"
+                        />
+                        <span className="text-xs text-gray-400">원</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">고정수당 (총매출 합산용)</span>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          value={appData.corporate.fixedIncomes}
+                          onChange={(e) => handleCorporateConfigChange('fixedIncomes', e.target.value)}
+                          className="bg-gray-900 border border-gray-700 px-2 py-1 text-xs rounded text-right w-24 text-white"
+                        />
+                        <span className="text-xs text-gray-400">원</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 월 선택 바 */}
+              <div className="flex items-center justify-between bg-gray-950 p-2 rounded-xl border border-gray-800">
+                <button
+                  onClick={() => {
+                    const [y, m] = currentYearMonth.split('-').map(Number);
+                    const prevDate = new Date(y, m - 2, 1);
+                    setCurrentYearMonth(`${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`);
+                  }}
+                  className="px-3 py-1 bg-gray-800 text-gray-300 rounded-lg text-sm font-bold"
+                >
+                  ◀
+                </button>
+                <span className="text-base font-black tracking-wide text-yellow-400">{currentYearMonth} 정산</span>
+                <button
+                  onClick={() => {
+                    const [y, m] = currentYearMonth.split('-').map(Number);
+                    const nextDate = new Date(y, m, 1);
+                    setCurrentYearMonth(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`);
+                  }}
+                  className="px-3 py-1 bg-gray-800 text-gray-300 rounded-lg text-sm font-bold"
+                >
+                  ▶
+                </button>
+              </div>
+
+              {/* 정산 요약 카드 */}
+              {appData.activeTab === 'corporate' ? (
+                /* 법인택시 월 정산 */
+                <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 space-y-3">
+                  <div className="flex justify-between items-center text-xs pb-2 border-b border-gray-700">
+                    <span className="text-gray-400">회사 전액 부담 가스비</span>
+                    <span className="text-gray-300 font-semibold">{formatMoney(currentMonthStats.totalGasCompany)} (지원)</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-gray-900/90 p-3 rounded-xl">
+                      <span className="text-[11px] text-blue-400 block font-semibold">총매출 + 고정수당</span>
+                      <span className="text-base font-bold text-blue-300 block mt-0.5">{formatMoney(currentMonthStats.grossSalary)}</span>
+                      <span className="text-[9px] text-gray-500 block">(월급여 산정액)</span>
+                    </div>
+                    <div className="bg-gray-900/90 p-3 rounded-xl">
+                      <span className="text-[11px] text-orange-400 block font-semibold">기타 기사 지출합산</span>
+                      <span className="text-base font-bold text-orange-300 block mt-0.5">{formatMoney(currentMonthStats.totalDriverExpense)}</span>
+                      <span className="text-[9px] text-gray-500 block">(기사 자부담 경비)</span>
+                    </div>
+                  </div>
+
+                  {/* 기사 순수입 확인 버튼 */}
+                  <button
+                    onClick={() => setShowCorporateNet(!showCorporateNet)}
+                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold rounded-xl text-xs transition"
+                  >
+                    {showCorporateNet ? '순수입 숨기기' : '이번 달 실제 순수입 계산 / 확인'}
+                  </button>
+
+                  {showCorporateNet && (
+                    <div className="bg-indigo-950 border border-indigo-500 p-3 rounded-xl text-center">
+                      <span className="text-[11px] text-indigo-300 block">월급여 - 기사 자부담 경비</span>
+                      <span className="text-xl font-black text-yellow-300 mt-1 block">
+                        {formatMoney(currentMonthStats.netIncome)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* 개인택시 월 정산 */
+                <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 space-y-3">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-gray-900 p-2.5 rounded-xl">
+                      <span className="text-gray-400 block">총 수입 (카드+현금)</span>
+                      <span className="text-sm font-bold text-green-400 mt-1 block">{formatMoney(currentMonthStats.totalRevenue)}</span>
+                    </div>
+                    <div className="bg-gray-900 p-2.5 rounded-xl">
+                      <span className="text-gray-400 block">총 지출 (가스/경비 등)</span>
+                      <span className="text-sm font-bold text-red-400 mt-1 block">{formatMoney(currentMonthStats.totalExpense)}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-900 p-3 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-gray-400 block">과세표준 소득금액 (순수익)</span>
+                      <span className="text-lg font-black text-yellow-400">{formatMoney(currentMonthStats.netIncome)}</span>
+                    </div>
+                    <button
+                      onClick={() => setShowTaxModal(true)}
+                      className="px-3 py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs"
+                    >
+                      세무서 양식 추출
+                    </button>
                   </div>
                 </div>
               )}
 
-              {/* 음성 테스트 버튼 & 로그 */}
-              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--dim)" }}>실시간 안내 기록</span>
-                  <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => speakVoice("음성 안내 시스템이 정상 작동 중입니다.")}>🔊 스피커 테스트</button>
+              {/* 간편 달력 / 일별 목록 트리거 */}
+              <div className="bg-gray-800/60 p-4 rounded-2xl border border-gray-700/50 space-y-2">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-bold text-gray-300">일별 운행 기록 입력</span>
+                  <span className="text-[11px] text-gray-500">날짜를 눌러 상세 입력</span>
                 </div>
-                <div style={{ background: "var(--card-alt)", borderRadius: 10, padding: 10, fontSize: 11, color: "var(--dim)", maxHeight: 120, overflowY: "auto", lineHeight: 1.6 }}>
-                  {alertLogs.length > 0 ? alertLogs.map((log, i) => <div key={i}>{log}</div>) : "카메라 감지 대기 중..."}
-                </div>
-              </div>
-            </div>
-          )}
 
-          {/* --- [TAB 3: 고정비 직접 관리 & 백업 (화면 맞춤 개선)] --- */}
-          {tab === "report" && (
-            <div>
-              {/* 고정비 직접 관리 카드 */}
-              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "16px", marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800 }}>🔧 월 고정 지출 항목 관리</div>
-                  <span style={{ fontSize: 12, color: "var(--amber)", fontWeight: 700 }}>총 {won(monthStats.fixedSum)}</span>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="bg-gray-900 border border-gray-700 px-3 py-2 rounded-xl text-sm font-semibold flex-1 text-white focus:outline-none"
+                  />
+                  <button
+                    onClick={() => setShowDailyModal(true)}
+                    className="px-4 py-2 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow"
+                  >
+                    기록 작성 / 수정
+                  </button>
                 </div>
-                
-                {/* 등록된 고정비 목록 & 삭제 버튼 */}
-                <div style={{ marginBottom: 14 }}>
-                  {fixedCosts.length === 0 ? (
-                    <div style={{ fontSize: 12, color: "var(--dim)", textAlign: "center", padding: "12px 0" }}>등록된 고정비가 없습니다. 아래에서 추가해 보세요!</div>
-                  ) : (
-                    fixedCosts.map((item) => (
-                      <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-                        <span style={{ fontWeight: 600 }}>{item.name}</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontWeight: 700, color: "var(--amber)" }}>{won(item.amount)}</span>
-                          <button 
-                            onClick={() => handleDeleteFixedCost(item.id)}
-                            style={{ background: "rgba(217,83,79,0.2)", color: "var(--red)", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 11, cursor: "pointer", fontWeight: 700 }}
-                          >
-                            삭제
-                          </button>
-                        </div>
+
+                {/* 해당 일자 요약 미리보기 */}
+                {(() => {
+                  const r = appData[appData.activeTab].records[selectedDate];
+                  if (!r) {
+                    return <div className="text-xs text-gray-500 pt-1 text-center">등록된 운행 기록이 없습니다.</div>;
+                  }
+                  if (r.isHoliday) {
+                    return <div className="text-xs text-yellow-500 font-bold pt-1 text-center">🌴 [휴무일 지정됨]</div>;
+                  }
+                  return (
+                    <div className="bg-gray-900 p-2.5 rounded-xl text-xs space-y-1 mt-2">
+                      <div className="flex justify-between text-gray-300">
+                        <span>매출액:</span>
+                        <span className="font-bold text-yellow-400">
+                          {appData.activeTab === 'corporate'
+                            ? formatMoney(r.revenue)
+                            : formatMoney(Number(r.cardRev || 0) + Number(r.cashRev || 0))}
+                        </span>
                       </div>
-                    ))
-                  )}
-                </div>
-
-                {/* 고정비 신규 추가 입력폼 (모바일 최적화 레이아웃) */}
-                <div style={{ background: "var(--card-alt)", borderRadius: 12, padding: "12px", border: "1px dashed var(--border)" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--amber)", marginBottom: 8 }}>+ 새 고정비 항목 추가</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      <input 
-                        placeholder="항목명 (예: 조합비)" 
-                        value={newCostName} 
-                        onChange={(e) => setNewCostName(e.target.value)} 
-                        style={{ width: "100%", minWidth: 0, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px", color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }}
-                      />
-                      <input 
-                        type="number" 
-                        placeholder="금액 (원)" 
-                        value={newCostAmount} 
-                        onChange={(e) => setNewCostAmount(e.target.value)} 
-                        style={{ width: "100%", minWidth: 0, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px", color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }}
-                      />
+                      {r.memo && <div className="text-gray-400 text-[11px]">메모: {r.memo}</div>}
                     </div>
-                    <button className="btn btn-primary" style={{ width: "100%", padding: "10px 0", fontSize: 13 }} onClick={handleAddFixedCost}>
-                      + 고정비 항목 추가하기
-                    </button>
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
 
-              {/* 백업/복원 카드 */}
-              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "16px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>💾 데이터 안전 백업 / 복원</div>
-                <button className="btn btn-secondary" style={{ width: "100%", padding: "12px 0", marginBottom: 8, fontSize: 13 }} onClick={handleBackupExport}>
-                  📥 백업 파일 저장하기 (JSON)
+              {/* 데이터 백업 / 복원 섹션 */}
+              <div className="pt-2 flex gap-2">
+                <button
+                  onClick={exportBackup}
+                  className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold rounded-xl text-xs border border-gray-700"
+                >
+                  데이터 백업 (저장)
                 </button>
-                <label className="btn btn-secondary" style={{ width: "100%", padding: "12px 0", fontSize: 13, cursor: "pointer", display: "flex" }}>
-                  📤 백업 파일 불러오기 (복원)
-                  <input type="file" accept=".json" onChange={handleBackupImport} style={{ display: "none" }} />
+                <label className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold rounded-xl text-xs border border-gray-700 text-center cursor-pointer">
+                  데이터 복원 (열기)
+                  <input type="file" accept=".json" onChange={importBackup} className="hidden" />
                 </label>
               </div>
             </div>
           )}
 
-          {/* --- [TAB 4: 설정 모달] --- */}
-          {tab === "settings" && (
-            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "18px" }}>
-              <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 14 }}>⚙️ 기사 기본 정보 설정</div>
-              <div className="field-label">운행 형태</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-                <button className={`btn ${profile.type==='corporate'?'btn-primary':'btn-secondary'}`} style={{ padding: "10px 0" }} onClick={() => setProfile({...profile, type: "corporate"})}>법인택시</button>
-                <button className={`btn ${profile.type==='personal'?'btn-primary':'btn-secondary'}`} style={{ padding: "10px 0" }} onClick={() => setProfile({...profile, type: "personal"})}>개인택시</button>
-              </div>
-
-              <div className="field-label">차량번호</div>
-              <input className="input-box" value={profile.vehicleNumber} onChange={(e) => setProfile({...profile, vehicleNumber: e.target.value})} />
-
-              {profile.type === "corporate" && (
-                <>
-                  <div className="field-label">1일 기본 사납금 (원)</div>
-                  <input className="input-box" type="number" value={profile.dailyQuota} onChange={(e) => setProfile({...profile, dailyQuota: num(e.target.value)})} />
-                  <div className="field-label">4대보험 추정 공제율 (%)</div>
-                  <input className="input-box" type="number" value={profile.insuranceRate} onChange={(e) => setProfile({...profile, insuranceRate: num(e.target.value)})} />
-                </>
-              )}
-              <button className="btn btn-primary" style={{ width: "100%", padding: "12px 0", marginTop: 6 }} onClick={() => setTab("log")}>저장 완료</button>
-            </div>
+          {/* 일별 기록 입력 모달 */}
+          {showDailyModal && (
+            <DailyRecordModal
+              activeTab={appData.activeTab}
+              dateKey={selectedDate}
+              existingData={appData[appData.activeTab].records[selectedDate] || {}}
+              onSave={(data) => handleSaveRecord(selectedDate, data)}
+              onClose={() => setShowDailyModal(false)}
+            />
           )}
 
-          {/* --- [일별 기록 입력 모달] --- */}
-          {editModal && (
-            <div className="modal-overlay" onClick={() => setEditModal(false)}>
-              <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <span style={{ fontWeight: 800, fontSize: 16 }}>{selectedDate} 기록</span>
-                  <button className="btn btn-secondary" style={{ padding: "4px 8px" }} onClick={() => setDraft({...draft, holiday: !draft.holiday})}>
-                    {draft.holiday ? "🔴 휴무 해제" : "🌴 휴무 지정"}
-                  </button>
+          {/* 개인택시 세무서 제출 텍스트 모달 */}
+          {showTaxModal && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-sm font-bold text-yellow-400">세무서 제출 양식 추출</h3>
+                  <button onClick={() => setShowTaxModal(false)} className="text-gray-400 text-lg font-bold">✕</button>
                 </div>
-
-                {!draft.holiday ? (
-                  <>
-                    <div className="field-label">총 매출 (원)</div>
-                    <input className="input-box" type="number" placeholder="예: 250000" value={draft.revenue} onChange={(e) => setDraft({...draft, revenue: e.target.value})} />
-                    <div className="field-label">연료비 / 충전비 (원)</div>
-                    <input className="input-box" type="number" placeholder="예: 35000" value={draft.fuel} onChange={(e) => setDraft({...draft, fuel: e.target.value})} />
-                    {profile.type === "corporate" && (
-                      <>
-                        <div className="field-label">운행 콜 수</div>
-                        <input className="input-box" type="number" placeholder="예: 16" value={draft.tripCount} onChange={(e) => setDraft({...draft, tripCount: e.target.value})} />
-                      </>
-                    )}
-                    <div className="field-label">특이사항 메모</div>
-                    <textarea className="input-box" rows="2" placeholder="정비, 세차, 날씨 등" value={draft.memo} onChange={(e) => setDraft({...draft, memo: e.target.value})} />
-                  </>
-                ) : (
-                  <div style={{ textAlign: "center", padding: "20px 0", color: "var(--red)", fontWeight: 700 }}>휴무일로 지정되었습니다.</div>
-                )}
-
-                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                  <button className="btn btn-secondary" style={{ flex: 1, padding: "12px 0" }} onClick={() => setEditModal(false)}>취소</button>
-                  <button className="btn btn-primary" style={{ flex: 1, padding: "12px 0" }} onClick={saveDayRecord}>저장</button>
+                <textarea
+                  readOnly
+                  value={taxReportText}
+                  className="w-full h-64 bg-gray-950 text-gray-200 text-xs font-mono p-3 rounded-xl border border-gray-800 focus:outline-none resize-none"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(taxReportText);
+                      alert('클립보드에 복사되었습니다. 세무사 또는 홈택스 입력 시 활용하세요.');
+                    }}
+                    className="flex-1 py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs"
+                  >
+                    내용 전체 복사
+                  </button>
+                  <button
+                    onClick={() => setShowTaxModal(false)}
+                    className="px-4 py-2.5 bg-gray-800 text-gray-300 font-bold rounded-xl text-xs"
+                  >
+                    닫기
+                  </button>
                 </div>
               </div>
             </div>
@@ -565,7 +730,209 @@
       );
     }
 
-    const root = ReactDOM.createRoot(document.getElementById("root"));
+    // --- 일별 운행기록 작성 모달 컴포넌트 ---
+    function DailyRecordModal({ activeTab, dateKey, existingData, onSave, onClose }) {
+      const [isHoliday, setIsHoliday] = useState(existingData.isHoliday || false);
+      const [memo, setMemo] = useState(existingData.memo || '');
+
+      // 법인 폼 상태
+      const [revenue, setRevenue] = useState(existingData.revenue || '');
+      const [gas, setGas] = useState(existingData.gas || '');
+      const [driverExpense, setDriverExpense] = useState(existingData.driverExpense || '');
+
+      // 개인 폼 상태
+      const [cardRev, setCardRev] = useState(existingData.cardRev || '');
+      const [cashRev, setCashRev] = useState(existingData.cashRev || '');
+      const [privGas, setPrivGas] = useState(existingData.gas || '');
+      const [toll, setToll] = useState(existingData.toll || '');
+      const [maint, setMaint] = useState(existingData.maint || '');
+      const [other, setOther] = useState(existingData.other || '');
+
+      const handleSave = () => {
+        if (activeTab === 'corporate') {
+          onSave({
+            isHoliday,
+            memo,
+            revenue: Number(revenue) || 0,
+            gas: Number(gas) || 0,
+            driverExpense: Number(driverExpense) || 0
+          });
+        } else {
+          onSave({
+            isHoliday,
+            memo,
+            cardRev: Number(cardRev) || 0,
+            cashRev: Number(cashRev) || 0,
+            gas: Number(privGas) || 0,
+            toll: Number(toll) || 0,
+            maint: Number(maint) || 0,
+            other: Number(other) || 0
+          });
+        }
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center pb-2 border-b border-gray-800">
+              <h3 className="text-sm font-bold text-yellow-400">{dateKey} 운행기록</h3>
+              <button onClick={onClose} className="text-gray-400 font-bold text-lg">✕</button>
+            </div>
+
+            {/* 휴무 체크 */}
+            <label className="flex items-center gap-2 bg-gray-950 p-2.5 rounded-xl border border-gray-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isHoliday}
+                onChange={(e) => setIsHoliday(e.target.checked)}
+                className="w-4 h-4 rounded text-yellow-500 focus:ring-0"
+              />
+              <span className="text-xs font-bold text-gray-300">이 날은 운행하지 않고 휴무했습니다</span>
+            </label>
+
+            {!isHoliday && (
+              <div className="space-y-3">
+                {activeTab === 'corporate' ? (
+                  /* 법인택시 입력 폼 */
+                  <>
+                    <div>
+                      <label className="text-xs text-gray-400 block mb-1">당일 운행 매출액</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={revenue}
+                        onChange={(e) => setRevenue(e.target.value)}
+                        className="w-full bg-gray-950 border border-gray-700 p-2 text-sm rounded-xl text-right font-semibold text-white focus:border-yellow-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-blue-400 block mb-1">가스 충전비 (회사부담 참고용)</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={gas}
+                        onChange={(e) => setGas(e.target.value)}
+                        className="w-full bg-gray-950 border border-gray-700 p-2 text-sm rounded-xl text-right font-semibold text-white focus:border-yellow-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-orange-400 block mb-1">기타 기사부담 경비 (식대/세차/통행료 등)</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={driverExpense}
+                        onChange={(e) => setDriverExpense(e.target.value)}
+                        className="w-full bg-gray-950 border border-gray-700 p-2 text-sm rounded-xl text-right font-semibold text-white focus:border-yellow-500 focus:outline-none"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  /* 개인택시 입력 폼 */
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] text-gray-400 block mb-1">카드/앱 결제 매출</label>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={cardRev}
+                          onChange={(e) => setCardRev(e.target.value)}
+                          className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-gray-400 block mb-1">현금 수입 매출</label>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={cashRev}
+                          onChange={(e) => setCashRev(e.target.value)}
+                          className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] text-gray-400 block mb-1">가스 충전비</label>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={privGas}
+                          onChange={(e) => setPrivGas(e.target.value)}
+                          className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-gray-400 block mb-1">도로 통행료</label>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={toll}
+                          onChange={(e) => setToll(e.target.value)}
+                          className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] text-gray-400 block mb-1">정비/소모품비</label>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={maint}
+                          onChange={(e) => setMaint(e.target.value)}
+                          className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-gray-400 block mb-1">기타 사업경비</label>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={other}
+                          onChange={(e) => setOther(e.target.value)}
+                          className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">운행 메모</label>
+                  <input
+                    type="text"
+                    placeholder="특이사항 메모"
+                    value={memo}
+                    onChange={(e) => setMemo(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-white focus:outline-none"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={handleSave}
+                className="flex-1 py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs"
+              >
+                저장 완료
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2.5 bg-gray-800 text-gray-300 font-bold rounded-xl text-xs"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
 </body>
