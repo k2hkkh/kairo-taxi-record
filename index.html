@@ -94,16 +94,53 @@
       return R * c;
     };
 
-    // 기본 단속 카메라 DB
-    const SAMPLE_CAMERAS = [
-      { id: 1, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 단속' },
-      { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 단속' },
-      { id: 3, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 단속' },
-      { id: 4, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 단속' },
-      { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '스쿨존 단속' }
+    // --- 확장된 단속 카메라 DB (천안·아산 및 주요 간선도로 실좌표 내장) ---
+    const ENFORCEMENT_CAMERAS = [
+      // 천안 도심 및 주요 교차로
+      { id: 101, lat: 36.8124, lon: 127.1085, limitSpeed: 50, desc: '불당동 번영로사거리 단속' },
+      { id: 102, lat: 36.8198, lon: 127.1565, limitSpeed: 50, desc: '신부동 천안종합터미널앞 단속' },
+      { id: 103, lat: 36.8322, lon: 127.1488, limitSpeed: 50, desc: '두정역입구 교차로 신호과속' },
+      { id: 104, lat: 36.8285, lon: 127.1235, limitSpeed: 60, desc: '백석동 백석사거리 신호단속' },
+      { id: 105, lat: 36.7985, lon: 127.1285, limitSpeed: 50, desc: '쌍용사거리 서부대로 단속' },
+      { id: 106, lat: 36.7865, lon: 127.1585, limitSpeed: 50, desc: '청수동 행정타운 교차로단속' },
+      { id: 107, lat: 36.8155, lon: 127.1402, limitSpeed: 50, desc: '성정동 성정지하차도앞 단속' },
+      { id: 108, lat: 36.8455, lon: 127.1355, limitSpeed: 50, desc: '성성동 업성수변로 과속단속' },
+      
+      // 천안 스쿨존 (어린이보호구역 30km/h)
+      { id: 109, lat: 36.7925, lon: 127.1185, limitSpeed: 30, desc: '쌍용초/나사렛대 스쿨존 단속' },
+      { id: 110, lat: 36.8145, lon: 127.1125, limitSpeed: 30, desc: '불당초교앞 어린이보호구역' },
+      { id: 111, lat: 36.8215, lon: 127.1355, limitSpeed: 30, desc: '성정초교앞 스쿨존 단속' },
+      { id: 112, lat: 36.7845, lon: 127.1485, limitSpeed: 30, desc: '청수초교앞 어린이보호구역' },
+
+      // 아산 도심 및 탕정/배방권
+      { id: 201, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 교차로 신호단속' },
+      { id: 202, lat: 36.7802, lon: 127.0045, limitSpeed: 50, desc: '온양온천역 광장앞 신호단속' },
+      { id: 203, lat: 36.7775, lon: 127.0525, limitSpeed: 50, desc: '배방역삼거리 모산로 단속' },
+      { id: 204, lat: 36.8105, lon: 127.0625, limitSpeed: 60, desc: '탕정 디스플레이시티대로 단속' },
+      { id: 205, lat: 36.7925, lon: 127.0125, limitSpeed: 60, desc: '충무교차로 충무로 과속단속' },
+      { id: 206, lat: 36.7685, lon: 127.0655, limitSpeed: 60, desc: '배방 온천대로 신호과속' },
+      { id: 207, lat: 36.7955, lon: 127.0855, limitSpeed: 60, desc: '이순신대로 천안아산경계 단속' },
+      { id: 208, lat: 36.9155, lon: 127.0425, limitSpeed: 50, desc: '둔포면 아산밸리로 교차로' },
+
+      // 아산 스쿨존 (어린이보호구역 30km/h)
+      { id: 209, lat: 36.7985, lon: 127.0555, limitSpeed: 30, desc: '탕정초교앞 어린이보호구역' },
+      { id: 210, lat: 36.7725, lon: 127.0185, limitSpeed: 30, desc: '온양초교앞 스쿨존 단속' },
+      { id: 211, lat: 36.7745, lon: 127.0585, limitSpeed: 30, desc: '배방초교앞 어린이보호구역' },
+
+      // 천안-아산 주요 국도 및 자동차전용도로
+      { id: 301, lat: 36.7825, lon: 127.1215, limitSpeed: 60, desc: '21번국도 신방삼거리 단속' },
+      { id: 302, lat: 36.7615, lon: 126.9855, limitSpeed: 70, desc: '21번국도 장존교차로 단속' },
+      { id: 303, lat: 36.7755, lon: 127.1685, limitSpeed: 70, desc: '남부대로 유량교차로 과속단속' },
+      { id: 304, lat: 36.8725, lon: 127.1515, limitSpeed: 70, desc: '1번국도 직산사거리 단속' },
+      { id: 305, lat: 36.8355, lon: 127.0355, limitSpeed: 80, desc: '43번국도 세종평택로 진입로' },
+
+      // 서울/수도권 주요 랜드마크 샘플
+      { id: 401, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 신호·과속 단속' },
+      { id: 402, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 과속단속' },
+      { id: 403, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 신호·과속 단속' }
     ];
 
-    // 스토리지 기본 스키마
+    // 스토리지 표준 기본값
     const DEFAULT_STORAGE = {
       activeType: 'corporate',
       corporate: {
@@ -129,7 +166,7 @@
       speedingLogs: []
     };
 
-    // 안전 데이터 로더
+    // 안전 데이터 로더 (기존 저장 데이터 마이그레이션)
     const loadSafeData = () => {
       try {
         let saved = null;
@@ -137,7 +174,7 @@
           const raw = localStorage.getItem(`K_TAXI_RECORD_DATA_V${i}`);
           if (raw) { saved = raw; break; }
         }
-        if (!saved) saved = localStorage.getItem('K_TAXI_RECORD_DATA_V12') || localStorage.getItem('K_TAXI_RECORD_DATA_V3');
+        if (!saved) saved = localStorage.getItem('K_TAXI_RECORD_DATA_V12');
 
         if (saved) {
           const p = JSON.parse(saved);
@@ -226,7 +263,7 @@
       const lastAlertedCamRef = useRef(null);
       const lastLoggedCamRef = useRef(null);
 
-      // 스토리지 안전 동기화
+      // 스토리지 동기화
       useEffect(() => {
         try {
           localStorage.setItem('K_TAXI_RECORD_DATA_V12', JSON.stringify(appData));
@@ -269,7 +306,7 @@
         }
       };
 
-      // GPS 감시
+      // GPS 감시 및 고속 반경 연산 필터링
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -284,11 +321,14 @@
             let closest = null;
             let minDist = Infinity;
 
-            SAMPLE_CAMERAS.forEach((cam) => {
-              const dist = getDistanceMeters(userLat, userLon, cam.lat, cam.lon);
-              if (dist < 600 && dist < minDist) {
-                minDist = Math.round(dist);
-                closest = { ...cam, distance: minDist };
+            // 1차 반경(0.01도, 약 1.1km) 거친 필터링 후 정밀 하버사인 계산 (연산 최적화)
+            ENFORCEMENT_CAMERAS.forEach((cam) => {
+              if (Math.abs(userLat - cam.lat) < 0.015 && Math.abs(userLon - cam.lon) < 0.015) {
+                const dist = getDistanceMeters(userLat, userLon, cam.lat, cam.lon);
+                if (dist < 600 && dist < minDist) {
+                  minDist = Math.round(dist);
+                  closest = { ...cam, distance: minDist };
+                }
               }
             });
 
@@ -303,6 +343,7 @@
                 lastAlertedCamRef.current = `${closest.id}-500`;
               }
 
+              // 단속 지점 통과 시 과속 감지 자동 기록
               if (closest.distance <= 45 && speedKmh > closest.limitSpeed) {
                 if (lastLoggedCamRef.current !== closest.id) {
                   const overKm = speedKmh - closest.limitSpeed;
@@ -390,7 +431,7 @@
         }));
       };
 
-      // 고정비 공제 관리
+      // 고정비 관리
       const handleAddFixedExpense = () => {
         const newItem = { id: Date.now(), name: '항목추가', amount: 0 };
         setAppData(prev => ({
@@ -655,7 +696,7 @@
       return (
         <div className="max-w-md mx-auto w-full min-h-screen flex flex-col bg-slate-950 border-x border-slate-800 relative">
           
-          {/* 상단 간결 헤더 */}
+          {/* 상단 헤더 */}
           <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
             <div className="flex items-center gap-2">
               <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
@@ -664,7 +705,6 @@
               </span>
             </div>
 
-            {/* 법인 / 개인 전환 토글 */}
             <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
               <button
                 onClick={() => setVehicleType('corporate')}
@@ -685,7 +725,7 @@
             </div>
           </header>
 
-          {/* 메인 뷰 컨텐츠 */}
+          {/* 메인 뷰 */}
           <main className="flex-1 p-3.5 pb-24 overflow-y-auto">
             
             {/* 탭 1: 운행일지 & 달력 */}
@@ -739,7 +779,7 @@
                   </div>
                 </div>
 
-                {/* 미니 캘린더 */}
+                {/* 달력 */}
                 <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
                   <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
                     <span className="text-red-400">일</span>
@@ -797,7 +837,7 @@
                   </div>
                 </div>
 
-                {/* 일별 기록 리스트 */}
+                {/* 일별 기록 */}
                 <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800 space-y-2">
                   <div className="flex justify-between items-center pb-1">
                     <span className="text-xs font-bold text-slate-300">운행 일지 ({sortedMonthEntries.length}건)</span>
@@ -857,7 +897,7 @@
               </div>
             )}
 
-            {/* 탭 2: 월간 급여 정산서 */}
+            {/* 탭 2: 월간 정산 */}
             {currentTab === 'settlement' && (
               <div className="space-y-3.5">
                 <div className="flex justify-between items-center bg-slate-900 p-3 rounded-2xl border border-slate-800">
@@ -961,12 +1001,12 @@
                   ) : (
                     <span className="text-xs text-green-400 flex items-center gap-1 font-semibold">
                       <span className="w-2 h-2 bg-green-400 rounded-full animate-ping"></span>
-                      음성 활성
+                      음성 활성 (DB {ENFORCEMENT_CAMERAS.length}개)
                     </span>
                   )}
                 </div>
 
-                {/* 중앙 속도계 */}
+                {/* 속도계 및 알림 */}
                 <div className={`flex flex-col items-center justify-center my-auto transition-transform ${hudMirrored ? 'hud-mirror' : ''}`}>
                   <div className="h-8 flex items-center text-center mb-2">
                     {nearestCamera ? (
@@ -1076,7 +1116,6 @@
                   )}
                 </div>
 
-                {/* 단속 의심 이력 버튼 */}
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
                   <div>
                     <span className="text-xs font-bold text-slate-300 block">과속 단속 의심 이력</span>
@@ -1090,7 +1129,6 @@
                   </button>
                 </div>
 
-                {/* 데이터 백업 / 복원 */}
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-2.5">
                   <span className="text-xs font-bold text-slate-300 block">장부 데이터 백업 & 복원</span>
                   <div className="flex gap-2">
@@ -1110,7 +1148,7 @@
             )}
           </main>
 
-          {/* 하단 4대 탭 바 */}
+          {/* 하단 탭 바 */}
           <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
             <button
               onClick={() => setCurrentTab('calendar')}
@@ -1153,7 +1191,7 @@
             />
           )}
 
-          {/* 고정 수당 모달 */}
+          {/* 수당 모달 */}
           {showFixedAllowanceModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
@@ -1189,7 +1227,7 @@
             </div>
           )}
 
-          {/* 회사 고정비 모달 */}
+          {/* 고정비 모달 */}
           {showFixedExpenseModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
