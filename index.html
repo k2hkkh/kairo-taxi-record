@@ -6,12 +6,20 @@
   <title>K-TAXI 운행기록장 & 안전운행 HUD</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React & ReactDOM CDN -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel CDN -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- React 18 & ReactDOM (Cloudflare CDN) -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel Standalone (Cloudflare CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
   <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: #020617;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
     @keyframes pulse-slow {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.4; }
@@ -27,8 +35,12 @@
     }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen font-sans select-none antialiased flex flex-col justify-between">
-  <div id="root"></div>
+<body class="select-none antialiased min-h-screen bg-slate-950">
+  <div id="root">
+    <div class="min-h-screen flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
+      K-TAXI 시스템 로딩 중...
+    </div>
+  </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
@@ -67,7 +79,7 @@
       return `${date} ${time}`;
     };
 
-    // 하버사인 거리 계산 공식
+    // 하버사인 거리 계산
     const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371e3;
       const φ1 = (lat1 * Math.PI) / 180;
@@ -82,7 +94,7 @@
       return R * c;
     };
 
-    // 단속 카메라 DB
+    // 기본 단속 카메라 DB
     const SAMPLE_CAMERAS = [
       { id: 1, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 단속' },
       { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 단속' },
@@ -91,9 +103,9 @@
       { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '스쿨존 단속' }
     ];
 
-    // 스토리지 표준 기본값
+    // 스토리지 기본 스키마
     const DEFAULT_STORAGE = {
-      activeType: 'corporate', // 'corporate' | 'private'
+      activeType: 'corporate',
       corporate: {
         carNumber: '',
         dailyDeposit: 201000,
@@ -117,14 +129,15 @@
       speedingLogs: []
     };
 
-    // 안전한 로컬 스토리지 로더 (구버전 데이터 자동 통합)
+    // 안전 데이터 로더
     const loadSafeData = () => {
       try {
-        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V12') ||
-                      localStorage.getItem('K_TAXI_RECORD_DATA_V11') ||
-                      localStorage.getItem('K_TAXI_RECORD_DATA_V10') ||
-                      localStorage.getItem('K_TAXI_RECORD_DATA_V9') ||
-                      localStorage.getItem('K_TAXI_RECORD_DATA_V8');
+        let saved = null;
+        for (let i = 15; i >= 1; i--) {
+          const raw = localStorage.getItem(`K_TAXI_RECORD_DATA_V${i}`);
+          if (raw) { saved = raw; break; }
+        }
+        if (!saved) saved = localStorage.getItem('K_TAXI_RECORD_DATA_V12') || localStorage.getItem('K_TAXI_RECORD_DATA_V3');
 
         if (saved) {
           const p = JSON.parse(saved);
@@ -150,7 +163,7 @@
           };
         }
       } catch (e) {
-        console.warn('Storage Parse Fallback', e);
+        console.warn('Storage fallback', e);
       }
       return DEFAULT_STORAGE;
     };
@@ -190,9 +203,7 @@
 
     function App() {
       const [appData, setAppData] = useState(loadSafeData);
-
-      // 하단 4개 탭 모드 ('calendar' | 'settlement' | 'hud' | 'settings')
-      const [currentTab, setCurrentTab] = useState('calendar');
+      const [currentTab, setCurrentTab] = useState('calendar'); // 'calendar' | 'settlement' | 'hud' | 'settings'
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
         const now = new Date();
@@ -215,38 +226,50 @@
       const lastAlertedCamRef = useRef(null);
       const lastLoggedCamRef = useRef(null);
 
-      // 스토리지 동기화
+      // 스토리지 안전 동기화
       useEffect(() => {
-        localStorage.setItem('K_TAXI_RECORD_DATA_V12', JSON.stringify(appData));
+        try {
+          localStorage.setItem('K_TAXI_RECORD_DATA_V12', JSON.stringify(appData));
+        } catch (e) {
+          console.warn('Storage Save Warning', e);
+        }
       }, [appData]);
 
       // TTS 발화
       const speak = (text) => {
         if (!('speechSynthesis' in window)) return;
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'ko-KR';
-        utterance.rate = 1.05;
-        utterance.pitch = 1.0;
-        utterance.volume = 1.0;
+        try {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'ko-KR';
+          utterance.rate = 1.05;
+          utterance.pitch = 1.0;
+          utterance.volume = 1.0;
 
-        const voices = window.speechSynthesis.getVoices();
-        const koVoice = voices.find(v => v.lang.includes('ko'));
-        if (koVoice) utterance.voice = koVoice;
+          const voices = window.speechSynthesis.getVoices();
+          const koVoice = voices.find(v => v.lang.includes('ko'));
+          if (koVoice) utterance.voice = koVoice;
 
-        window.speechSynthesis.speak(utterance);
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          console.warn('TTS Error', e);
+        }
       };
 
       const initAudioChannel = () => {
         if ('speechSynthesis' in window) {
-          const dummy = new SpeechSynthesisUtterance('');
-          window.speechSynthesis.speak(dummy);
-          setAudioReady(true);
-          speak('안전운행 음성 안내가 활성화되었습니다.');
+          try {
+            const dummy = new SpeechSynthesisUtterance('');
+            window.speechSynthesis.speak(dummy);
+            setAudioReady(true);
+            speak('안전운행 음성 안내가 활성화되었습니다.');
+          } catch (e) {
+            setAudioReady(true);
+          }
         }
       };
 
-      // GPS 감시 루프
+      // GPS 감시
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -313,7 +336,7 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, []);
 
-      const activeType = appData.activeType === 'private' ? 'private' : 'corporate';
+      const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
 
       const setVehicleType = (type) => {
         setAppData(prev => ({ ...prev, activeType: type }));
@@ -322,14 +345,14 @@
       const handleCarNumberChange = (val) => {
         setAppData(prev => ({
           ...prev,
-          [activeType]: { ...prev[activeType], carNumber: val }
+          [activeType]: { ...(prev[activeType] || {}), carNumber: val }
         }));
       };
 
       const handleCorporateConfigChange = (key, val) => {
         setAppData(prev => ({
           ...prev,
-          corporate: { ...prev.corporate, [key]: Number(val) || 0 }
+          corporate: { ...(prev.corporate || {}), [key]: Number(val) || 0 }
         }));
       };
 
@@ -340,7 +363,7 @@
           ...prev,
           corporate: {
             ...prev.corporate,
-            fixedAllowanceItems: [...(prev.corporate.fixedAllowanceItems || []), newItem]
+            fixedAllowanceItems: [...(prev.corporate?.fixedAllowanceItems || []), newItem]
           }
         }));
       };
@@ -350,7 +373,7 @@
           ...prev,
           corporate: {
             ...prev.corporate,
-            fixedAllowanceItems: (prev.corporate.fixedAllowanceItems || []).map(item =>
+            fixedAllowanceItems: (prev.corporate?.fixedAllowanceItems || []).map(item =>
               item.id === id ? { ...item, [field]: field === 'amount' ? Number(value) : value } : item
             )
           }
@@ -362,7 +385,7 @@
           ...prev,
           corporate: {
             ...prev.corporate,
-            fixedAllowanceItems: (prev.corporate.fixedAllowanceItems || []).filter(item => item.id !== id)
+            fixedAllowanceItems: (prev.corporate?.fixedAllowanceItems || []).filter(item => item.id !== id)
           }
         }));
       };
@@ -374,7 +397,7 @@
           ...prev,
           corporate: {
             ...prev.corporate,
-            fixedExpenseItems: [...(prev.corporate.fixedExpenseItems || []), newItem]
+            fixedExpenseItems: [...(prev.corporate?.fixedExpenseItems || []), newItem]
           }
         }));
       };
@@ -384,7 +407,7 @@
           ...prev,
           corporate: {
             ...prev.corporate,
-            fixedExpenseItems: (prev.corporate.fixedExpenseItems || []).map(item =>
+            fixedExpenseItems: (prev.corporate?.fixedExpenseItems || []).map(item =>
               item.id === id ? { ...item, [field]: field === 'amount' ? Number(value) : value } : item
             )
           }
@@ -396,7 +419,7 @@
           ...prev,
           corporate: {
             ...prev.corporate,
-            fixedExpenseItems: (prev.corporate.fixedExpenseItems || []).filter(item => item.id !== id)
+            fixedExpenseItems: (prev.corporate?.fixedExpenseItems || []).filter(item => item.id !== id)
           }
         }));
       };
@@ -441,19 +464,19 @@
 
       // 수당 & 공제 자동합산
       const totalFixedAllowances = useMemo(() => {
-        const items = appData.corporate?.fixedAllowanceItems || [];
+        const items = appData?.corporate?.fixedAllowanceItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      }, [appData.corporate?.fixedAllowanceItems]);
+      }, [appData?.corporate?.fixedAllowanceItems]);
 
       const totalFixedExpenses = useMemo(() => {
-        const items = appData.corporate?.fixedExpenseItems || [];
+        const items = appData?.corporate?.fixedExpenseItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      }, [appData.corporate?.fixedExpenseItems]);
+      }, [appData?.corporate?.fixedExpenseItems]);
 
       // 월별 정산 통계
       const currentMonthStats = useMemo(() => {
         const records = appData[activeType]?.records || {};
-        const entries = Object.entries(records).filter(([date]) => date.startsWith(currentYearMonth));
+        const entries = Object.entries(records).filter(([date]) => date && String(date).startsWith(currentYearMonth));
 
         let workDays = 0;
         let holidayDays = 0;
@@ -626,7 +649,7 @@
 
       const currentRecords = appData[activeType]?.records || {};
       const sortedMonthEntries = Object.entries(currentRecords)
-        .filter(([date]) => date.startsWith(currentYearMonth))
+        .filter(([date]) => date && String(date).startsWith(currentYearMonth))
         .sort(([a], [b]) => a.localeCompare(b));
 
       return (
@@ -668,7 +691,6 @@
             {/* 탭 1: 운행일지 & 달력 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3.5">
-                {/* 월 선택 바 */}
                 <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
                   <button
                     onClick={() => {
@@ -698,7 +720,6 @@
                   </button>
                 </div>
 
-                {/* 핵심 실시간 요약 카드 */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
                     <span className="text-[11px] text-slate-400 block font-semibold">이번 달 총 매출</span>
@@ -853,7 +874,6 @@
 
                 {activeType === 'corporate' ? (
                   <div className="space-y-3">
-                    {/* 회사 지급 내역 */}
                     <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2">
                       <div className="flex justify-between text-xs text-blue-400 font-bold border-b border-slate-800 pb-1.5">
                         <span>1. 회사 지급 내역 (세전 급여)</span>
@@ -869,7 +889,6 @@
                       </div>
                     </div>
 
-                    {/* 공제 내역 */}
                     <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2">
                       <div className="flex justify-between text-xs text-orange-400 font-bold border-b border-slate-800 pb-1.5">
                         <span>2. 공제 내역 합계</span>
@@ -885,7 +904,6 @@
                       </div>
                     </div>
 
-                    {/* 통장 실수령액 */}
                     <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-4 rounded-2xl border border-indigo-500/40 text-center space-y-1">
                       <span className="text-xs text-indigo-300 font-bold">회사 실지급액 (통장 입금액)</span>
                       <span className="text-2xl font-black text-green-400 block tracking-tight">
@@ -893,7 +911,6 @@
                       </span>
                     </div>
 
-                    {/* 기사 자부담 경비 및 최종 순수입 */}
                     <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2">
                       <div className="flex justify-between text-xs text-slate-400">
                         <span>당월 기사 자부담 경비 (식대/세차 등):</span>
@@ -906,7 +923,6 @@
                     </div>
                   </div>
                 ) : (
-                  /* 개인택시 정산 */
                   <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
                     <div className="flex justify-between text-xs text-slate-300">
                       <span>총 수입 (카드+현금):</span>
@@ -1409,7 +1425,8 @@
       );
     }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
+    const rootElement = document.getElementById('root');
+    const root = ReactDOM.createRoot(rootElement);
     root.render(<App />);
   </script>
 </body>
