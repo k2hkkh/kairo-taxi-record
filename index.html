@@ -32,8 +32,12 @@
 
     // --- 유틸리티 함수 (3자리 콤마 표기) ---
     const formatMoney = (val) => {
-      const num = Number(val) || 0;
+      const num = Number(String(val).replace(/[^0-9]/g, '')) || 0;
       return num.toLocaleString('ko-KR');
+    };
+
+    const parseMoneyInput = (val) => {
+      return Number(String(val).replace(/[^0-9]/g, '')) || 0;
     };
 
     const formatShortMoney = (val) => {
@@ -84,13 +88,13 @@
       { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '어린이보호구역 스쿨존 단속' }
     ];
 
-    // 스토리지 스키마 (법인/개인 격리 및 고정비 지출 설정)
+    // 스토리지 스키마 (기본 사납금: 201,000)
     const DEFAULT_STORAGE = {
-      activeTab: 'corporate', // 'corporate' | 'private'
+      activeTab: 'corporate',
       corporate: {
         carNumber: '',
-        baseDeposit: 201000,   // 기본 사납금
-        fixedExpenses: 0,      // 고정비 지출 (노조비, 상조회비 등)
+        baseDeposit: 201000,
+        fixedExpenses: 0,
         records: {}
       },
       private: {
@@ -102,27 +106,25 @@
 
     function App() {
       const [appData, setAppData] = useState(() => {
-        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V6');
+        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V7');
         if (saved) {
           try { return JSON.parse(saved); } catch (e) { return DEFAULT_STORAGE; }
         }
         return DEFAULT_STORAGE;
       });
 
-      const [viewMode, setViewMode] = useState('record'); // 'record' | 'hud'
+      const [viewMode, setViewMode] = useState('record');
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       });
 
-      // 모달 상태
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
       const [showSpeedLogModal, setShowSpeedLogModal] = useState(false);
       const [showCorporateNet, setShowCorporateNet] = useState(false);
 
-      // GPS & HUD 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [nearestCamera, setNearestCamera] = useState(null);
       const [hudMirrored, setHudMirrored] = useState(false);
@@ -131,12 +133,10 @@
       const lastAlertedCamRef = useRef(null);
       const lastLoggedCamRef = useRef(null);
 
-      // 스토리지 동기화
       useEffect(() => {
-        localStorage.setItem('K_TAXI_RECORD_DATA_V6', JSON.stringify(appData));
+        localStorage.setItem('K_TAXI_RECORD_DATA_V7', JSON.stringify(appData));
       }, [appData]);
 
-      // TTS 발화
       const speak = (text) => {
         if (!('speechSynthesis' in window)) return;
         window.speechSynthesis.cancel();
@@ -162,7 +162,7 @@
         }
       };
 
-      // GPS 감시 및 과속 감지
+      // GPS 감시 및 과속 기록
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -242,11 +242,12 @@
         }));
       };
 
-      // 법인 설정 변경 (기본 사납금, 고정비 지출)
-      const handleCorporateConfigChange = (key, val) => {
+      // 법인 설정 변경 (콤마 파싱 처리)
+      const handleCorporateConfigChange = (key, rawVal) => {
+        const parsed = parseMoneyInput(rawVal);
         setAppData(prev => ({
           ...prev,
-          corporate: { ...prev.corporate, [key]: Number(val) || 0 }
+          corporate: { ...prev.corporate, [key]: parsed }
         }));
       };
 
@@ -289,7 +290,7 @@
         }
       };
 
-      // 월별 통계 계산
+      // 월별 정산 통계
       const currentMonthStats = useMemo(() => {
         const tab = appData.activeTab;
         const records = appData[tab].records || {};
@@ -316,9 +317,7 @@
 
           const baseDeposit = Number(appData.corporate.baseDeposit || 0);
           const fixedExpenses = Number(appData.corporate.fixedExpenses || 0);
-          // 월수령액(월급여) = 기본사납금 - 고정비 (예: 상조회비, 노조비)
           const monthlySalary = baseDeposit - fixedExpenses;
-          // 최종 실제 순수입 = 월수령액(월급여) + 총매출 - 기사경비
           const netIncome = monthlySalary + totalRevenue - totalDriverExpense;
 
           return {
@@ -460,7 +459,7 @@
       return (
         <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-900 border-x border-gray-800">
           
-          {/* 상단 헤더 */}
+          {/* 헤더 */}
           <header className="p-4 bg-gray-950 border-b border-gray-800 flex items-center justify-between sticky top-0 z-30">
             <div className="flex items-center gap-2">
               <span className="bg-yellow-500 text-black text-xs font-black px-2 py-0.5 rounded">K-TAXI</span>
@@ -488,7 +487,7 @@
             </div>
           </header>
 
-          {/* 메인 뷰: HUD 모드 */}
+          {/* HUD 모드 */}
           {viewMode === 'hud' ? (
             <div className="flex-1 flex flex-col p-4 bg-black justify-between select-none">
               <div className="flex justify-between items-center">
@@ -555,7 +554,7 @@
               </div>
             </div>
           ) : (
-            /* 메인 뷰: 운행기록장 모드 */
+            /* 운행기록장 모드 */
             <div className="flex-1 p-4 space-y-4 overflow-y-auto">
               
               {/* 법인 / 개인 탭 */}
@@ -582,7 +581,7 @@
                 </button>
               </div>
 
-              {/* 차량번호 및 기준 설정 카드 */}
+              {/* 기본 설정 카드 (쉼표 3자리 포맷팅 완비) */}
               <div className="bg-gray-800/80 p-3.5 rounded-2xl border border-gray-700/60 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs text-gray-400 font-semibold">차량 번호</label>
@@ -600,19 +599,21 @@
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-gray-400">기본 사납금 (기사 직접입력)</span>
                       <input
-                        type="number"
-                        value={appData.corporate.baseDeposit}
+                        type="text"
+                        inputMode="numeric"
+                        value={formatMoney(appData.corporate.baseDeposit)}
                         onChange={(e) => handleCorporateConfigChange('baseDeposit', e.target.value)}
-                        className="bg-gray-900 border border-gray-700 px-2 py-0.5 text-xs rounded text-right w-28 text-white focus:outline-none focus:border-yellow-500"
+                        className="bg-gray-900 border border-gray-700 px-2 py-0.5 text-xs rounded text-right w-28 text-white focus:outline-none focus:border-yellow-500 font-semibold"
                       />
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-gray-400">고정비 지출 (노조비·상조회비 등)</span>
                       <input
-                        type="number"
-                        value={appData.corporate.fixedExpenses}
+                        type="text"
+                        inputMode="numeric"
+                        value={formatMoney(appData.corporate.fixedExpenses)}
                         onChange={(e) => handleCorporateConfigChange('fixedExpenses', e.target.value)}
-                        className="bg-gray-900 border border-gray-700 px-2 py-0.5 text-xs rounded text-right w-28 text-white focus:outline-none focus:border-yellow-500"
+                        className="bg-gray-900 border border-gray-700 px-2 py-0.5 text-xs rounded text-right w-28 text-white focus:outline-none focus:border-yellow-500 font-semibold"
                       />
                     </div>
                   </div>
@@ -655,7 +656,6 @@
                     <span className="text-gray-300 font-semibold">{formatMoney(currentMonthStats.totalGasCompany)} (회사지원)</span>
                   </div>
 
-                  {/* 기본사납금 - 고정비 = 월수령액(월급여) */}
                   <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800 space-y-1.5">
                     <div className="flex justify-between text-xs text-gray-400">
                       <span>기본 사납금:</span>
@@ -671,7 +671,6 @@
                     </div>
                   </div>
 
-                  {/* 매출 및 기사경비 */}
                   <div className="grid grid-cols-2 gap-2.5">
                     <div className="bg-gray-900/90 p-2.5 rounded-xl">
                       <span className="text-[11px] text-green-400 block font-semibold">이번 달 총매출 합산</span>
@@ -683,7 +682,6 @@
                     </div>
                   </div>
 
-                  {/* 실제 순수입 확인 버튼 */}
                   <button
                     onClick={() => setShowCorporateNet(!showCorporateNet)}
                     className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold rounded-xl text-xs transition"
@@ -872,7 +870,7 @@
             </div>
           )}
 
-          {/* 일별 기록 작성/수정 모달 */}
+          {/* 일별 기록 작성/수정 모달 (콤마 포맷팅 완비) */}
           {showDailyModal && (
             <DailyRecordModal
               activeTab={appData.activeTab}
@@ -971,21 +969,21 @@
       );
     }
 
-    // --- 일별 운행기록 작성 모달 ---
+    // --- 일별 운행기록 작성 모달 컴포넌트 ---
     function DailyRecordModal({ activeTab, dateKey, existingData, onSave, onClose }) {
       const [isHoliday, setIsHoliday] = useState(existingData.isHoliday || false);
       const [memo, setMemo] = useState(existingData.memo || '');
 
-      const [revenue, setRevenue] = useState(existingData.revenue || '');
-      const [gas, setGas] = useState(existingData.gas || '');
-      const [driverExpense, setDriverExpense] = useState(existingData.driverExpense || '');
+      const [revenue, setRevenue] = useState(existingData.revenue || 0);
+      const [gas, setGas] = useState(existingData.gas || 0);
+      const [driverExpense, setDriverExpense] = useState(existingData.driverExpense || 0);
 
-      const [cardRev, setCardRev] = useState(existingData.cardRev || '');
-      const [cashRev, setCashRev] = useState(existingData.cashRev || '');
-      const [privGas, setPrivGas] = useState(existingData.gas || '');
-      const [toll, setToll] = useState(existingData.toll || '');
-      const [maint, setMaint] = useState(existingData.maint || '');
-      const [other, setOther] = useState(existingData.other || '');
+      const [cardRev, setCardRev] = useState(existingData.cardRev || 0);
+      const [cashRev, setCashRev] = useState(existingData.cashRev || 0);
+      const [privGas, setPrivGas] = useState(existingData.gas || 0);
+      const [toll, setToll] = useState(existingData.toll || 0);
+      const [maint, setMaint] = useState(existingData.maint || 0);
+      const [other, setOther] = useState(existingData.other || 0);
 
       const handleSave = () => {
         if (activeTab === 'corporate') {
@@ -1035,30 +1033,33 @@
                     <div>
                       <label className="text-xs text-gray-400 block mb-1">당일 운행 총매출액</label>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
                         placeholder="0"
-                        value={revenue}
-                        onChange={(e) => setRevenue(e.target.value)}
+                        value={formatMoney(revenue)}
+                        onChange={(e) => setRevenue(parseMoneyInput(e.target.value))}
                         className="w-full bg-gray-950 border border-gray-700 p-2 text-sm rounded-xl text-right font-semibold text-white focus:border-yellow-500 focus:outline-none"
                       />
                     </div>
                     <div>
                       <label className="text-xs text-blue-400 block mb-1">가스 충전비 (회사부담 참고용)</label>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
                         placeholder="0"
-                        value={gas}
-                        onChange={(e) => setGas(e.target.value)}
+                        value={formatMoney(gas)}
+                        onChange={(e) => setGas(parseMoneyInput(e.target.value))}
                         className="w-full bg-gray-950 border border-gray-700 p-2 text-sm rounded-xl text-right font-semibold text-white focus:border-yellow-500 focus:outline-none"
                       />
                     </div>
                     <div>
                       <label className="text-xs text-orange-400 block mb-1">기타 기사부담 경비 (식대/세차/통행료 등)</label>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
                         placeholder="0"
-                        value={driverExpense}
-                        onChange={(e) => setDriverExpense(e.target.value)}
+                        value={formatMoney(driverExpense)}
+                        onChange={(e) => setDriverExpense(parseMoneyInput(e.target.value))}
                         className="w-full bg-gray-950 border border-gray-700 p-2 text-sm rounded-xl text-right font-semibold text-white focus:border-yellow-500 focus:outline-none"
                       />
                     </div>
@@ -1069,20 +1070,22 @@
                       <div>
                         <label className="text-[11px] text-gray-400 block mb-1">카드/앱 결제 매출</label>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           placeholder="0"
-                          value={cardRev}
-                          onChange={(e) => setCardRev(e.target.value)}
+                          value={formatMoney(cardRev)}
+                          onChange={(e) => setCardRev(parseMoneyInput(e.target.value))}
                           className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
                         />
                       </div>
                       <div>
                         <label className="text-[11px] text-gray-400 block mb-1">현금 수입 매출</label>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           placeholder="0"
-                          value={cashRev}
-                          onChange={(e) => setCashRev(e.target.value)}
+                          value={formatMoney(cashRev)}
+                          onChange={(e) => setCashRev(parseMoneyInput(e.target.value))}
                           className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
                         />
                       </div>
@@ -1092,20 +1095,22 @@
                       <div>
                         <label className="text-[11px] text-gray-400 block mb-1">가스 충전비</label>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           placeholder="0"
-                          value={privGas}
-                          onChange={(e) => setPrivGas(e.target.value)}
+                          value={formatMoney(privGas)}
+                          onChange={(e) => setPrivGas(parseMoneyInput(e.target.value))}
                           className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
                         />
                       </div>
                       <div>
                         <label className="text-[11px] text-gray-400 block mb-1">도로 통행료</label>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           placeholder="0"
-                          value={toll}
-                          onChange={(e) => setToll(e.target.value)}
+                          value={formatMoney(toll)}
+                          onChange={(e) => setToll(parseMoneyInput(e.target.value))}
                           className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
                         />
                       </div>
@@ -1115,20 +1120,22 @@
                       <div>
                         <label className="text-[11px] text-gray-400 block mb-1">정비/소모품비</label>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           placeholder="0"
-                          value={maint}
-                          onChange={(e) => setMaint(e.target.value)}
+                          value={formatMoney(maint)}
+                          onChange={(e) => setMaint(parseMoneyInput(e.target.value))}
                           className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
                         />
                       </div>
                       <div>
                         <label className="text-[11px] text-gray-400 block mb-1">기타 사업경비</label>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           placeholder="0"
-                          value={other}
-                          onChange={(e) => setOther(e.target.value)}
+                          value={formatMoney(other)}
+                          onChange={(e) => setOther(parseMoneyInput(e.target.value))}
                           className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-right font-semibold text-white"
                         />
                       </div>
