@@ -22,15 +22,19 @@
     .hud-mirror {
       transform: scaleY(-1);
     }
+    /* 하단 탭 바 safe area */
+    .pb-safe {
+      padding-bottom: env(safe-area-inset-bottom, 1rem);
+    }
   </style>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen font-sans select-none antialiased">
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans select-none antialiased flex flex-col justify-between">
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    // --- 통화 포맷팅 유틸리티 ---
+    // --- 유틸리티 함수 ---
     const formatMoney = (val) => {
       const num = Number(String(val).replace(/[^0-9]/g, '')) || 0;
       return num.toLocaleString('ko-KR');
@@ -64,7 +68,7 @@
       return `${date} ${time}`;
     };
 
-    // 하버사인 거리 계산 (단위: m)
+    // 하버사인 거리 계산
     const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371e3;
       const φ1 = (lat1 * Math.PI) / 180;
@@ -81,27 +85,27 @@
 
     // 기본 단속 카메라 DB
     const SAMPLE_CAMERAS = [
-      { id: 1, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 신호·과속 단속' },
-      { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 과속단속' },
-      { id: 3, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 신호·과속 단속' },
-      { id: 4, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 신호·과속 단속' },
-      { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '스쿨존 어린이보호구역 단속' }
+      { id: 1, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 단속' },
+      { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 단속' },
+      { id: 3, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 단속' },
+      { id: 4, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 단속' },
+      { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '스쿨존 단속' }
     ];
 
-    // 스토리지 기본 데이터 (급여명세서 3개월 실데이터 기반 기본값 세팅)
+    // 스토리지 기본 데이터 (급여명세서 실데이터 기반)
     const DEFAULT_STORAGE = {
-      activeTab: 'corporate',
+      activeType: 'corporate', // 'corporate' | 'private'
       corporate: {
         carNumber: '',
-        dailyDeposit: 201000,         // 1일 기준 사납금
-        deductionRate: 9.0,           // 4대보험/세금 평균 공제율 (8.8~9.3% 중간값 9.0% 기본 세팅)
-        fixedAllowanceItems: [        // 급여명세서 실데이터 수당 세트 (총 1,367,700원)
+        dailyDeposit: 201000,
+        deductionRate: 9.0,
+        fixedAllowanceItems: [
           { id: 1, name: '기본급', amount: 1181700 },
           { id: 2, name: '승무수당', amount: 130000 },
           { id: 3, name: '교육수당', amount: 21000 },
           { id: 4, name: '법정휴일수당', amount: 35000 }
         ],
-        fixedExpenseItems: [          // 급여명세서 실데이터 공제 항목
+        fixedExpenseItems: [
           { id: 1, name: '노조비', amount: 25000 },
           { id: 2, name: '상조회비', amount: 0 }
         ],
@@ -114,7 +118,7 @@
       speedingLogs: []
     };
 
-    // 스마트 금액 입력 컴포넌트 (원터치 전체선택 + 지움 ✕ 지원)
+    // 스마트 금액 입력 인풋
     function SmartMoneyInput({ value, onChange, placeholder = "0", className = "", colorClass = "text-white" }) {
       const numVal = Number(value) || 0;
       const displayVal = numVal > 0 ? numVal.toLocaleString('ko-KR') : '';
@@ -125,7 +129,7 @@
             <button
               type="button"
               onClick={() => onChange(0)}
-              className="absolute left-2 z-10 text-gray-400 hover:text-red-400 bg-gray-800/80 active:bg-gray-700 rounded-full w-5 h-5 flex items-center justify-center text-[11px] font-black leading-none"
+              className="absolute left-2 z-10 text-slate-400 hover:text-red-400 bg-slate-800 active:bg-slate-700 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-black"
               tabIndex={-1}
             >
               ✕
@@ -141,7 +145,7 @@
               const raw = e.target.value.replace(/[^0-9]/g, '');
               onChange(raw ? Number(raw) : 0);
             }}
-            className={`w-full bg-gray-950 border border-gray-700 p-2 text-sm rounded-xl text-right font-semibold ${colorClass} focus:border-yellow-500 focus:outline-none ${className}`}
+            className={`w-full bg-slate-900 border border-slate-700 p-2.5 text-sm rounded-xl text-right font-bold ${colorClass} focus:border-yellow-500 focus:outline-none ${className}`}
           />
         </div>
       );
@@ -149,7 +153,7 @@
 
     function App() {
       const [appData, setAppData] = useState(() => {
-        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V11');
+        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V12');
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
@@ -164,7 +168,9 @@
         return DEFAULT_STORAGE;
       });
 
-      const [viewMode, setViewMode] = useState('record');
+      // 네비게이션 탭 ('calendar' | 'settlement' | 'hud' | 'settings')
+      const [currentTab, setCurrentTab] = useState('calendar');
+      
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
         const now = new Date();
@@ -175,7 +181,6 @@
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
       const [showSpeedLogModal, setShowSpeedLogModal] = useState(false);
-      const [showCorporateNet, setShowCorporateNet] = useState(false);
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
 
@@ -189,7 +194,7 @@
       const lastLoggedCamRef = useRef(null);
 
       useEffect(() => {
-        localStorage.setItem('K_TAXI_RECORD_DATA_V11', JSON.stringify(appData));
+        localStorage.setItem('K_TAXI_RECORD_DATA_V12', JSON.stringify(appData));
       }, [appData]);
 
       // TTS 발화
@@ -218,6 +223,7 @@
         }
       };
 
+      // GPS Watcher
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -284,16 +290,15 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, []);
 
-      const setTab = (tab) => {
-        setAppData(prev => ({ ...prev, activeTab: tab }));
-        setShowCorporateNet(false);
+      const setVehicleType = (type) => {
+        setAppData(prev => ({ ...prev, activeType: type }));
       };
 
       const handleCarNumberChange = (val) => {
-        const tab = appData.activeTab;
+        const type = appData.activeType;
         setAppData(prev => ({
           ...prev,
-          [tab]: { ...prev[tab], carNumber: val }
+          [type]: { ...prev[type], carNumber: val }
         }));
       };
 
@@ -304,7 +309,7 @@
         }));
       };
 
-      // 1. 고정 수당 목록 관리
+      // 수당 관리
       const handleAddFixedAllowance = () => {
         const newItem = { id: Date.now(), name: '수당추가', amount: 0 };
         setAppData(prev => ({
@@ -338,7 +343,7 @@
         }));
       };
 
-      // 2. 회사 고정비 공제 목록 관리
+      // 고정비 공제 관리
       const handleAddFixedExpense = () => {
         const newItem = { id: Date.now(), name: '항목추가', amount: 0 };
         setAppData(prev => ({
@@ -372,14 +377,15 @@
         }));
       };
 
+      // 일별 기록 저장
       const handleSaveRecord = (dateKey, recordData) => {
-        const tab = appData.activeTab;
+        const type = appData.activeType;
         setAppData(prev => ({
           ...prev,
-          [tab]: {
-            ...prev[tab],
+          [type]: {
+            ...prev[type],
             records: {
-              ...prev[tab].records,
+              ...prev[type].records,
               [dateKey]: recordData
             }
           }
@@ -389,12 +395,12 @@
 
       const handleDeleteDailyRecord = (dateKey) => {
         if (!confirm(`${dateKey} 기록을 삭제하시겠습니까?`)) return;
-        const tab = appData.activeTab;
-        const updatedRecords = { ...appData[tab].records };
+        const type = appData.activeType;
+        const updatedRecords = { ...appData[type].records };
         delete updatedRecords[dateKey];
         setAppData(prev => ({
           ...prev,
-          [tab]: { ...prev[tab], records: updatedRecords }
+          [type]: { ...prev[type], records: updatedRecords }
         }));
       };
 
@@ -411,13 +417,12 @@
         }
       };
 
-      // 고정 수당 총 합계
+      // 자동 합산액 계산
       const totalFixedAllowances = useMemo(() => {
         const items = appData.corporate.fixedAllowanceItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       }, [appData.corporate.fixedAllowanceItems]);
 
-      // 회사 고정비 총 합계
       const totalFixedExpenses = useMemo(() => {
         const items = appData.corporate.fixedExpenseItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
@@ -425,14 +430,14 @@
 
       // 월별 정산 통계
       const currentMonthStats = useMemo(() => {
-        const tab = appData.activeTab;
-        const records = appData[tab].records || {};
+        const type = appData.activeType;
+        const records = appData[type].records || {};
         const entries = Object.entries(records).filter(([date]) => date.startsWith(currentYearMonth));
 
         let workDays = 0;
         let holidayDays = 0;
 
-        if (tab === 'corporate') {
+        if (type === 'corporate') {
           const dailyDeposit = Number(appData.corporate.dailyDeposit || 201000);
           const deductionRate = Number(appData.corporate.deductionRate || 9.0) / 100;
 
@@ -456,15 +461,10 @@
             }
           });
 
-          // 총 지급액 (세전 급여) = 고정 수당 합계 + 70% 초과 성과급
           const grossSalary = totalFixedAllowances + totalIncentive;
-          // 세금 및 4대보험 공제 추정액
           const taxAndInsurance = Math.round(grossSalary * deductionRate);
-          // 총 공제액 = 세금/보험료 + 고정비(노조비 등)
           const totalDeductions = taxAndInsurance + totalFixedExpenses;
-          // 회사 실지급액 (통장 실수령액)
           const netSalaryFromCompany = grossSalary - totalDeductions;
-          // 기사 최종 실제 순수입 = 회사 실지급액 - 기사 자부담 경비
           const finalNetIncome = netSalaryFromCompany - totalDriverExpense;
 
           return {
@@ -525,6 +525,7 @@
         }
       }, [appData, currentYearMonth, totalFixedAllowances, totalFixedExpenses]);
 
+      // 달력 날짜 생성
       const calendarCells = useMemo(() => {
         const [y, m] = currentYearMonth.split('-').map(Number);
         const firstDayWeekIndex = new Date(y, m - 1, 1).getDay();
@@ -541,8 +542,9 @@
         return cells;
       }, [currentYearMonth]);
 
+      // 세무서 텍스트
       const taxReportText = useMemo(() => {
-        if (appData.activeTab !== 'private') return '';
+        if (appData.activeType !== 'private') return '';
         const stats = currentMonthStats;
         const carNum = appData.private.carNumber || '미등록';
 
@@ -564,7 +566,7 @@
 ------------------------------------
 3. 소득금액 (과세표준 대상): ${formatMoney(stats.netIncome)}
 ------------------------------------
-※ 본 자료는 K-TAXI에서 부가가치세 및 종합소득세 신고를 위해 자동 산출된 자료입니다.`;
+※ 본 자료는 K-TAXI에서 자동 산출된 자료입니다.`;
       }, [appData, currentMonthStats, currentYearMonth]);
 
       const exportBackup = () => {
@@ -601,694 +603,650 @@
         setShowDailyModal(true);
       };
 
-      const currentRecords = appData[appData.activeTab].records || {};
+      const currentRecords = appData[appData.activeType].records || {};
       const sortedMonthEntries = Object.entries(currentRecords)
         .filter(([date]) => date.startsWith(currentYearMonth))
         .sort(([a], [b]) => a.localeCompare(b));
 
       return (
-        <div className="max-w-md mx-auto min-h-screen flex flex-col bg-gray-900 border-x border-gray-800">
+        <div className="max-w-md mx-auto w-full min-h-screen flex flex-col bg-slate-950 border-x border-slate-800 relative">
           
-          {/* 상단 헤더 */}
-          <header className="p-4 bg-gray-950 border-b border-gray-800 flex items-center justify-between sticky top-0 z-30">
+          {/* 1. 상단 심플 헤더 */}
+          <header className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
             <div className="flex items-center gap-2">
-              <span className="bg-yellow-500 text-black text-xs font-black px-2 py-0.5 rounded">K-TAXI</span>
-              <h1 className="text-base font-bold tracking-tight">운행기록 & HUD</h1>
+              <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
+              <span className="text-sm font-bold text-white tracking-tight">
+                {appData[appData.activeType].carNumber || (appData.activeType === 'corporate' ? '법인택시' : '개인택시')}
+              </span>
             </div>
-            <div className="flex items-center gap-2">
+
+            {/* 법인 / 개인 원터치 토글 */}
+            <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
               <button
-                onClick={() => setShowSpeedLogModal(true)}
-                className="px-2 py-1 bg-red-950/80 border border-red-800 text-red-300 text-[11px] font-bold rounded-lg relative"
-              >
-                단속의심 {appData.speedingLogs && appData.speedingLogs.length > 0 && (
-                  <span className="ml-1 bg-red-500 text-white px-1.5 py-0.2 rounded-full text-[9px]">
-                    {appData.speedingLogs.length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setViewMode(viewMode === 'hud' ? 'record' : 'hud')}
-                className={`px-3 py-1 text-xs font-bold rounded-lg transition ${
-                  viewMode === 'hud' ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-800 text-yellow-400 border border-yellow-500/30'
+                onClick={() => setVehicleType('corporate')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                  appData.activeType === 'corporate' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
                 }`}
               >
-                {viewMode === 'hud' ? '기록장 닫기' : '안전운행 HUD'}
+                법인
+              </button>
+              <button
+                onClick={() => setVehicleType('private')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                  appData.activeType === 'private' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
+                }`}
+              >
+                개인
               </button>
             </div>
           </header>
 
-          {/* 메인 뷰: HUD 모드 */}
-          {viewMode === 'hud' ? (
-            <div className="flex-1 flex flex-col p-4 bg-black justify-between select-none">
-              <div className="flex justify-between items-center">
-                <button
-                  onClick={() => setHudMirrored(!hudMirrored)}
-                  className="text-xs px-3 py-1.5 bg-gray-800 text-gray-300 rounded-lg"
-                >
-                  {hudMirrored ? '미러 모드 켜짐 (HUD)' : '일반 모드'}
-                </button>
-                {!audioReady ? (
+          {/* 2. 메인 컨텐츠 영역 (탭별 렌더링) */}
+          <main className="flex-1 p-3.5 pb-24 overflow-y-auto">
+            
+            {/* 탭 1: 운행 달력 (홈) */}
+            {currentTab === 'calendar' && (
+              <div className="space-y-3.5">
+                
+                {/* 월 선택 & 빠른 요약 카드 */}
+                <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
                   <button
-                    onClick={initAudioChannel}
-                    className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold animate-bounce"
+                    onClick={() => {
+                      const [y, m] = currentYearMonth.split('-').map(Number);
+                      const prevDate = new Date(y, m - 2, 1);
+                      setCurrentYearMonth(`${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`);
+                    }}
+                    className="w-8 h-8 flex items-center justify-center bg-slate-800 active:bg-slate-700 rounded-xl text-slate-300 font-bold"
                   >
-                    🔊 블루투스/음성 켜기
+                    ◀
                   </button>
-                ) : (
-                  <span className="text-xs text-green-400 flex items-center gap-1 font-semibold">
-                    <span className="w-2 h-2 bg-green-400 rounded-full animate-ping"></span>
-                    음성 알림 활성
-                  </span>
-                )}
-              </div>
+                  <div className="text-center">
+                    <span className="text-base font-black text-yellow-400">{currentYearMonth}</span>
+                    <div className="text-[11px] text-slate-400 font-medium">
+                      {currentMonthStats.workDays}일 운행 / {currentMonthStats.holidayDays}일 휴무
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const [y, m] = currentYearMonth.split('-').map(Number);
+                      const nextDate = new Date(y, m, 1);
+                      setCurrentYearMonth(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`);
+                    }}
+                    className="w-8 h-8 flex items-center justify-center bg-slate-800 active:bg-slate-700 rounded-xl text-slate-300 font-bold"
+                  >
+                    ▶
+                  </button>
+                </div>
 
-              <div className={`flex flex-col items-center justify-center my-auto transition-transform ${hudMirrored ? 'hud-mirror' : ''}`}>
-                <div className="h-10 flex items-center text-center">
-                  {nearestCamera ? (
-                    <span className="text-yellow-400 font-bold text-lg animate-pulse-slow">
-                      ⚠️ {nearestCamera.distance}m 앞 [{nearestCamera.limitSpeed}km/h] {nearestCamera.desc}
+                {/* 핵심 수입 요약 바 */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
+                    <span className="text-[11px] text-slate-400 block font-semibold">이번 달 총 매출</span>
+                    <span className="text-base font-black text-yellow-400 block mt-0.5">
+                      {formatMoney(currentMonthStats.totalRevenue)}
                     </span>
+                  </div>
+                  <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
+                    <span className="text-[11px] text-green-400 block font-semibold">
+                      {appData.activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}
+                    </span>
+                    <span className="text-base font-black text-green-400 block mt-0.5">
+                      {appData.activeType === 'corporate'
+                        ? formatMoney(currentMonthStats.netSalaryFromCompany)
+                        : formatMoney(currentMonthStats.netIncome)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 심플 캘린더 */}
+                <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
+                  <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
+                    <span className="text-red-400">일</span>
+                    <span>월</span>
+                    <span>화</span>
+                    <span>수</span>
+                    <span>목</span>
+                    <span>금</span>
+                    <span className="text-blue-400">토</span>
+                  </div>
+
+                  <div className="grid grid-cols-7 gap-1">
+                    {calendarCells.map((dateStr, idx) => {
+                      if (!dateStr) {
+                        return <div key={`empty-${idx}`} className="h-12 rounded-lg bg-transparent"></div>;
+                      }
+                      const dayNum = Number(dateStr.split('-')[2]);
+                      const rec = currentRecords[dateStr];
+                      const isSelected = selectedDate === dateStr;
+
+                      return (
+                        <button
+                          key={dateStr}
+                          onClick={() => openModalForDate(dateStr)}
+                          className={`h-12 p-1 rounded-xl flex flex-col justify-between items-start text-left border transition active:scale-95 ${
+                            isSelected
+                              ? 'border-yellow-400 bg-yellow-500/20'
+                              : rec
+                              ? 'border-slate-700 bg-slate-950/80 hover:border-slate-600'
+                              : 'border-slate-800/60 bg-slate-950/30'
+                          }`}
+                        >
+                          <span className={`text-[10px] font-bold ${
+                            idx % 7 === 0 ? 'text-red-400' : idx % 7 === 6 ? 'text-blue-400' : 'text-slate-300'
+                          }`}>
+                            {dayNum}
+                          </span>
+
+                          {rec && (
+                            rec.isHoliday ? (
+                              <span className="text-[8px] bg-green-950 text-green-300 font-bold px-1 rounded leading-tight w-full text-center">
+                                휴무
+                              </span>
+                            ) : (
+                              <span className="text-[8px] text-yellow-400 font-bold truncate w-full text-center leading-tight">
+                                {appData.activeType === 'corporate'
+                                  ? formatShortMoney(rec.revenue)
+                                  : formatShortMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
+                              </span>
+                            )
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 일별 목록 */}
+                <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800 space-y-2">
+                  <div className="flex justify-between items-center pb-1">
+                    <span className="text-xs font-bold text-slate-300">운행 일지 목록 ({sortedMonthEntries.length}건)</span>
+                    <button
+                      onClick={() => openModalForDate(getTodayKey())}
+                      className="px-2.5 py-1 bg-yellow-500 text-black font-bold text-[11px] rounded-lg shadow active:bg-yellow-400"
+                    >
+                      + 오늘 기록
+                    </button>
+                  </div>
+
+                  {sortedMonthEntries.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-slate-500">
+                      등록된 운행 기록이 없습니다.<br/>위 달력에서 날짜를 눌러 입력하세요.
+                    </div>
                   ) : (
-                    <span className="text-gray-500 text-sm">안전 속도를 준수하십시오</span>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-center gap-6 my-6">
-                  <div className="flex flex-col items-center justify-center w-24 h-24 rounded-full border-4 border-red-600 bg-white text-black shadow-2xl flex-shrink-0">
-                    <span className="text-[11px] font-black text-red-600 leading-none">제한</span>
-                    <span className="text-3xl font-black leading-tight tracking-tight">
-                      {nearestCamera ? nearestCamera.limitSpeed : 50}
-                    </span>
-                    <span className="text-[9px] font-bold text-gray-500 leading-none">km/h</span>
-                  </div>
-
-                  <div className="flex items-baseline">
-                    <span className={`text-8xl font-black tracking-tighter ${
-                      nearestCamera && gpsSpeed > nearestCamera.limitSpeed ? 'text-red-500 animate-bounce' : 'text-green-400'
-                    }`}>
-                      {gpsSpeed}
-                    </span>
-                    <span className="text-2xl font-bold ml-2 text-gray-400">km/h</span>
-                  </div>
-                </div>
-
-                {nearestCamera && gpsSpeed > nearestCamera.limitSpeed && (
-                  <div className="w-full bg-red-600/90 text-white text-center py-1.5 rounded-xl font-bold text-sm">
-                    속도 초과! 단속 의심 기록 중 (+{gpsSpeed - nearestCamera.limitSpeed} km/h 초과)
-                  </div>
-                )}
-              </div>
-
-              <div className="text-center text-xs text-gray-600 pb-2">
-                카메라 통과 시 과속 기록은 [단속의심] 버튼에서 확인 가능합니다.
-              </div>
-            </div>
-          ) : (
-            /* 메인 뷰: 운행기록장 모드 */
-            <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-              
-              {/* 법인 / 개인 탭 */}
-              <div className="grid grid-cols-2 p-1 bg-gray-950 rounded-xl border border-gray-800">
-                <button
-                  onClick={() => setTab('corporate')}
-                  className={`py-2 text-sm font-bold rounded-lg transition ${
-                    appData.activeTab === 'corporate'
-                      ? 'bg-yellow-500 text-black shadow-md'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  법인 택시
-                </button>
-                <button
-                  onClick={() => setTab('private')}
-                  className={`py-2 text-sm font-bold rounded-lg transition ${
-                    appData.activeTab === 'private'
-                      ? 'bg-yellow-500 text-black shadow-md'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  개인 택시
-                </button>
-              </div>
-
-              {/* 기본 설정 카드 */}
-              <div className="bg-gray-800/80 p-3.5 rounded-2xl border border-gray-700/60 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-gray-400 font-semibold">차량 번호</label>
-                  <input
-                    type="text"
-                    placeholder="예: 충남31바 1234"
-                    value={appData[appData.activeTab].carNumber}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => handleCarNumberChange(e.target.value)}
-                    className="bg-gray-900 border border-gray-700 px-3 py-1 text-sm rounded-lg text-right w-40 font-semibold text-white focus:border-yellow-500 focus:outline-none"
-                  />
-                </div>
-
-                {appData.activeTab === 'corporate' && (
-                  <div className="pt-2 border-t border-gray-700 space-y-2.5">
-                    {/* 1일 사납금 */}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-gray-400 whitespace-nowrap">1일 기준 사납금</span>
-                      <div className="w-32">
-                        <SmartMoneyInput
-                          value={appData.corporate.dailyDeposit}
-                          onChange={(val) => handleCorporateConfigChange('dailyDeposit', val)}
-                          placeholder="201,000"
-                        />
-                      </div>
-                    </div>
-
-                    {/* 각종 고정 수당 목록 */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <span className="text-xs text-gray-400 block leading-tight">각종 고정 수당 목록</span>
-                        <span className="text-[10px] text-blue-400">기본급·승무·교육·휴일수당 등</span>
-                      </div>
-                      <button
-                        onClick={() => setShowFixedAllowanceModal(true)}
-                        className="px-3 py-1.5 bg-gray-900 border border-blue-500/40 text-blue-300 rounded-xl text-xs font-bold hover:bg-gray-800"
-                      >
-                        {formatMoney(totalFixedAllowances)} ({appData.corporate.fixedAllowanceItems?.length || 0}개 항목) ⚙️
-                      </button>
-                    </div>
-
-                    {/* 회사 고정비 공제 목록 */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <span className="text-xs text-gray-400 block leading-tight">회사 고정비 지출 목록</span>
-                        <span className="text-[10px] text-orange-400">노조비·상조회비 등 공제</span>
-                      </div>
-                      <button
-                        onClick={() => setShowFixedExpenseModal(true)}
-                        className="px-3 py-1.5 bg-gray-900 border border-orange-500/40 text-orange-300 rounded-xl text-xs font-bold hover:bg-gray-800"
-                      >
-                        {formatMoney(totalFixedExpenses)} ({appData.corporate.fixedExpenseItems?.length || 0}개 항목) ⚙️
-                      </button>
-                    </div>
-
-                    {/* 4대보험/세금 공제율 */}
-                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-700/50">
-                      <span className="text-xs text-gray-400">4대보험 및 세금 공제율</span>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={appData.corporate.deductionRate}
-                          onChange={(e) => handleCorporateConfigChange('deductionRate', e.target.value)}
-                          className="bg-gray-900 border border-gray-700 px-2 py-0.5 text-xs rounded text-right w-16 text-white font-semibold"
-                        />
-                        <span className="text-xs text-gray-400">%</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 월 선택 바 */}
-              <div className="flex items-center justify-between bg-gray-950 p-2 rounded-xl border border-gray-800">
-                <button
-                  onClick={() => {
-                    const [y, m] = currentYearMonth.split('-').map(Number);
-                    const prevDate = new Date(y, m - 2, 1);
-                    setCurrentYearMonth(`${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`);
-                  }}
-                  className="px-3 py-1 bg-gray-800 text-gray-300 rounded-lg text-sm font-bold active:bg-gray-700"
-                >
-                  ◀
-                </button>
-                <div className="text-center">
-                  <span className="text-base font-black tracking-wide text-yellow-400">{currentYearMonth}</span>
-                  <span className="text-xs text-gray-400 ml-2">({currentMonthStats.workDays}일 운행 / {currentMonthStats.holidayDays}일 휴무)</span>
-                </div>
-                <button
-                  onClick={() => {
-                    const [y, m] = currentYearMonth.split('-').map(Number);
-                    const nextDate = new Date(y, m, 1);
-                    setCurrentYearMonth(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`);
-                  }}
-                  className="px-3 py-1 bg-gray-800 text-gray-300 rounded-lg text-sm font-bold active:bg-gray-700"
-                >
-                  ▶
-                </button>
-              </div>
-
-              {/* 월간 정산 카드 */}
-              {appData.activeTab === 'corporate' ? (
-                <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 space-y-3">
-                  <div className="flex justify-between items-center text-xs pb-2 border-b border-gray-700">
-                    <span className="text-gray-400">회사 전액 부담 가스비</span>
-                    <span className="text-gray-300 font-semibold">{formatMoney(currentMonthStats.totalGasCompany)} (회사지원)</span>
-                  </div>
-
-                  {/* 1. 지급 내역 */}
-                  <div className="bg-gray-950/90 p-3 rounded-xl border border-gray-800 space-y-1.5">
-                    <span className="text-[11px] font-bold text-blue-400 block border-b border-gray-800 pb-1">1. 회사 지급 내역 (세전 급여)</span>
-                    <div className="flex justify-between text-xs text-gray-300">
-                      <span>고정 수당 합계(기본급·승무·교육·휴일):</span>
-                      <span className="font-semibold">{formatMoney(currentMonthStats.totalFixedAllowances)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-yellow-400">
-                      <span>+ 사납금 초과 성과급 합산 (70%):</span>
-                      <span className="font-bold">+{formatMoney(currentMonthStats.totalIncentive)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs font-bold pt-1 border-t border-gray-800 text-white">
-                      <span>= 월 지급총액 (세전):</span>
-                      <span className="text-blue-300 text-sm">{formatMoney(currentMonthStats.grossSalary)}</span>
-                    </div>
-                  </div>
-
-                  {/* 2. 공제 내역 */}
-                  <div className="bg-gray-950/90 p-3 rounded-xl border border-gray-800 space-y-1.5">
-                    <span className="text-[11px] font-bold text-orange-400 block border-b border-gray-800 pb-1">2. 공제 내역 및 통장 실수령액</span>
-                    <div className="flex justify-between text-xs text-gray-400">
-                      <span>4대보험 및 세금 (추정 {appData.corporate.deductionRate}%):</span>
-                      <span>-{formatMoney(currentMonthStats.taxAndInsurance)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-orange-400">
-                      <span>회사 고정비 합산 (노조비/상조비 등):</span>
-                      <span>-{formatMoney(currentMonthStats.totalFixedExpenses)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs font-bold pt-1 border-t border-gray-800 text-green-400">
-                      <span>= 회사 실지급액 (통장입금 월급):</span>
-                      <span className="text-green-300 text-sm font-black">{formatMoney(currentMonthStats.netSalaryFromCompany)}</span>
-                    </div>
-                  </div>
-
-                  {/* 3. 기사 자부담 경비 */}
-                  <div className="bg-gray-900 p-2.5 rounded-xl flex justify-between items-center text-xs">
-                    <span className="text-gray-400">당월 기사 자부담 경비 (식대/세차/통행료 등):</span>
-                    <span className="text-red-400 font-bold">{formatMoney(currentMonthStats.totalDriverExpense)}</span>
-                  </div>
-
-                  <button
-                    onClick={() => setShowCorporateNet(!showCorporateNet)}
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold rounded-xl text-xs transition"
-                  >
-                    {showCorporateNet ? '순수입 숨기기' : '이번 달 기사 최종 순수입 계산 / 확인'}
-                  </button>
-
-                  {showCorporateNet && (
-                    <div className="bg-indigo-950 border border-indigo-500 p-3 rounded-xl text-center space-y-1">
-                      <span className="text-[11px] text-indigo-300 block">회사 실지급액(세후 월급) - 기사 자부담 경비</span>
-                      <span className="text-2xl font-black text-yellow-300 block">
-                        {formatMoney(currentMonthStats.finalNetIncome)}
-                      </span>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {sortedMonthEntries.map(([date, rec]) => (
+                        <div
+                          key={date}
+                          className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between text-xs"
+                        >
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-300">{date}</span>
+                              {rec.isHoliday ? (
+                                <span className="bg-green-950 text-green-300 text-[9px] px-1 rounded font-bold">휴무</span>
+                              ) : (
+                                <span className="text-yellow-400 font-black">
+                                  {appData.activeType === 'corporate'
+                                    ? formatMoney(rec.revenue)
+                                    : formatMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
+                                </span>
+                              )}
+                            </div>
+                            {rec.memo && <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{rec.memo}</div>}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => openModalForDate(date)}
+                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-yellow-400 font-bold rounded-lg text-[10px]"
+                            >
+                              수정
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDailyRecord(date)}
+                              className="text-slate-500 hover:text-red-400 text-xs px-1"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 space-y-3">
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-gray-900 p-2.5 rounded-xl">
-                      <span className="text-gray-400 block">총 수입 (카드+현금)</span>
-                      <span className="text-sm font-bold text-green-400 mt-1 block">{formatMoney(currentMonthStats.totalRevenue)}</span>
-                    </div>
-                    <div className="bg-gray-900 p-2.5 rounded-xl">
-                      <span className="text-gray-400 block">총 지출 (가스/경비 등)</span>
-                      <span className="text-sm font-bold text-red-400 mt-1 block">{formatMoney(currentMonthStats.totalExpense)}</span>
-                    </div>
-                  </div>
+              </div>
+            )}
 
-                  <div className="bg-gray-900 p-3 rounded-xl flex items-center justify-between">
-                    <div>
-                      <span className="text-xs text-gray-400 block">과세표준 소득금액 (순수익)</span>
-                      <span className="text-lg font-black text-yellow-400">{formatMoney(currentMonthStats.netIncome)}</span>
-                    </div>
+            {/* 탭 2: 월간 정산 명세서 */}
+            {currentTab === 'settlement' && (
+              <div className="space-y-3.5">
+                <div className="flex justify-between items-center bg-slate-900 p-3 rounded-2xl border border-slate-800">
+                  <span className="text-sm font-bold text-yellow-400">{currentYearMonth} 급여 정산서</span>
+                  {appData.activeType === 'private' && (
                     <button
                       onClick={() => setShowTaxModal(true)}
-                      className="px-3 py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs shadow"
+                      className="px-2.5 py-1 bg-yellow-500 text-black font-bold rounded-lg text-xs"
                     >
                       세무서 양식 추출
                     </button>
-                  </div>
-                </div>
-              )}
-
-              {/* 월간 캘린더 */}
-              <div className="bg-gray-800/80 p-3.5 rounded-2xl border border-gray-700/60 space-y-2">
-                <div className="flex justify-between items-center pb-1">
-                  <h3 className="text-xs font-bold text-gray-200">월간 운행 달력</h3>
-                  <span className="text-[10px] text-yellow-400 font-medium">※ 날짜 터치 시 기록/수정</span>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-7 text-center text-[11px] font-bold text-gray-400 pb-1 border-b border-gray-700/60">
-                  <span className="text-red-400">일</span>
-                  <span>월</span>
-                  <span>화</span>
-                  <span>수</span>
-                  <span>목</span>
-                  <span>금</span>
-                  <span className="text-blue-400">토</span>
-                </div>
+                {appData.activeType === 'corporate' ? (
+                  <div className="space-y-3">
+                    {/* 회사 지급 내역 */}
+                    <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2">
+                      <div className="flex justify-between text-xs text-blue-400 font-bold border-b border-slate-800 pb-1.5">
+                        <span>1. 회사 지급 내역 (세전 급여)</span>
+                        <span>{formatMoney(currentMonthStats.grossSalary)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs text-slate-300">
+                        <span>고정 수당 합계 (기본급 등):</span>
+                        <span>{formatMoney(currentMonthStats.totalFixedAllowances)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs text-yellow-400">
+                        <span>사납금 초과 성과급 (70%):</span>
+                        <span className="font-bold">+{formatMoney(currentMonthStats.totalIncentive)}</span>
+                      </div>
+                    </div>
 
-                <div className="grid grid-cols-7 gap-1">
-                  {calendarCells.map((dateStr, idx) => {
-                    if (!dateStr) {
-                      return <div key={`empty-${idx}`} className="h-12 rounded-lg bg-transparent"></div>;
-                    }
-                    const dayNum = Number(dateStr.split('-')[2]);
-                    const rec = currentRecords[dateStr];
-                    const isSelected = selectedDate === dateStr;
+                    {/* 공제 내역 */}
+                    <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2">
+                      <div className="flex justify-between text-xs text-orange-400 font-bold border-b border-slate-800 pb-1.5">
+                        <span>2. 공제 내역 합계</span>
+                        <span>-{formatMoney(currentMonthStats.totalDeductions)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs text-slate-400">
+                        <span>4대보험 및 세금 ({appData.corporate.deductionRate}%):</span>
+                        <span>-{formatMoney(currentMonthStats.taxAndInsurance)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs text-orange-400">
+                        <span>회사 고정비 (노조비 등):</span>
+                        <span>-{formatMoney(currentMonthStats.totalFixedExpenses)}</span>
+                      </div>
+                    </div>
 
-                    return (
-                      <button
-                        key={dateStr}
-                        onClick={() => openModalForDate(dateStr)}
-                        className={`h-12 p-1 rounded-lg flex flex-col justify-between items-start text-left border transition ${
-                          isSelected
-                            ? 'border-yellow-400 bg-yellow-500/20'
-                            : rec
-                            ? 'border-gray-600 bg-gray-900 hover:border-gray-500'
-                            : 'border-gray-800 bg-gray-950/60 hover:bg-gray-800/40'
-                        }`}
-                      >
-                        <span className={`text-[10px] font-bold ${
-                          idx % 7 === 0 ? 'text-red-400' : idx % 7 === 6 ? 'text-blue-400' : 'text-gray-300'
-                        }`}>
-                          {dayNum}
-                        </span>
+                    {/* 통장 실수령액 */}
+                    <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-4 rounded-2xl border border-indigo-500/40 text-center space-y-1">
+                      <span className="text-xs text-indigo-300 font-bold">회사 실지급액 (통장 입금액)</span>
+                      <span className="text-2xl font-black text-green-400 block tracking-tight">
+                        {formatMoney(currentMonthStats.netSalaryFromCompany)}
+                      </span>
+                    </div>
 
-                        {rec && (
-                          rec.isHoliday ? (
-                            <span className="text-[8px] bg-green-950 text-green-300 font-bold px-1 rounded leading-tight w-full text-center">
-                              휴무
-                            </span>
-                          ) : (
-                            <span className="text-[8px] text-yellow-400 font-bold truncate w-full text-center leading-tight">
-                              {appData.activeTab === 'corporate'
-                                ? formatShortMoney(rec.revenue)
-                                : formatShortMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
-                            </span>
-                          )
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 일별 기록 목록 */}
-              <div className="bg-gray-800/80 p-3.5 rounded-2xl border border-gray-700/60 space-y-2">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-bold text-gray-200">
-                    {currentYearMonth} 일별 기록 목록 ({sortedMonthEntries.length}건)
-                  </h3>
-                  <button
-                    onClick={() => openModalForDate(getTodayKey())}
-                    className="px-2.5 py-1 bg-yellow-500 text-black font-bold text-xs rounded-lg shadow"
-                  >
-                    + 오늘 기록
-                  </button>
-                </div>
-
-                {sortedMonthEntries.length === 0 ? (
-                  <div className="text-center py-6 text-xs text-gray-500">
-                    이번 달에 등록된 운행 기록이 없습니다.<br/>위 달력에서 날짜를 눌러 입력해 보세요.
+                    {/* 기사 자부담 경비 및 최종 순수입 */}
+                    <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2">
+                      <div className="flex justify-between text-xs text-slate-400">
+                        <span>당월 기사 자부담 경비 (식대/세차 등):</span>
+                        <span className="text-red-400 font-bold">{formatMoney(currentMonthStats.totalDriverExpense)}</span>
+                      </div>
+                      <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
+                        <span className="text-xs font-bold text-yellow-400">기사 최종 실제 순수입:</span>
+                        <span className="text-lg font-black text-yellow-300">{formatMoney(currentMonthStats.finalNetIncome)}</span>
+                      </div>
+                    </div>
                   </div>
                 ) : (
-                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                    {sortedMonthEntries.map(([date, rec]) => (
-                      <div
-                        key={date}
-                        className="bg-gray-900 p-2.5 rounded-xl border border-gray-800 flex items-center justify-between text-xs"
-                      >
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-gray-200">{date}</span>
-                            {rec.isHoliday ? (
-                              <span className="bg-green-900/60 text-green-300 text-[10px] px-1.5 py-0.2 rounded font-bold">휴무</span>
-                            ) : (
-                              <span className="text-yellow-400 font-black">
-                                {appData.activeTab === 'corporate'
-                                  ? formatMoney(rec.revenue)
-                                  : formatMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
-                              </span>
-                            )}
-                          </div>
-                          {rec.memo && (
-                            <div className="text-[11px] text-gray-400 truncate max-w-[200px]">
-                              메모: {rec.memo}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => openModalForDate(date)}
-                            className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-yellow-400 font-bold rounded-lg text-[11px]"
-                          >
-                            수정
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDailyRecord(date)}
-                            className="px-1.5 py-1 text-gray-500 hover:text-red-400 text-[11px]"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                  /* 개인택시 정산 */
+                  <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
+                    <div className="flex justify-between text-xs text-slate-300">
+                      <span>총 수입 (카드+현금):</span>
+                      <span className="font-bold text-green-400">{formatMoney(currentMonthStats.totalRevenue)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-slate-300">
+                      <span>총 지출 (가스/경비 등):</span>
+                      <span className="font-bold text-red-400">{formatMoney(currentMonthStats.totalExpense)}</span>
+                    </div>
+                    <div className="pt-3 border-t border-slate-800 flex justify-between items-center">
+                      <span className="text-xs font-bold text-yellow-400">과세표준 소득금액:</span>
+                      <span className="text-xl font-black text-yellow-300">{formatMoney(currentMonthStats.netIncome)}</span>
+                    </div>
                   </div>
                 )}
               </div>
+            )}
 
-              {/* 데이터 백업 / 복원 */}
-              <div className="pt-1 flex gap-2">
-                <button
-                  onClick={exportBackup}
-                  className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold rounded-xl text-xs border border-gray-700"
-                >
-                  데이터 백업 (저장)
-                </button>
-                <label className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold rounded-xl text-xs border border-gray-700 text-center cursor-pointer">
-                  데이터 복원 (열기)
-                  <input type="file" accept=".json" onChange={importBackup} className="hidden" />
-                </label>
-              </div>
-            </div>
-          )}
-
-          {/* 1. 각종 고정 수당 목록 관리 모달 */}
-          {showFixedAllowanceModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4 max-h-[85vh] flex flex-col">
-                <div className="flex justify-between items-center pb-2 border-b border-gray-800">
-                  <div>
-                    <h3 className="text-sm font-bold text-blue-400">각종 고정 수당 목록 관리</h3>
-                    <span className="text-[11px] text-gray-400">기본급, 승무, 교육, 휴일수당 등</span>
-                  </div>
-                  <button onClick={() => setShowFixedAllowanceModal(false)} className="text-gray-400 text-lg font-bold">✕</button>
+            {/* 탭 3: 안전운행 HUD */}
+            {currentTab === 'hud' && (
+              <div className="flex flex-col justify-between h-full min-h-[460px] py-4 select-none">
+                <div className="flex justify-between items-center">
+                  <button
+                    onClick={() => setHudMirrored(!hudMirrored)}
+                    className="text-xs px-3 py-1.5 bg-slate-800 text-slate-300 rounded-xl"
+                  >
+                    {hudMirrored ? '미러 모드 (반사용)' : '일반 모드'}
+                  </button>
+                  {!audioReady ? (
+                    <button
+                      onClick={initAudioChannel}
+                      className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-xl font-bold animate-bounce"
+                    >
+                      🔊 블루투스/음성 켜기
+                    </button>
+                  ) : (
+                    <span className="text-xs text-green-400 flex items-center gap-1 font-semibold">
+                      <span className="w-2 h-2 bg-green-400 rounded-full animate-ping"></span>
+                      음성 활성
+                    </span>
+                  )}
                 </div>
 
-                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-                  {(appData.corporate.fixedAllowanceItems || []).map((item) => (
-                    <div key={item.id} className="bg-gray-950 p-2.5 rounded-xl border border-gray-800 flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={item.name}
-                        onChange={(e) => handleUpdateFixedAllowance(item.id, 'name', e.target.value)}
-                        placeholder="수당명"
-                        className="bg-gray-900 border border-gray-700 px-2 py-1 text-xs rounded-lg text-white w-24 font-semibold"
-                      />
-                      <div className="flex-1">
-                        <SmartMoneyInput
-                          value={item.amount}
-                          onChange={(val) => handleUpdateFixedAllowance(item.id, 'amount', val)}
-                          placeholder="0"
-                          colorClass="text-blue-300"
-                        />
-                      </div>
-                      <button
-                        onClick={() => handleDeleteFixedAllowance(item.id)}
-                        className="text-gray-500 hover:text-red-400 text-xs px-1"
-                      >
-                        ✕
-                      </button>
+                {/* 중앙 속도계 */}
+                <div className={`flex flex-col items-center justify-center my-auto transition-transform ${hudMirrored ? 'hud-mirror' : ''}`}>
+                  <div className="h-8 flex items-center text-center mb-2">
+                    {nearestCamera ? (
+                      <span className="text-yellow-400 font-bold text-base animate-pulse-slow">
+                        ⚠️ {nearestCamera.distance}m 앞 [{nearestCamera.limitSpeed}km/h] {nearestCamera.desc}
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 text-xs">안전 속도를 준수하십시오</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-center gap-5 my-4">
+                    <div className="flex flex-col items-center justify-center w-20 h-20 rounded-full border-4 border-red-600 bg-white text-black shadow-2xl flex-shrink-0">
+                      <span className="text-[10px] font-black text-red-600 leading-none">제한</span>
+                      <span className="text-2xl font-black leading-tight">
+                        {nearestCamera ? nearestCamera.limitSpeed : 50}
+                      </span>
+                      <span className="text-[8px] font-bold text-slate-500 leading-none">km/h</span>
                     </div>
-                  ))}
+
+                    <div className="flex items-baseline">
+                      <span className={`text-7xl font-black tracking-tighter ${
+                        nearestCamera && gpsSpeed > nearestCamera.limitSpeed ? 'text-red-500 animate-bounce' : 'text-green-400'
+                      }`}>
+                        {gpsSpeed}
+                      </span>
+                      <span className="text-xl font-bold ml-1.5 text-slate-400">km/h</span>
+                    </div>
+                  </div>
+
+                  {nearestCamera && gpsSpeed > nearestCamera.limitSpeed && (
+                    <div className="w-full bg-red-600/90 text-white text-center py-1 rounded-xl font-bold text-xs mt-2">
+                      속도 초과! 감속하십시오 (+{gpsSpeed - nearestCamera.limitSpeed} km/h)
+                    </div>
+                  )}
                 </div>
 
-                <div className="pt-2 border-t border-gray-800 space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-gray-400">고정 수당 총 합계:</span>
-                    <span className="text-base font-bold text-blue-400">{formatMoney(totalFixedAllowances)}</span>
+                <div className="text-center text-[11px] text-slate-500">
+                  단속 통과 시 과속 이력은 [설정 > 단속의심]에서 확인됩니다.
+                </div>
+              </div>
+            )}
+
+            {/* 탭 4: 설정 및 백업 */}
+            {currentTab === 'settings' && (
+              <div className="space-y-3.5">
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
+                  <h3 className="text-xs font-bold text-slate-300">차량 및 기준 설정</h3>
+                  
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400">차량 번호</span>
+                    <input
+                      type="text"
+                      placeholder="충남31바 1234"
+                      value={appData[appData.activeType].carNumber}
+                      onChange={(e) => handleCarNumberChange(e.target.value)}
+                      className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-36 text-white"
+                    />
                   </div>
+
+                  {appData.activeType === 'corporate' && (
+                    <>
+                      <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
+                        <span className="text-slate-400">1일 기준 사납금</span>
+                        <div className="w-32">
+                          <SmartMoneyInput
+                            value={appData.corporate.dailyDeposit}
+                            onChange={(val) => handleCorporateConfigChange('dailyDeposit', val)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
+                        <span className="text-slate-400">고정 수당 목록 ({appData.corporate.fixedAllowanceItems?.length || 0}개)</span>
+                        <button
+                          onClick={() => setShowFixedAllowanceModal(true)}
+                          className="px-3 py-1 bg-slate-800 text-blue-300 font-bold rounded-xl border border-blue-500/30"
+                        >
+                          {formatMoney(totalFixedAllowances)} ⚙️
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
+                        <span className="text-slate-400">회사 고정비 공제 ({appData.corporate.fixedExpenseItems?.length || 0}개)</span>
+                        <button
+                          onClick={() => setShowFixedExpenseModal(true)}
+                          className="px-3 py-1 bg-slate-800 text-orange-300 font-bold rounded-xl border border-orange-500/30"
+                        >
+                          {formatMoney(totalFixedExpenses)} ⚙️
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
+                        <span className="text-slate-400">4대보험 및 세금 공제율</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={appData.corporate.deductionRate}
+                            onChange={(e) => handleCorporateConfigChange('deductionRate', e.target.value)}
+                            className="bg-slate-950 border border-slate-700 px-2 py-1 text-xs rounded-xl text-right w-16 text-white font-bold"
+                          />
+                          <span className="text-slate-400">%</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* 단속 의심 이력 버튼 */}
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-slate-300 block">과속 단속 의심 이력</span>
+                    <span className="text-[10px] text-slate-500">카메라 통과 시 과속 감지 로그</span>
+                  </div>
+                  <button
+                    onClick={() => setShowSpeedLogModal(true)}
+                    className="px-3 py-1.5 bg-red-950/80 border border-red-800 text-red-300 font-bold rounded-xl text-xs"
+                  >
+                    확인 ({appData.speedingLogs?.length || 0}건)
+                  </button>
+                </div>
+
+                {/* 데이터 백업 / 복원 */}
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-2.5">
+                  <span className="text-xs font-bold text-slate-300 block">장부 데이터 백업 & 복원</span>
                   <div className="flex gap-2">
                     <button
-                      onClick={handleAddFixedAllowance}
-                      className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-yellow-400 font-bold rounded-xl text-xs border border-gray-700"
+                      onClick={exportBackup}
+                      className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700"
                     >
-                      + 수당 추가
+                      백업 파일 저장 (.json)
                     </button>
-                    <button
-                      onClick={() => setShowFixedAllowanceModal(false)}
-                      className="px-5 py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs"
-                    >
-                      완료
-                    </button>
+                    <label className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 text-center cursor-pointer">
+                      백업 파일 복원
+                      <input type="file" accept=".json" onChange={importBackup} className="hidden" />
+                    </label>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </main>
 
-          {/* 2. 회사 고정비 공제 관리 모달 */}
-          {showFixedExpenseModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4 max-h-[85vh] flex flex-col">
-                <div className="flex justify-between items-center pb-2 border-b border-gray-800">
-                  <div>
-                    <h3 className="text-sm font-bold text-orange-400">회사 고정비 항목 관리</h3>
-                    <span className="text-[11px] text-gray-400">노조비, 상조회비 등 월 공제 항목</span>
-                  </div>
-                  <button onClick={() => setShowFixedExpenseModal(false)} className="text-gray-400 text-lg font-bold">✕</button>
-                </div>
+          {/* 3. 하단 네비게이션 탭 바 (App Navigation) */}
+          <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
+            <button
+              onClick={() => setCurrentTab('calendar')}
+              className={`flex flex-col items-center py-2.5 ${currentTab === 'calendar' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}
+            >
+              <span className="text-lg">📅</span>
+              <span className="text-[10px] mt-0.5">운행일지</span>
+            </button>
+            <button
+              onClick={() => setCurrentTab('settlement')}
+              className={`flex flex-col items-center py-2.5 ${currentTab === 'settlement' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}
+            >
+              <span className="text-lg">📊</span>
+              <span className="text-[10px] mt-0.5">월간정산</span>
+            </button>
+            <button
+              onClick={() => setCurrentTab('hud')}
+              className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}
+            >
+              <span className="text-lg">🏎️</span>
+              <span className="text-[10px] mt-0.5">안전HUD</span>
+            </button>
+            <button
+              onClick={() => setCurrentTab('settings')}
+              className={`flex flex-col items-center py-2.5 ${currentTab === 'settings' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}
+            >
+              <span className="text-lg">⚙️</span>
+              <span className="text-[10px] mt-0.5">설정/백업</span>
+            </button>
+          </nav>
 
-                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-                  {(appData.corporate.fixedExpenseItems || []).map((item) => (
-                    <div key={item.id} className="bg-gray-950 p-2.5 rounded-xl border border-gray-800 flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={item.name}
-                        onChange={(e) => handleUpdateFixedExpense(item.id, 'name', e.target.value)}
-                        placeholder="항목명"
-                        className="bg-gray-900 border border-gray-700 px-2 py-1 text-xs rounded-lg text-white w-24 font-semibold"
-                      />
-                      <div className="flex-1">
-                        <SmartMoneyInput
-                          value={item.amount}
-                          onChange={(val) => handleUpdateFixedExpense(item.id, 'amount', val)}
-                          placeholder="0"
-                          colorClass="text-orange-400"
-                        />
-                      </div>
-                      <button
-                        onClick={() => handleDeleteFixedExpense(item.id)}
-                        className="text-gray-500 hover:text-red-400 text-xs px-1"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="pt-2 border-t border-gray-800 space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-gray-400">고정비 총 합산액:</span>
-                    <span className="text-base font-bold text-orange-400">{formatMoney(totalFixedExpenses)}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleAddFixedExpense}
-                      className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-yellow-400 font-bold rounded-xl text-xs border border-gray-700"
-                    >
-                      + 항목 추가
-                    </button>
-                    <button
-                      onClick={() => setShowFixedExpenseModal(false)}
-                      className="px-5 py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs"
-                    >
-                      완료
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 일별 기록 작성/수정 모달 */}
+          {/* 4. 일별 기록 모달 */}
           {showDailyModal && (
             <DailyRecordModal
-              activeTab={appData.activeTab}
+              activeType={appData.activeType}
               dateKey={selectedDate}
-              existingData={appData[appData.activeTab].records[selectedDate] || {}}
+              existingData={appData[appData.activeType].records[selectedDate] || {}}
               onSave={(data) => handleSaveRecord(selectedDate, data)}
               onClose={() => setShowDailyModal(false)}
             />
           )}
 
-          {/* 개인택시 세무서 양식 모달 */}
-          {showTaxModal && (
+          {/* 5. 고정 수당 모달 */}
+          {showFixedAllowanceModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-sm font-bold text-yellow-400">세무서 제출 양식 추출</h3>
-                  <button onClick={() => setShowTaxModal(false)} className="text-gray-400 text-lg font-bold">✕</button>
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <h3 className="text-xs font-bold text-blue-400">고정 수당 목록 관리</h3>
+                  <button onClick={() => setShowFixedAllowanceModal(false)} className="text-slate-400 text-base font-bold">✕</button>
                 </div>
-                <textarea
-                  readOnly
-                  value={taxReportText}
-                  className="w-full h-64 bg-gray-950 text-gray-200 text-xs font-mono p-3 rounded-xl border border-gray-800 focus:outline-none resize-none"
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(taxReportText);
-                      alert('클립보드에 복사되었습니다.');
-                    }}
-                    className="flex-1 py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs"
-                  >
-                    내용 전체 복사
-                  </button>
-                  <button
-                    onClick={() => setShowTaxModal(false)}
-                    className="px-4 py-2.5 bg-gray-800 text-gray-300 font-bold rounded-xl text-xs"
-                  >
-                    닫기
-                  </button>
+                <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                  {(appData.corporate.fixedAllowanceItems || []).map((item) => (
+                    <div key={item.id} className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => handleUpdateFixedAllowance(item.id, 'name', e.target.value)}
+                        className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold"
+                      />
+                      <div className="flex-1">
+                        <SmartMoneyInput
+                          value={item.amount}
+                          onChange={(val) => handleUpdateFixedAllowance(item.id, 'amount', val)}
+                          colorClass="text-blue-300"
+                        />
+                      </div>
+                      <button onClick={() => handleDeleteFixedAllowance(item.id)} className="text-slate-500 hover:text-red-400 text-xs px-1">✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-2 border-t border-slate-800 flex gap-2">
+                  <button onClick={handleAddFixedAllowance} className="flex-1 py-2 bg-slate-800 text-yellow-400 font-bold rounded-xl text-xs">+ 수당 추가</button>
+                  <button onClick={() => setShowFixedAllowanceModal(false)} className="px-5 py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs">완료</button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* 과속 단속 의심 이력 모달 */}
+          {/* 6. 회사 고정비 모달 */}
+          {showFixedExpenseModal && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <h3 className="text-xs font-bold text-orange-400">회사 고정비 공제 관리</h3>
+                  <button onClick={() => setShowFixedExpenseModal(false)} className="text-slate-400 text-base font-bold">✕</button>
+                </div>
+                <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                  {(appData.corporate.fixedExpenseItems || []).map((item) => (
+                    <div key={item.id} className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => handleUpdateFixedExpense(item.id, 'name', e.target.value)}
+                        className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold"
+                      />
+                      <div className="flex-1">
+                        <SmartMoneyInput
+                          value={item.amount}
+                          onChange={(val) => handleUpdateFixedExpense(item.id, 'amount', val)}
+                          colorClass="text-orange-400"
+                        />
+                      </div>
+                      <button onClick={() => handleDeleteFixedExpense(item.id)} className="text-slate-500 hover:text-red-400 text-xs px-1">✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-2 border-t border-slate-800 flex gap-2">
+                  <button onClick={handleAddFixedExpense} className="flex-1 py-2 bg-slate-800 text-yellow-400 font-bold rounded-xl text-xs">+ 항목 추가</button>
+                  <button onClick={() => setShowFixedExpenseModal(false)} className="px-5 py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs">완료</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 7. 과속 단속 의심 모달 */}
           {showSpeedLogModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4 max-h-[85vh] flex flex-col">
-                <div className="flex justify-between items-center pb-2 border-b border-gray-800">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-red-400">과속 단속 의심 이력</h3>
-                    <span className="text-xs text-gray-500">({appData.speedingLogs?.length || 0}건)</span>
-                  </div>
-                  <button onClick={() => setShowSpeedLogModal(false)} className="text-gray-400 text-lg font-bold">✕</button>
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3 max-h-[80vh] flex flex-col">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <h3 className="text-xs font-bold text-red-400">과속 단속 의심 이력 ({appData.speedingLogs?.length || 0}건)</h3>
+                  <button onClick={() => setShowSpeedLogModal(false)} className="text-slate-400 text-base font-bold">✕</button>
                 </div>
-
-                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+                <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                   {(!appData.speedingLogs || appData.speedingLogs.length === 0) ? (
-                    <div className="text-center py-10 text-xs text-gray-500">
-                      기록된 단속 의심 이력이 없습니다.
-                    </div>
+                    <div className="text-center py-8 text-xs text-slate-500">기록된 단속 의심 이력이 없습니다.</div>
                   ) : (
                     appData.speedingLogs.map((log) => (
-                      <div key={log.id} className="bg-gray-950 p-3 rounded-xl border border-red-950/80 space-y-1">
-                        <div className="flex justify-between items-start">
-                          <span className="text-xs font-bold text-gray-200">{log.desc}</span>
-                          <button
-                            onClick={() => handleDeleteSpeedLog(log.id)}
-                            className="text-[10px] text-gray-500 hover:text-red-400 ml-2"
-                          >
-                            삭제
-                          </button>
+                      <div key={log.id} className="bg-slate-950 p-2.5 rounded-xl border border-red-950 space-y-0.5">
+                        <div className="flex justify-between text-xs font-bold text-slate-200">
+                          <span>{log.desc}</span>
+                          <button onClick={() => handleDeleteSpeedLog(log.id)} className="text-[10px] text-slate-500">삭제</button>
                         </div>
-                        <div className="text-[11px] text-gray-400">{log.timestamp}</div>
-                        <div className="flex items-center justify-between pt-1 text-xs">
-                          <span className="text-gray-400">제한 {log.limitSpeed}km/h · 통과 <span className="text-white font-bold">{log.passSpeed}km/h</span></span>
-                          <span className="text-red-400 font-black">+{log.overSpeed} km/h 초과</span>
+                        <div className="text-[10px] text-slate-400">{log.timestamp}</div>
+                        <div className="flex justify-between text-xs pt-1">
+                          <span className="text-slate-400">제한 {log.limitSpeed} / 통과 {log.passSpeed}km/h</span>
+                          <span className="text-red-400 font-bold">+{log.overSpeed} km/h 초과</span>
                         </div>
                       </div>
                     ))
                   )}
                 </div>
-
                 {appData.speedingLogs && appData.speedingLogs.length > 0 && (
-                  <button
-                    onClick={handleClearAllSpeedLogs}
-                    className="w-full py-2 bg-red-950/80 hover:bg-red-900 text-red-300 font-bold rounded-xl text-xs border border-red-800"
-                  >
+                  <button onClick={handleClearAllSpeedLogs} className="w-full py-2 bg-red-950 text-red-300 font-bold rounded-xl text-xs">
                     이력 전체 삭제
                   </button>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* 8. 세무서 양식 모달 */}
+          {showTaxModal && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xs font-bold text-yellow-400">세무서 제출 양식</h3>
+                  <button onClick={() => setShowTaxModal(false)} className="text-slate-400 text-base font-bold">✕</button>
+                </div>
+                <textarea
+                  readOnly
+                  value={taxReportText}
+                  className="w-full h-56 bg-slate-950 text-slate-200 text-xs font-mono p-2.5 rounded-xl border border-slate-800 resize-none focus:outline-none"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(taxReportText);
+                    alert('복사되었습니다.');
+                  }}
+                  className="w-full py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs"
+                >
+                  내용 전체 복사
+                </button>
               </div>
             </div>
           )}
@@ -1296,8 +1254,8 @@
       );
     }
 
-    // --- 일별 운행기록 작성 모달 ---
-    function DailyRecordModal({ activeTab, dateKey, existingData, onSave, onClose }) {
+    // 일별 기록 작성 모달
+    function DailyRecordModal({ activeType, dateKey, existingData, onSave, onClose }) {
       const [isHoliday, setIsHoliday] = useState(existingData.isHoliday || false);
       const [memo, setMemo] = useState(existingData.memo || '');
 
@@ -1313,7 +1271,7 @@
       const [other, setOther] = useState(existingData.other || 0);
 
       const handleSave = () => {
-        if (activeTab === 'corporate') {
+        if (activeType === 'corporate') {
           onSave({
             isHoliday,
             memo,
@@ -1337,140 +1295,92 @@
 
       return (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-5 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center pb-2 border-b border-gray-800">
-              <h3 className="text-sm font-bold text-yellow-400">{dateKey} 운행기록</h3>
-              <button onClick={onClose} className="text-gray-400 font-bold text-lg">✕</button>
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+              <h3 className="text-xs font-bold text-yellow-400">{dateKey} 운행 기록</h3>
+              <button onClick={onClose} className="text-slate-400 font-bold text-base">✕</button>
             </div>
 
-            <label className="flex items-center gap-2 bg-gray-950 p-2.5 rounded-xl border border-gray-800 cursor-pointer">
+            <label className="flex items-center gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800 cursor-pointer">
               <input
                 type="checkbox"
                 checked={isHoliday}
                 onChange={(e) => setIsHoliday(e.target.checked)}
                 className="w-4 h-4 rounded text-yellow-500 focus:ring-0"
               />
-              <span className="text-xs font-bold text-gray-300">이 날은 운행하지 않고 휴무했습니다</span>
+              <span className="text-xs font-bold text-slate-300">이 날은 휴무했습니다 (미운행)</span>
             </label>
 
             {!isHoliday && (
-              <div className="space-y-3">
-                {activeTab === 'corporate' ? (
+              <div className="space-y-2.5">
+                {activeType === 'corporate' ? (
                   <>
                     <div>
-                      <label className="text-xs text-gray-400 block mb-1">당일 운행 총매출액</label>
-                      <SmartMoneyInput
-                        value={revenue}
-                        onChange={setRevenue}
-                        placeholder="0"
-                        colorClass="text-yellow-400"
-                      />
+                      <label className="text-[11px] text-slate-400 block mb-1">당일 운행 총매출액</label>
+                      <SmartMoneyInput value={revenue} onChange={setRevenue} colorClass="text-yellow-400" />
                     </div>
                     <div>
-                      <label className="text-xs text-blue-400 block mb-1">가스 충전비 (회사부담 참고용)</label>
-                      <SmartMoneyInput
-                        value={gas}
-                        onChange={setGas}
-                        placeholder="0"
-                        colorClass="text-blue-300"
-                      />
+                      <label className="text-[11px] text-blue-400 block mb-1">가스 충전비 (회사부담 참고)</label>
+                      <SmartMoneyInput value={gas} onChange={setGas} colorClass="text-blue-300" />
                     </div>
                     <div>
-                      <label className="text-xs text-orange-400 block mb-1">기타 기사부담 경비 (식대/세차/통행료 등)</label>
-                      <SmartMoneyInput
-                        value={driverExpense}
-                        onChange={setDriverExpense}
-                        placeholder="0"
-                        colorClass="text-orange-300"
-                      />
+                      <label className="text-[11px] text-orange-400 block mb-1">기타 기사경비 (식대/세차 등)</label>
+                      <SmartMoneyInput value={driverExpense} onChange={setDriverExpense} colorClass="text-orange-300" />
                     </div>
                   </>
                 ) : (
                   <>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[11px] text-gray-400 block mb-1">카드/앱 결제 매출</label>
-                        <SmartMoneyInput
-                          value={cardRev}
-                          onChange={setCardRev}
-                          placeholder="0"
-                        />
+                        <label className="text-[10px] text-slate-400 block mb-1">카드/앱 매출</label>
+                        <SmartMoneyInput value={cardRev} onChange={setCardRev} />
                       </div>
                       <div>
-                        <label className="text-[11px] text-gray-400 block mb-1">현금 수입 매출</label>
-                        <SmartMoneyInput
-                          value={cashRev}
-                          onChange={setCashRev}
-                          placeholder="0"
-                        />
+                        <label className="text-[10px] text-slate-400 block mb-1">현금 수입</label>
+                        <SmartMoneyInput value={cashRev} onChange={setCashRev} />
                       </div>
                     </div>
-
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[11px] text-gray-400 block mb-1">가스 충전비</label>
-                        <SmartMoneyInput
-                          value={privGas}
-                          onChange={setPrivGas}
-                          placeholder="0"
-                        />
+                        <label className="text-[10px] text-slate-400 block mb-1">가스비</label>
+                        <SmartMoneyInput value={privGas} onChange={setPrivGas} />
                       </div>
                       <div>
-                        <label className="text-[11px] text-gray-400 block mb-1">도로 통행료</label>
-                        <SmartMoneyInput
-                          value={toll}
-                          onChange={setToll}
-                          placeholder="0"
-                        />
+                        <label className="text-[10px] text-slate-400 block mb-1">통행료</label>
+                        <SmartMoneyInput value={toll} onChange={setToll} />
                       </div>
                     </div>
-
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[11px] text-gray-400 block mb-1">정비/소모품비</label>
-                        <SmartMoneyInput
-                          value={maint}
-                          onChange={setMaint}
-                          placeholder="0"
-                        />
+                        <label className="text-[10px] text-slate-400 block mb-1">정비비</label>
+                        <SmartMoneyInput value={maint} onChange={setMaint} />
                       </div>
                       <div>
-                        <label className="text-[11px] text-gray-400 block mb-1">기타 사업경비</label>
-                        <SmartMoneyInput
-                          value={other}
-                          onChange={setOther}
-                          placeholder="0"
-                        />
+                        <label className="text-[10px] text-slate-400 block mb-1">기타경비</label>
+                        <SmartMoneyInput value={other} onChange={setOther} />
                       </div>
                     </div>
                   </>
                 )}
 
                 <div>
-                  <label className="text-xs text-gray-400 block mb-1">운행 메모</label>
+                  <label className="text-[11px] text-slate-400 block mb-1">운행 메모</label>
                   <input
                     type="text"
                     placeholder="특이사항 메모"
                     value={memo}
-                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setMemo(e.target.value)}
-                    className="w-full bg-gray-950 border border-gray-700 p-2 text-xs rounded-xl text-white focus:outline-none"
+                    className="w-full bg-slate-950 border border-slate-700 p-2 text-xs rounded-xl text-white focus:outline-none"
                   />
                 </div>
               </div>
             )}
 
             <div className="flex gap-2 pt-2">
-              <button
-                onClick={handleSave}
-                className="flex-1 py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs"
-              >
+              <button onClick={handleSave} className="flex-1 py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs">
                 저장 완료
               </button>
-              <button
-                onClick={onClose}
-                className="px-4 py-2.5 bg-gray-800 text-gray-300 font-bold rounded-xl text-xs"
-              >
+              <button onClick={onClose} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">
                 취소
               </button>
             </div>
