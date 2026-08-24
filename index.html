@@ -22,9 +22,8 @@
     .hud-mirror {
       transform: scaleY(-1);
     }
-    /* 하단 탭 바 safe area */
     .pb-safe {
-      padding-bottom: env(safe-area-inset-bottom, 1rem);
+      padding-bottom: env(safe-area-inset-bottom, 1.25rem);
     }
   </style>
 </head>
@@ -34,7 +33,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    // --- 유틸리티 함수 ---
+    // --- 통화 포맷 유틸리티 ---
     const formatMoney = (val) => {
       const num = Number(String(val).replace(/[^0-9]/g, '')) || 0;
       return num.toLocaleString('ko-KR');
@@ -68,7 +67,7 @@
       return `${date} ${time}`;
     };
 
-    // 하버사인 거리 계산
+    // 하버사인 거리 계산 공식
     const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371e3;
       const φ1 = (lat1 * Math.PI) / 180;
@@ -83,7 +82,7 @@
       return R * c;
     };
 
-    // 기본 단속 카메라 DB
+    // 단속 카메라 DB
     const SAMPLE_CAMERAS = [
       { id: 1, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 단속' },
       { id: 2, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 단속' },
@@ -92,7 +91,7 @@
       { id: 5, lat: 36.7812, lon: 127.0095, limitSpeed: 30, desc: '스쿨존 단속' }
     ];
 
-    // 스토리지 기본 데이터 (급여명세서 실데이터 기반)
+    // 스토리지 표준 기본값
     const DEFAULT_STORAGE = {
       activeType: 'corporate', // 'corporate' | 'private'
       corporate: {
@@ -116,6 +115,44 @@
         records: {}
       },
       speedingLogs: []
+    };
+
+    // 안전한 로컬 스토리지 로더 (구버전 데이터 자동 통합)
+    const loadSafeData = () => {
+      try {
+        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V12') ||
+                      localStorage.getItem('K_TAXI_RECORD_DATA_V11') ||
+                      localStorage.getItem('K_TAXI_RECORD_DATA_V10') ||
+                      localStorage.getItem('K_TAXI_RECORD_DATA_V9') ||
+                      localStorage.getItem('K_TAXI_RECORD_DATA_V8');
+
+        if (saved) {
+          const p = JSON.parse(saved);
+          return {
+            activeType: (p.activeType || p.activeTab || 'corporate') === 'private' ? 'private' : 'corporate',
+            corporate: {
+              carNumber: p.corporate?.carNumber || '',
+              dailyDeposit: Number(p.corporate?.dailyDeposit || p.corporate?.baseDeposit || 201000),
+              deductionRate: Number(p.corporate?.deductionRate || 9.0),
+              fixedAllowanceItems: Array.isArray(p.corporate?.fixedAllowanceItems) && p.corporate.fixedAllowanceItems.length > 0
+                ? p.corporate.fixedAllowanceItems
+                : DEFAULT_STORAGE.corporate.fixedAllowanceItems,
+              fixedExpenseItems: Array.isArray(p.corporate?.fixedExpenseItems)
+                ? p.corporate.fixedExpenseItems
+                : DEFAULT_STORAGE.corporate.fixedExpenseItems,
+              records: p.corporate?.records || {}
+            },
+            private: {
+              carNumber: p.private?.carNumber || '',
+              records: p.private?.records || {}
+            },
+            speedingLogs: Array.isArray(p.speedingLogs) ? p.speedingLogs : []
+          };
+        }
+      } catch (e) {
+        console.warn('Storage Parse Fallback', e);
+      }
+      return DEFAULT_STORAGE;
     };
 
     // 스마트 금액 입력 인풋
@@ -145,32 +182,17 @@
               const raw = e.target.value.replace(/[^0-9]/g, '');
               onChange(raw ? Number(raw) : 0);
             }}
-            className={`w-full bg-slate-900 border border-slate-700 p-2.5 text-sm rounded-xl text-right font-bold ${colorClass} focus:border-yellow-500 focus:outline-none ${className}`}
+            className={`w-full bg-slate-900 border border-slate-700 p-2 text-sm rounded-xl text-right font-bold ${colorClass} focus:border-yellow-500 focus:outline-none ${className}`}
           />
         </div>
       );
     }
 
     function App() {
-      const [appData, setAppData] = useState(() => {
-        const saved = localStorage.getItem('K_TAXI_RECORD_DATA_V12');
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (!parsed.corporate.fixedAllowanceItems) {
-              parsed.corporate.fixedAllowanceItems = DEFAULT_STORAGE.corporate.fixedAllowanceItems;
-            }
-            return parsed;
-          } catch (e) {
-            return DEFAULT_STORAGE;
-          }
-        }
-        return DEFAULT_STORAGE;
-      });
+      const [appData, setAppData] = useState(loadSafeData);
 
-      // 네비게이션 탭 ('calendar' | 'settlement' | 'hud' | 'settings')
+      // 하단 4개 탭 모드 ('calendar' | 'settlement' | 'hud' | 'settings')
       const [currentTab, setCurrentTab] = useState('calendar');
-      
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
         const now = new Date();
@@ -193,6 +215,7 @@
       const lastAlertedCamRef = useRef(null);
       const lastLoggedCamRef = useRef(null);
 
+      // 스토리지 동기화
       useEffect(() => {
         localStorage.setItem('K_TAXI_RECORD_DATA_V12', JSON.stringify(appData));
       }, [appData]);
@@ -223,7 +246,7 @@
         }
       };
 
-      // GPS Watcher
+      // GPS 감시 루프
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -290,15 +313,16 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, []);
 
+      const activeType = appData.activeType === 'private' ? 'private' : 'corporate';
+
       const setVehicleType = (type) => {
         setAppData(prev => ({ ...prev, activeType: type }));
       };
 
       const handleCarNumberChange = (val) => {
-        const type = appData.activeType;
         setAppData(prev => ({
           ...prev,
-          [type]: { ...prev[type], carNumber: val }
+          [activeType]: { ...prev[activeType], carNumber: val }
         }));
       };
 
@@ -379,13 +403,12 @@
 
       // 일별 기록 저장
       const handleSaveRecord = (dateKey, recordData) => {
-        const type = appData.activeType;
         setAppData(prev => ({
           ...prev,
-          [type]: {
-            ...prev[type],
+          [activeType]: {
+            ...prev[activeType],
             records: {
-              ...prev[type].records,
+              ...(prev[activeType]?.records || {}),
               [dateKey]: recordData
             }
           }
@@ -395,19 +418,18 @@
 
       const handleDeleteDailyRecord = (dateKey) => {
         if (!confirm(`${dateKey} 기록을 삭제하시겠습니까?`)) return;
-        const type = appData.activeType;
-        const updatedRecords = { ...appData[type].records };
+        const updatedRecords = { ...(appData[activeType]?.records || {}) };
         delete updatedRecords[dateKey];
         setAppData(prev => ({
           ...prev,
-          [type]: { ...prev[type], records: updatedRecords }
+          [activeType]: { ...prev[activeType], records: updatedRecords }
         }));
       };
 
       const handleDeleteSpeedLog = (id) => {
         setAppData(prev => ({
           ...prev,
-          speedingLogs: prev.speedingLogs.filter(item => item.id !== id)
+          speedingLogs: (prev.speedingLogs || []).filter(item => item.id !== id)
         }));
       };
 
@@ -417,29 +439,28 @@
         }
       };
 
-      // 자동 합산액 계산
+      // 수당 & 공제 자동합산
       const totalFixedAllowances = useMemo(() => {
-        const items = appData.corporate.fixedAllowanceItems || [];
+        const items = appData.corporate?.fixedAllowanceItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      }, [appData.corporate.fixedAllowanceItems]);
+      }, [appData.corporate?.fixedAllowanceItems]);
 
       const totalFixedExpenses = useMemo(() => {
-        const items = appData.corporate.fixedExpenseItems || [];
+        const items = appData.corporate?.fixedExpenseItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      }, [appData.corporate.fixedExpenseItems]);
+      }, [appData.corporate?.fixedExpenseItems]);
 
       // 월별 정산 통계
       const currentMonthStats = useMemo(() => {
-        const type = appData.activeType;
-        const records = appData[type].records || {};
+        const records = appData[activeType]?.records || {};
         const entries = Object.entries(records).filter(([date]) => date.startsWith(currentYearMonth));
 
         let workDays = 0;
         let holidayDays = 0;
 
-        if (type === 'corporate') {
-          const dailyDeposit = Number(appData.corporate.dailyDeposit || 201000);
-          const deductionRate = Number(appData.corporate.deductionRate || 9.0) / 100;
+        if (activeType === 'corporate') {
+          const dailyDeposit = Number(appData.corporate?.dailyDeposit || 201000);
+          const deductionRate = Number(appData.corporate?.deductionRate || 9.0) / 100;
 
           let totalRevenue = 0;
           let totalGasCompany = 0;
@@ -447,14 +468,14 @@
           let totalIncentive = 0;
 
           entries.forEach(([_, r]) => {
-            if (r.isHoliday) {
+            if (r?.isHoliday) {
               holidayDays++;
             } else {
               workDays++;
-              const rev = Number(r.revenue || 0);
+              const rev = Number(r?.revenue || 0);
               totalRevenue += rev;
-              totalGasCompany += Number(r.gas || 0);
-              totalDriverExpense += Number(r.driverExpense || 0);
+              totalGasCompany += Number(r?.gas || 0);
+              totalDriverExpense += Number(r?.driverExpense || 0);
 
               const dailyOver = Math.max(0, rev - dailyDeposit);
               totalIncentive += Math.round(dailyOver * 0.7);
@@ -492,16 +513,16 @@
           let otherTotal = 0;
 
           entries.forEach(([_, r]) => {
-            if (r.isHoliday) {
+            if (r?.isHoliday) {
               holidayDays++;
             } else {
               workDays++;
-              cardTotal += Number(r.cardRev || 0);
-              cashTotal += Number(r.cashRev || 0);
-              gasTotal += Number(r.gas || 0);
-              tollTotal += Number(r.toll || 0);
-              maintTotal += Number(r.maint || 0);
-              otherTotal += Number(r.other || 0);
+              cardTotal += Number(r?.cardRev || 0);
+              cashTotal += Number(r?.cashRev || 0);
+              gasTotal += Number(r?.gas || 0);
+              tollTotal += Number(r?.toll || 0);
+              maintTotal += Number(r?.maint || 0);
+              otherTotal += Number(r?.other || 0);
             }
           });
 
@@ -523,7 +544,7 @@
             netIncome
           };
         }
-      }, [appData, currentYearMonth, totalFixedAllowances, totalFixedExpenses]);
+      }, [appData, activeType, currentYearMonth, totalFixedAllowances, totalFixedExpenses]);
 
       // 달력 날짜 생성
       const calendarCells = useMemo(() => {
@@ -544,9 +565,9 @@
 
       // 세무서 텍스트
       const taxReportText = useMemo(() => {
-        if (appData.activeType !== 'private') return '';
+        if (activeType !== 'private') return '';
         const stats = currentMonthStats;
-        const carNum = appData.private.carNumber || '미등록';
+        const carNum = appData.private?.carNumber || '미등록';
 
         return `[세무서 제출용 간편 소득 요약서]
 ■ 귀속기간: ${currentYearMonth}
@@ -567,7 +588,7 @@
 3. 소득금액 (과세표준 대상): ${formatMoney(stats.netIncome)}
 ------------------------------------
 ※ 본 자료는 K-TAXI에서 자동 산출된 자료입니다.`;
-      }, [appData, currentMonthStats, currentYearMonth]);
+      }, [appData, activeType, currentMonthStats, currentYearMonth]);
 
       const exportBackup = () => {
         const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
@@ -603,7 +624,7 @@
         setShowDailyModal(true);
       };
 
-      const currentRecords = appData[appData.activeType].records || {};
+      const currentRecords = appData[activeType]?.records || {};
       const sortedMonthEntries = Object.entries(currentRecords)
         .filter(([date]) => date.startsWith(currentYearMonth))
         .sort(([a], [b]) => a.localeCompare(b));
@@ -611,29 +632,29 @@
       return (
         <div className="max-w-md mx-auto w-full min-h-screen flex flex-col bg-slate-950 border-x border-slate-800 relative">
           
-          {/* 1. 상단 심플 헤더 */}
-          <header className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
+          {/* 상단 간결 헤더 */}
+          <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
             <div className="flex items-center gap-2">
               <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
-              <span className="text-sm font-bold text-white tracking-tight">
-                {appData[appData.activeType].carNumber || (appData.activeType === 'corporate' ? '법인택시' : '개인택시')}
+              <span className="text-sm font-bold text-white tracking-tight truncate max-w-[150px]">
+                {appData[activeType]?.carNumber || (activeType === 'corporate' ? '법인택시' : '개인택시')}
               </span>
             </div>
 
-            {/* 법인 / 개인 원터치 토글 */}
+            {/* 법인 / 개인 전환 토글 */}
             <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
               <button
                 onClick={() => setVehicleType('corporate')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
-                  appData.activeType === 'corporate' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
+                className={`px-3 py-1 text-xs font-bold rounded-md transition ${
+                  activeType === 'corporate' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
                 }`}
               >
                 법인
               </button>
               <button
                 onClick={() => setVehicleType('private')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
-                  appData.activeType === 'private' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
+                className={`px-3 py-1 text-xs font-bold rounded-md transition ${
+                  activeType === 'private' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
                 }`}
               >
                 개인
@@ -641,15 +662,14 @@
             </div>
           </header>
 
-          {/* 2. 메인 컨텐츠 영역 (탭별 렌더링) */}
+          {/* 메인 뷰 컨텐츠 */}
           <main className="flex-1 p-3.5 pb-24 overflow-y-auto">
             
-            {/* 탭 1: 운행 달력 (홈) */}
+            {/* 탭 1: 운행일지 & 달력 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3.5">
-                
-                {/* 월 선택 & 빠른 요약 카드 */}
-                <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
+                {/* 월 선택 바 */}
+                <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
                   <button
                     onClick={() => {
                       const [y, m] = currentYearMonth.split('-').map(Number);
@@ -678,7 +698,7 @@
                   </button>
                 </div>
 
-                {/* 핵심 수입 요약 바 */}
+                {/* 핵심 실시간 요약 카드 */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
                     <span className="text-[11px] text-slate-400 block font-semibold">이번 달 총 매출</span>
@@ -688,17 +708,17 @@
                   </div>
                   <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
                     <span className="text-[11px] text-green-400 block font-semibold">
-                      {appData.activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}
+                      {activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}
                     </span>
                     <span className="text-base font-black text-green-400 block mt-0.5">
-                      {appData.activeType === 'corporate'
+                      {activeType === 'corporate'
                         ? formatMoney(currentMonthStats.netSalaryFromCompany)
                         : formatMoney(currentMonthStats.netIncome)}
                     </span>
                   </div>
                 </div>
 
-                {/* 심플 캘린더 */}
+                {/* 미니 캘린더 */}
                 <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
                   <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
                     <span className="text-red-400">일</span>
@@ -744,7 +764,7 @@
                               </span>
                             ) : (
                               <span className="text-[8px] text-yellow-400 font-bold truncate w-full text-center leading-tight">
-                                {appData.activeType === 'corporate'
+                                {activeType === 'corporate'
                                   ? formatShortMoney(rec.revenue)
                                   : formatShortMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
                               </span>
@@ -756,10 +776,10 @@
                   </div>
                 </div>
 
-                {/* 일별 목록 */}
+                {/* 일별 기록 리스트 */}
                 <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800 space-y-2">
                   <div className="flex justify-between items-center pb-1">
-                    <span className="text-xs font-bold text-slate-300">운행 일지 목록 ({sortedMonthEntries.length}건)</span>
+                    <span className="text-xs font-bold text-slate-300">운행 일지 ({sortedMonthEntries.length}건)</span>
                     <button
                       onClick={() => openModalForDate(getTodayKey())}
                       className="px-2.5 py-1 bg-yellow-500 text-black font-bold text-[11px] rounded-lg shadow active:bg-yellow-400"
@@ -782,17 +802,17 @@
                           <div className="space-y-0.5">
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-slate-300">{date}</span>
-                              {rec.isHoliday ? (
+                              {rec?.isHoliday ? (
                                 <span className="bg-green-950 text-green-300 text-[9px] px-1 rounded font-bold">휴무</span>
                               ) : (
                                 <span className="text-yellow-400 font-black">
-                                  {appData.activeType === 'corporate'
-                                    ? formatMoney(rec.revenue)
-                                    : formatMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
+                                  {activeType === 'corporate'
+                                    ? formatMoney(rec?.revenue)
+                                    : formatMoney(Number(rec?.cardRev || 0) + Number(rec?.cashRev || 0))}
                                 </span>
                               )}
                             </div>
-                            {rec.memo && <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{rec.memo}</div>}
+                            {rec?.memo && <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{rec.memo}</div>}
                           </div>
                           <div className="flex items-center gap-1.5">
                             <button
@@ -816,12 +836,12 @@
               </div>
             )}
 
-            {/* 탭 2: 월간 정산 명세서 */}
+            {/* 탭 2: 월간 급여 정산서 */}
             {currentTab === 'settlement' && (
               <div className="space-y-3.5">
                 <div className="flex justify-between items-center bg-slate-900 p-3 rounded-2xl border border-slate-800">
-                  <span className="text-sm font-bold text-yellow-400">{currentYearMonth} 급여 정산서</span>
-                  {appData.activeType === 'private' && (
+                  <span className="text-sm font-bold text-yellow-400">{currentYearMonth} 정산 명세서</span>
+                  {activeType === 'private' && (
                     <button
                       onClick={() => setShowTaxModal(true)}
                       className="px-2.5 py-1 bg-yellow-500 text-black font-bold rounded-lg text-xs"
@@ -831,7 +851,7 @@
                   )}
                 </div>
 
-                {appData.activeType === 'corporate' ? (
+                {activeType === 'corporate' ? (
                   <div className="space-y-3">
                     {/* 회사 지급 내역 */}
                     <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2">
@@ -856,7 +876,7 @@
                         <span>-{formatMoney(currentMonthStats.totalDeductions)}</span>
                       </div>
                       <div className="flex justify-between text-xs text-slate-400">
-                        <span>4대보험 및 세금 ({appData.corporate.deductionRate}%):</span>
+                        <span>4대보험 및 세금 ({appData.corporate?.deductionRate}%):</span>
                         <span>-{formatMoney(currentMonthStats.taxAndInsurance)}</span>
                       </div>
                       <div className="flex justify-between text-xs text-orange-400">
@@ -985,26 +1005,26 @@
                     <input
                       type="text"
                       placeholder="충남31바 1234"
-                      value={appData[appData.activeType].carNumber}
+                      value={appData[activeType]?.carNumber || ''}
                       onChange={(e) => handleCarNumberChange(e.target.value)}
                       className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-36 text-white"
                     />
                   </div>
 
-                  {appData.activeType === 'corporate' && (
+                  {activeType === 'corporate' && (
                     <>
                       <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
                         <span className="text-slate-400">1일 기준 사납금</span>
                         <div className="w-32">
                           <SmartMoneyInput
-                            value={appData.corporate.dailyDeposit}
+                            value={appData.corporate?.dailyDeposit}
                             onChange={(val) => handleCorporateConfigChange('dailyDeposit', val)}
                           />
                         </div>
                       </div>
 
                       <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
-                        <span className="text-slate-400">고정 수당 목록 ({appData.corporate.fixedAllowanceItems?.length || 0}개)</span>
+                        <span className="text-slate-400">고정 수당 목록 ({appData.corporate?.fixedAllowanceItems?.length || 0}개)</span>
                         <button
                           onClick={() => setShowFixedAllowanceModal(true)}
                           className="px-3 py-1 bg-slate-800 text-blue-300 font-bold rounded-xl border border-blue-500/30"
@@ -1014,7 +1034,7 @@
                       </div>
 
                       <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
-                        <span className="text-slate-400">회사 고정비 공제 ({appData.corporate.fixedExpenseItems?.length || 0}개)</span>
+                        <span className="text-slate-400">회사 고정비 공제 ({appData.corporate?.fixedExpenseItems?.length || 0}개)</span>
                         <button
                           onClick={() => setShowFixedExpenseModal(true)}
                           className="px-3 py-1 bg-slate-800 text-orange-300 font-bold rounded-xl border border-orange-500/30"
@@ -1029,7 +1049,7 @@
                           <input
                             type="number"
                             step="0.1"
-                            value={appData.corporate.deductionRate}
+                            value={appData.corporate?.deductionRate || 9.0}
                             onChange={(e) => handleCorporateConfigChange('deductionRate', e.target.value)}
                             className="bg-slate-950 border border-slate-700 px-2 py-1 text-xs rounded-xl text-right w-16 text-white font-bold"
                           />
@@ -1074,7 +1094,7 @@
             )}
           </main>
 
-          {/* 3. 하단 네비게이션 탭 바 (App Navigation) */}
+          {/* 하단 4대 탭 바 */}
           <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
             <button
               onClick={() => setCurrentTab('calendar')}
@@ -1106,18 +1126,18 @@
             </button>
           </nav>
 
-          {/* 4. 일별 기록 모달 */}
+          {/* 일별 기록 모달 */}
           {showDailyModal && (
             <DailyRecordModal
-              activeType={appData.activeType}
+              activeType={activeType}
               dateKey={selectedDate}
-              existingData={appData[appData.activeType].records[selectedDate] || {}}
+              existingData={appData[activeType]?.records?.[selectedDate] || {}}
               onSave={(data) => handleSaveRecord(selectedDate, data)}
               onClose={() => setShowDailyModal(false)}
             />
           )}
 
-          {/* 5. 고정 수당 모달 */}
+          {/* 고정 수당 모달 */}
           {showFixedAllowanceModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
@@ -1126,7 +1146,7 @@
                   <button onClick={() => setShowFixedAllowanceModal(false)} className="text-slate-400 text-base font-bold">✕</button>
                 </div>
                 <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
-                  {(appData.corporate.fixedAllowanceItems || []).map((item) => (
+                  {(appData.corporate?.fixedAllowanceItems || []).map((item) => (
                     <div key={item.id} className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center gap-1.5">
                       <input
                         type="text"
@@ -1153,7 +1173,7 @@
             </div>
           )}
 
-          {/* 6. 회사 고정비 모달 */}
+          {/* 회사 고정비 모달 */}
           {showFixedExpenseModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
@@ -1162,7 +1182,7 @@
                   <button onClick={() => setShowFixedExpenseModal(false)} className="text-slate-400 text-base font-bold">✕</button>
                 </div>
                 <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
-                  {(appData.corporate.fixedExpenseItems || []).map((item) => (
+                  {(appData.corporate?.fixedExpenseItems || []).map((item) => (
                     <div key={item.id} className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center gap-1.5">
                       <input
                         type="text"
@@ -1189,7 +1209,7 @@
             </div>
           )}
 
-          {/* 7. 과속 단속 의심 모달 */}
+          {/* 과속 단속 의심 모달 */}
           {showSpeedLogModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3 max-h-[80vh] flex flex-col">
@@ -1225,7 +1245,7 @@
             </div>
           )}
 
-          {/* 8. 세무서 양식 모달 */}
+          {/* 세무서 양식 모달 */}
           {showTaxModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
@@ -1254,21 +1274,21 @@
       );
     }
 
-    // 일별 기록 작성 모달
+    // 일별 기록 모달
     function DailyRecordModal({ activeType, dateKey, existingData, onSave, onClose }) {
-      const [isHoliday, setIsHoliday] = useState(existingData.isHoliday || false);
-      const [memo, setMemo] = useState(existingData.memo || '');
+      const [isHoliday, setIsHoliday] = useState(existingData?.isHoliday || false);
+      const [memo, setMemo] = useState(existingData?.memo || '');
 
-      const [revenue, setRevenue] = useState(existingData.revenue || 0);
-      const [gas, setGas] = useState(existingData.gas || 0);
-      const [driverExpense, setDriverExpense] = useState(existingData.driverExpense || 0);
+      const [revenue, setRevenue] = useState(existingData?.revenue || 0);
+      const [gas, setGas] = useState(existingData?.gas || 0);
+      const [driverExpense, setDriverExpense] = useState(existingData?.driverExpense || 0);
 
-      const [cardRev, setCardRev] = useState(existingData.cardRev || 0);
-      const [cashRev, setCashRev] = useState(existingData.cashRev || 0);
-      const [privGas, setPrivGas] = useState(existingData.gas || 0);
-      const [toll, setToll] = useState(existingData.toll || 0);
-      const [maint, setMaint] = useState(existingData.maint || 0);
-      const [other, setOther] = useState(existingData.other || 0);
+      const [cardRev, setCardRev] = useState(existingData?.cardRev || 0);
+      const [cashRev, setCashRev] = useState(existingData?.cashRev || 0);
+      const [privGas, setPrivGas] = useState(existingData?.gas || 0);
+      const [toll, setToll] = useState(existingData?.toll || 0);
+      const [maint, setMaint] = useState(existingData?.maint || 0);
+      const [other, setOther] = useState(existingData?.other || 0);
 
       const handleSave = () => {
         if (activeType === 'corporate') {
