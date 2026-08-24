@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>K-TAXI 운행기록장 & 안전운행 HUD</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -43,7 +46,10 @@
   </div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef, useMemo } = React;
+    const { useState, useEffect, useRef, useMemo, Component } = React;
+
+    const APP_VERSION = 'v1.3.2';
+    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V13';
 
     // --- 통화 포맷 유틸리티 ---
     const formatMoney = (val) => {
@@ -94,9 +100,8 @@
       return R * c;
     };
 
-    // --- 확장된 단속 카메라 DB (천안·아산 및 주요 간선도로 실좌표 내장) ---
+    // --- 단속 카메라 DB (천안·아산 및 주요 간선도로 실좌표) ---
     const ENFORCEMENT_CAMERAS = [
-      // 천안 도심 및 주요 교차로
       { id: 101, lat: 36.8124, lon: 127.1085, limitSpeed: 50, desc: '불당동 번영로사거리 단속' },
       { id: 102, lat: 36.8198, lon: 127.1565, limitSpeed: 50, desc: '신부동 천안종합터미널앞 단속' },
       { id: 103, lat: 36.8322, lon: 127.1488, limitSpeed: 50, desc: '두정역입구 교차로 신호과속' },
@@ -105,14 +110,10 @@
       { id: 106, lat: 36.7865, lon: 127.1585, limitSpeed: 50, desc: '청수동 행정타운 교차로단속' },
       { id: 107, lat: 36.8155, lon: 127.1402, limitSpeed: 50, desc: '성정동 성정지하차도앞 단속' },
       { id: 108, lat: 36.8455, lon: 127.1355, limitSpeed: 50, desc: '성성동 업성수변로 과속단속' },
-      
-      // 천안 스쿨존 (어린이보호구역 30km/h)
       { id: 109, lat: 36.7925, lon: 127.1185, limitSpeed: 30, desc: '쌍용초/나사렛대 스쿨존 단속' },
       { id: 110, lat: 36.8145, lon: 127.1125, limitSpeed: 30, desc: '불당초교앞 어린이보호구역' },
       { id: 111, lat: 36.8215, lon: 127.1355, limitSpeed: 30, desc: '성정초교앞 스쿨존 단속' },
       { id: 112, lat: 36.7845, lon: 127.1485, limitSpeed: 30, desc: '청수초교앞 어린이보호구역' },
-
-      // 아산 도심 및 탕정/배방권
       { id: 201, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 교차로 신호단속' },
       { id: 202, lat: 36.7802, lon: 127.0045, limitSpeed: 50, desc: '온양온천역 광장앞 신호단속' },
       { id: 203, lat: 36.7775, lon: 127.0525, limitSpeed: 50, desc: '배방역삼거리 모산로 단속' },
@@ -121,26 +122,20 @@
       { id: 206, lat: 36.7685, lon: 127.0655, limitSpeed: 60, desc: '배방 온천대로 신호과속' },
       { id: 207, lat: 36.7955, lon: 127.0855, limitSpeed: 60, desc: '이순신대로 천안아산경계 단속' },
       { id: 208, lat: 36.9155, lon: 127.0425, limitSpeed: 50, desc: '둔포면 아산밸리로 교차로' },
-
-      // 아산 스쿨존 (어린이보호구역 30km/h)
       { id: 209, lat: 36.7985, lon: 127.0555, limitSpeed: 30, desc: '탕정초교앞 어린이보호구역' },
       { id: 210, lat: 36.7725, lon: 127.0185, limitSpeed: 30, desc: '온양초교앞 스쿨존 단속' },
       { id: 211, lat: 36.7745, lon: 127.0585, limitSpeed: 30, desc: '배방초교앞 어린이보호구역' },
-
-      // 천안-아산 주요 국도 및 자동차전용도로
       { id: 301, lat: 36.7825, lon: 127.1215, limitSpeed: 60, desc: '21번국도 신방삼거리 단속' },
       { id: 302, lat: 36.7615, lon: 126.9855, limitSpeed: 70, desc: '21번국도 장존교차로 단속' },
       { id: 303, lat: 36.7755, lon: 127.1685, limitSpeed: 70, desc: '남부대로 유량교차로 과속단속' },
       { id: 304, lat: 36.8725, lon: 127.1515, limitSpeed: 70, desc: '1번국도 직산사거리 단속' },
       { id: 305, lat: 36.8355, lon: 127.0355, limitSpeed: 80, desc: '43번국도 세종평택로 진입로' },
-
-      // 서울/수도권 주요 랜드마크 샘플
       { id: 401, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 신호·과속 단속' },
       { id: 402, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 과속단속' },
       { id: 403, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 신호·과속 단속' }
     ];
 
-    // 스토리지 표준 기본값
+    // 스토리지 기본 스키마
     const DEFAULT_STORAGE = {
       activeType: 'corporate',
       corporate: {
@@ -166,7 +161,7 @@
       speedingLogs: []
     };
 
-    // 안전 데이터 로더 (기존 저장 데이터 마이그레이션)
+    // --- 1단계: 전 버전 다중 스키마 안전 로더 (마이그레이션) ---
     const loadSafeData = () => {
       try {
         let saved = null;
@@ -174,7 +169,7 @@
           const raw = localStorage.getItem(`K_TAXI_RECORD_DATA_V${i}`);
           if (raw) { saved = raw; break; }
         }
-        if (!saved) saved = localStorage.getItem('K_TAXI_RECORD_DATA_V12');
+        if (!saved) saved = localStorage.getItem('K_TAXI_RECORD_DATA');
 
         if (saved) {
           const p = JSON.parse(saved);
@@ -183,7 +178,7 @@
             corporate: {
               carNumber: p.corporate?.carNumber || '',
               dailyDeposit: Number(p.corporate?.dailyDeposit || p.corporate?.baseDeposit || 201000),
-              deductionRate: Number(p.corporate?.deductionRate || 9.0),
+              deductionRate: Number(p.corporate?.deductionRate !== undefined ? p.corporate.deductionRate : 9.0),
               fixedAllowanceItems: Array.isArray(p.corporate?.fixedAllowanceItems) && p.corporate.fixedAllowanceItems.length > 0
                 ? p.corporate.fixedAllowanceItems
                 : DEFAULT_STORAGE.corporate.fixedAllowanceItems,
@@ -200,12 +195,12 @@
           };
         }
       } catch (e) {
-        console.warn('Storage fallback', e);
+        console.warn('Storage Migration Fallback', e);
       }
       return DEFAULT_STORAGE;
     };
 
-    // 스마트 금액 입력 인풋
+    // --- 2단계: 스마트 금액 인풋 컴포넌트 ---
     function SmartMoneyInput({ value, onChange, placeholder = "0", className = "", colorClass = "text-white" }) {
       const numVal = Number(value) || 0;
       const displayVal = numVal > 0 ? numVal.toLocaleString('ko-KR') : '';
@@ -238,6 +233,7 @@
       );
     }
 
+    // --- 메인 App 컴포넌트 ---
     function App() {
       const [appData, setAppData] = useState(loadSafeData);
       const [currentTab, setCurrentTab] = useState('calendar'); // 'calendar' | 'settlement' | 'hud' | 'settings'
@@ -263,10 +259,10 @@
       const lastAlertedCamRef = useRef(null);
       const lastLoggedCamRef = useRef(null);
 
-      // 스토리지 동기화
+      // 스토리지 안전 동기화 (예외 방어)
       useEffect(() => {
         try {
-          localStorage.setItem('K_TAXI_RECORD_DATA_V12', JSON.stringify(appData));
+          localStorage.setItem(CURRENT_STORAGE_KEY, JSON.stringify(appData));
         } catch (e) {
           console.warn('Storage Save Warning', e);
         }
@@ -306,7 +302,7 @@
         }
       };
 
-      // GPS 감시 및 고속 반경 연산 필터링
+      // GPS 감시 루프
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -321,7 +317,7 @@
             let closest = null;
             let minDist = Infinity;
 
-            // 1차 반경(0.01도, 약 1.1km) 거친 필터링 후 정밀 하버사인 계산 (연산 최적화)
+            // 반경 연산 필터링 (최적화)
             ENFORCEMENT_CAMERAS.forEach((cam) => {
               if (Math.abs(userLat - cam.lat) < 0.015 && Math.abs(userLon - cam.lon) < 0.015) {
                 const dist = getDistanceMeters(userLat, userLon, cam.lat, cam.lon);
@@ -343,7 +339,6 @@
                 lastAlertedCamRef.current = `${closest.id}-500`;
               }
 
-              // 단속 지점 통과 시 과속 감지 자동 기록
               if (closest.distance <= 45 && speedKmh > closest.limitSpeed) {
                 if (lastLoggedCamRef.current !== closest.id) {
                   const overKm = speedKmh - closest.limitSpeed;
@@ -431,7 +426,7 @@
         }));
       };
 
-      // 고정비 관리
+      // 고정비 공제 관리
       const handleAddFixedExpense = () => {
         const newItem = { id: Date.now(), name: '항목추가', amount: 0 };
         setAppData(prev => ({
@@ -503,7 +498,7 @@
         }
       };
 
-      // 수당 & 공제 자동합산
+      // 자동 합산액 계산
       const totalFixedAllowances = useMemo(() => {
         const items = appData?.corporate?.fixedAllowanceItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
@@ -524,7 +519,7 @@
 
         if (activeType === 'corporate') {
           const dailyDeposit = Number(appData.corporate?.dailyDeposit || 201000);
-          const deductionRate = Number(appData.corporate?.deductionRate || 9.0) / 100;
+          const deductionRate = Number(appData.corporate?.deductionRate !== undefined ? appData.corporate.deductionRate : 9.0) / 100;
 
           let totalRevenue = 0;
           let totalGasCompany = 0;
@@ -779,7 +774,7 @@
                   </div>
                 </div>
 
-                {/* 달력 */}
+                {/* 미니 캘린더 */}
                 <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
                   <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
                     <span className="text-red-400">일</span>
@@ -1006,7 +1001,6 @@
                   )}
                 </div>
 
-                {/* 속도계 및 알림 */}
                 <div className={`flex flex-col items-center justify-center my-auto transition-transform ${hudMirrored ? 'hud-mirror' : ''}`}>
                   <div className="h-8 flex items-center text-center mb-2">
                     {nearestCamera ? (
@@ -1054,7 +1048,10 @@
             {currentTab === 'settings' && (
               <div className="space-y-3.5">
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
-                  <h3 className="text-xs font-bold text-slate-300">차량 및 기준 설정</h3>
+                  <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                    <h3 className="text-xs font-bold text-slate-300">차량 및 기준 설정</h3>
+                    <span className="text-[10px] text-green-400 font-semibold">● 실시간 자동 저장 보호 중</span>
+                  </div>
                   
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-slate-400">차량 번호</span>
@@ -1105,7 +1102,7 @@
                           <input
                             type="number"
                             step="0.1"
-                            value={appData.corporate?.deductionRate || 9.0}
+                            value={appData.corporate?.deductionRate !== undefined ? appData.corporate.deductionRate : 9.0}
                             onChange={(e) => handleCorporateConfigChange('deductionRate', e.target.value)}
                             className="bg-slate-950 border border-slate-700 px-2 py-1 text-xs rounded-xl text-right w-16 text-white font-bold"
                           />
@@ -1130,7 +1127,10 @@
                 </div>
 
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-2.5">
-                  <span className="text-xs font-bold text-slate-300 block">장부 데이터 백업 & 복원</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-slate-300">장부 데이터 백업 & 복원</span>
+                    <span className="text-[10px] text-slate-500">{APP_VERSION}</span>
+                  </div>
                   <div className="flex gap-2">
                     <button
                       onClick={exportBackup}
@@ -1463,9 +1463,73 @@
       );
     }
 
+    // --- 4단계: Error Boundary 보호막 ---
+    class ErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false };
+      }
+      static getDerivedStateFromError(error) {
+        return { hasError: true };
+      }
+      componentDidCatch(error, errorInfo) {
+        console.error("K-TAXI Runtime Error Caught:", error, errorInfo);
+      }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
+              <div className="bg-slate-900 border border-red-500/40 p-6 rounded-3xl max-w-sm w-full space-y-4 shadow-2xl">
+                <div className="w-12 h-12 rounded-2xl bg-red-950/80 border border-red-500/40 flex items-center justify-center mx-auto text-2xl">
+                  🛡️
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-red-400">데이터 안전 보호 모드</h2>
+                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                    시스템 업데이트가 적용되는 과정입니다. 기사님의 기존 운행 기록 데이터는 안전하게 보관되어 있습니다.
+                  </p>
+                </div>
+                <div className="space-y-2 pt-2">
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="w-full py-2.5 bg-yellow-500 hover:bg-yellow-400 text-black font-bold text-xs rounded-xl shadow"
+                  >
+                    화면 새로고침 (정상 복구)
+                  </button>
+                  <button
+                    onClick={() => {
+                      try {
+                        const data = localStorage.getItem(CURRENT_STORAGE_KEY) || localStorage.getItem('K_TAXI_RECORD_DATA_V12') || '{}';
+                        const blob = new Blob([data], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `K-TAXI_SAFETY_BACKUP_${new Date().toISOString().slice(0, 10)}.json`;
+                        a.click();
+                      } catch (e) {
+                        alert('백업 생성 실패');
+                      }
+                    }}
+                    className="w-full py-2.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl border border-slate-700"
+                  >
+                    긴급 데이터 백업 다운로드
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
     const rootElement = document.getElementById('root');
     const root = ReactDOM.createRoot(rootElement);
-    root.render(<App />);
+    root.render(
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    );
   </script>
 </body>
 </html>
