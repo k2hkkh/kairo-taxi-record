@@ -23,18 +23,21 @@
       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
       -webkit-tap-highlight-color: transparent;
     }
-    @keyframes pulse-slow {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-    .animate-pulse-slow {
-      animation: pulse-slow 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-    }
-    .hud-mirror {
+    .hud-mirror-landscape {
       transform: scaleY(-1);
+    }
+    .hud-mirror-portrait-rot {
+      transform: rotate(-90deg) scaleY(-1);
     }
     .pb-safe {
       padding-bottom: env(safe-area-inset-bottom, 1.25rem);
+    }
+    @keyframes blink-red {
+      0%, 100% { background-color: rgba(220, 38, 38, 0.15); }
+      50% { background-color: rgba(220, 38, 38, 0.45); }
+    }
+    .animate-overspeed {
+      animation: blink-red 0.8s infinite;
     }
   </style>
 </head>
@@ -48,17 +51,13 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v1.3.2';
-    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V13';
+    const APP_VERSION = 'v1.4.0';
+    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
 
-    // --- 통화 포맷 유틸리티 ---
+    // --- 통화 및 시간 포맷 유틸리티 ---
     const formatMoney = (val) => {
       const num = Number(String(val).replace(/[^0-9]/g, '')) || 0;
       return num.toLocaleString('ko-KR');
-    };
-
-    const parseMoneyInput = (val) => {
-      return Number(String(val).replace(/[^0-9]/g, '')) || 0;
     };
 
     const formatShortMoney = (val) => {
@@ -78,66 +77,33 @@
       return `${y}-${m}-${d}`;
     };
 
-    const getNowTimestamp = () => {
+    const getCurrentTimeStr = () => {
       const now = new Date();
-      const date = getTodayKey();
-      const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-      return `${date} ${time}`;
+      return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     };
 
-    // 하버사인 거리 계산
-    const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
-      const R = 6371e3;
-      const φ1 = (lat1 * Math.PI) / 180;
-      const φ2 = (lat2 * Math.PI) / 180;
-      const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-      const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-      const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-                Math.cos(φ1) * Math.cos(φ2) *
-                Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
+    const calculateMinutes = (start, end) => {
+      if (!start || !end) return 0;
+      const [sh, sm] = start.split(':').map(Number);
+      const [eh, em] = end.split(':').map(Number);
+      let sMin = sh * 60 + sm;
+      let eMin = eh * 60 + em;
+      if (eMin < sMin) eMin += 24 * 60; // 야간 운행 (자정 넘김)
+      return Math.max(0, eMin - sMin);
     };
 
-    // --- 단속 카메라 DB (천안·아산 및 주요 간선도로 실좌표) ---
-    const ENFORCEMENT_CAMERAS = [
-      { id: 101, lat: 36.8124, lon: 127.1085, limitSpeed: 50, desc: '불당동 번영로사거리 단속' },
-      { id: 102, lat: 36.8198, lon: 127.1565, limitSpeed: 50, desc: '신부동 천안종합터미널앞 단속' },
-      { id: 103, lat: 36.8322, lon: 127.1488, limitSpeed: 50, desc: '두정역입구 교차로 신호과속' },
-      { id: 104, lat: 36.8285, lon: 127.1235, limitSpeed: 60, desc: '백석동 백석사거리 신호단속' },
-      { id: 105, lat: 36.7985, lon: 127.1285, limitSpeed: 50, desc: '쌍용사거리 서부대로 단속' },
-      { id: 106, lat: 36.7865, lon: 127.1585, limitSpeed: 50, desc: '청수동 행정타운 교차로단속' },
-      { id: 107, lat: 36.8155, lon: 127.1402, limitSpeed: 50, desc: '성정동 성정지하차도앞 단속' },
-      { id: 108, lat: 36.8455, lon: 127.1355, limitSpeed: 50, desc: '성성동 업성수변로 과속단속' },
-      { id: 109, lat: 36.7925, lon: 127.1185, limitSpeed: 30, desc: '쌍용초/나사렛대 스쿨존 단속' },
-      { id: 110, lat: 36.8145, lon: 127.1125, limitSpeed: 30, desc: '불당초교앞 어린이보호구역' },
-      { id: 111, lat: 36.8215, lon: 127.1355, limitSpeed: 30, desc: '성정초교앞 스쿨존 단속' },
-      { id: 112, lat: 36.7845, lon: 127.1485, limitSpeed: 30, desc: '청수초교앞 어린이보호구역' },
-      { id: 201, lat: 36.7845, lon: 127.0041, limitSpeed: 50, desc: '아산시청앞 교차로 신호단속' },
-      { id: 202, lat: 36.7802, lon: 127.0045, limitSpeed: 50, desc: '온양온천역 광장앞 신호단속' },
-      { id: 203, lat: 36.7775, lon: 127.0525, limitSpeed: 50, desc: '배방역삼거리 모산로 단속' },
-      { id: 204, lat: 36.8105, lon: 127.0625, limitSpeed: 60, desc: '탕정 디스플레이시티대로 단속' },
-      { id: 205, lat: 36.7925, lon: 127.0125, limitSpeed: 60, desc: '충무교차로 충무로 과속단속' },
-      { id: 206, lat: 36.7685, lon: 127.0655, limitSpeed: 60, desc: '배방 온천대로 신호과속' },
-      { id: 207, lat: 36.7955, lon: 127.0855, limitSpeed: 60, desc: '이순신대로 천안아산경계 단속' },
-      { id: 208, lat: 36.9155, lon: 127.0425, limitSpeed: 50, desc: '둔포면 아산밸리로 교차로' },
-      { id: 209, lat: 36.7985, lon: 127.0555, limitSpeed: 30, desc: '탕정초교앞 어린이보호구역' },
-      { id: 210, lat: 36.7725, lon: 127.0185, limitSpeed: 30, desc: '온양초교앞 스쿨존 단속' },
-      { id: 211, lat: 36.7745, lon: 127.0585, limitSpeed: 30, desc: '배방초교앞 어린이보호구역' },
-      { id: 301, lat: 36.7825, lon: 127.1215, limitSpeed: 60, desc: '21번국도 신방삼거리 단속' },
-      { id: 302, lat: 36.7615, lon: 126.9855, limitSpeed: 70, desc: '21번국도 장존교차로 단속' },
-      { id: 303, lat: 36.7755, lon: 127.1685, limitSpeed: 70, desc: '남부대로 유량교차로 과속단속' },
-      { id: 304, lat: 36.8725, lon: 127.1515, limitSpeed: 70, desc: '1번국도 직산사거리 단속' },
-      { id: 305, lat: 36.8355, lon: 127.0355, limitSpeed: 80, desc: '43번국도 세종평택로 진입로' },
-      { id: 401, lat: 37.5665, lon: 126.9780, limitSpeed: 50, desc: '서울시청앞 신호·과속 단속' },
-      { id: 402, lat: 37.4979, lon: 127.0276, limitSpeed: 50, desc: '강남역교차로 과속단속' },
-      { id: 403, lat: 37.5172, lon: 127.0473, limitSpeed: 60, desc: '봉은사로 신호·과속 단속' }
-    ];
+    const formatMinutesToHours = (totalMins) => {
+      if (!totalMins || totalMins <= 0) return '0시간';
+      const hours = Math.floor(totalMins / 60);
+      const mins = totalMins % 60;
+      if (mins === 0) return `${hours}시간`;
+      return `${hours}시간 ${mins}분`;
+    };
 
     // 스토리지 기본 스키마
     const DEFAULT_STORAGE = {
       activeType: 'corporate',
+      hudSpeedLimit: 50,
       corporate: {
         carNumber: '',
         dailyDeposit: 201000,
@@ -157,11 +123,10 @@
       private: {
         carNumber: '',
         records: {}
-      },
-      speedingLogs: []
+      }
     };
 
-    // --- 1단계: 전 버전 다중 스키마 안전 로더 (마이그레이션) ---
+    // 데이터 안전 로더
     const loadSafeData = () => {
       try {
         let saved = null;
@@ -175,6 +140,7 @@
           const p = JSON.parse(saved);
           return {
             activeType: (p.activeType || p.activeTab || 'corporate') === 'private' ? 'private' : 'corporate',
+            hudSpeedLimit: Number(p.hudSpeedLimit || 50),
             corporate: {
               carNumber: p.corporate?.carNumber || '',
               dailyDeposit: Number(p.corporate?.dailyDeposit || p.corporate?.baseDeposit || 201000),
@@ -190,8 +156,7 @@
             private: {
               carNumber: p.private?.carNumber || '',
               records: p.private?.records || {}
-            },
-            speedingLogs: Array.isArray(p.speedingLogs) ? p.speedingLogs : []
+            }
           };
         }
       } catch (e) {
@@ -200,7 +165,7 @@
       return DEFAULT_STORAGE;
     };
 
-    // --- 2단계: 스마트 금액 인풋 컴포넌트 ---
+    // 스마트 금액 입력 인풋
     function SmartMoneyInput({ value, onChange, placeholder = "0", className = "", colorClass = "text-white" }) {
       const numVal = Number(value) || 0;
       const displayVal = numVal > 0 ? numVal.toLocaleString('ko-KR') : '';
@@ -233,7 +198,7 @@
       );
     }
 
-    // --- 메인 App 컴포넌트 ---
+    // 메인 App 컴포넌트
     function App() {
       const [appData, setAppData] = useState(loadSafeData);
       const [currentTab, setCurrentTab] = useState('calendar'); // 'calendar' | 'settlement' | 'hud' | 'settings'
@@ -246,20 +211,15 @@
       // 모달 상태
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
-      const [showSpeedLogModal, setShowSpeedLogModal] = useState(false);
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
 
       // GPS & HUD 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
-      const [nearestCamera, setNearestCamera] = useState(null);
-      const [hudMirrored, setHudMirrored] = useState(false);
-      const [audioReady, setAudioReady] = useState(false);
-      
-      const lastAlertedCamRef = useRef(null);
-      const lastLoggedCamRef = useRef(null);
+      const [hudMirrorMode, setHudMirrorMode] = useState('normal'); // 'normal' | 'landscape' | 'portrait-rot'
+      const SPEED_LIMIT_PRESETS = [30, 50, 60, 70, 80, 100];
 
-      // 스토리지 안전 동기화 (예외 방어)
+      // 스토리지 동기화
       useEffect(() => {
         try {
           localStorage.setItem(CURRENT_STORAGE_KEY, JSON.stringify(appData));
@@ -268,41 +228,7 @@
         }
       }, [appData]);
 
-      // TTS 발화
-      const speak = (text) => {
-        if (!('speechSynthesis' in window)) return;
-        try {
-          window.speechSynthesis.cancel();
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.lang = 'ko-KR';
-          utterance.rate = 1.05;
-          utterance.pitch = 1.0;
-          utterance.volume = 1.0;
-
-          const voices = window.speechSynthesis.getVoices();
-          const koVoice = voices.find(v => v.lang.includes('ko'));
-          if (koVoice) utterance.voice = koVoice;
-
-          window.speechSynthesis.speak(utterance);
-        } catch (e) {
-          console.warn('TTS Error', e);
-        }
-      };
-
-      const initAudioChannel = () => {
-        if ('speechSynthesis' in window) {
-          try {
-            const dummy = new SpeechSynthesisUtterance('');
-            window.speechSynthesis.speak(dummy);
-            setAudioReady(true);
-            speak('안전운행 음성 안내가 활성화되었습니다.');
-          } catch (e) {
-            setAudioReady(true);
-          }
-        }
-      };
-
-      // GPS 감시 루프
+      // GPS 속도 감시
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -310,63 +236,9 @@
           (pos) => {
             const speedKmh = pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0;
             setGpsSpeed(speedKmh);
-
-            const userLat = pos.coords.latitude;
-            const userLon = pos.coords.longitude;
-
-            let closest = null;
-            let minDist = Infinity;
-
-            // 반경 연산 필터링 (최적화)
-            ENFORCEMENT_CAMERAS.forEach((cam) => {
-              if (Math.abs(userLat - cam.lat) < 0.015 && Math.abs(userLon - cam.lon) < 0.015) {
-                const dist = getDistanceMeters(userLat, userLon, cam.lat, cam.lon);
-                if (dist < 600 && dist < minDist) {
-                  minDist = Math.round(dist);
-                  closest = { ...cam, distance: minDist };
-                }
-              }
-            });
-
-            setNearestCamera(closest);
-
-            if (closest) {
-              if (closest.distance <= 300 && closest.distance > 60 && lastAlertedCamRef.current !== `${closest.id}-300`) {
-                speak(`전방 300미터 앞 제한속도 ${closest.limitSpeed}킬로미터 단속 구간입니다.`);
-                lastAlertedCamRef.current = `${closest.id}-300`;
-              } else if (closest.distance > 300 && closest.distance <= 500 && lastAlertedCamRef.current !== `${closest.id}-500`) {
-                speak(`전방에 ${closest.limitSpeed}킬로미터 단속 카메라가 있습니다.`);
-                lastAlertedCamRef.current = `${closest.id}-500`;
-              }
-
-              if (closest.distance <= 45 && speedKmh > closest.limitSpeed) {
-                if (lastLoggedCamRef.current !== closest.id) {
-                  const overKm = speedKmh - closest.limitSpeed;
-                  const newLog = {
-                    id: Date.now(),
-                    timestamp: getNowTimestamp(),
-                    desc: closest.desc,
-                    limitSpeed: closest.limitSpeed,
-                    passSpeed: speedKmh,
-                    overSpeed: overKm
-                  };
-
-                  setAppData(prev => ({
-                    ...prev,
-                    speedingLogs: [newLog, ...(prev.speedingLogs || [])]
-                  }));
-
-                  speak(`제한속도 ${overKm}킬로미터 초과! 단속 의심 내역에 기록되었습니다.`);
-                  lastLoggedCamRef.current = closest.id;
-                }
-              }
-            } else {
-              lastAlertedCamRef.current = null;
-              lastLoggedCamRef.current = null;
-            }
           },
           (err) => console.warn('GPS Info:', err.message),
-          { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+          { enableHighAccuracy: true, maximumAge: 1000, timeout: 4000 }
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
@@ -392,83 +264,51 @@
         }));
       };
 
-      // 수당 관리
-      const handleAddFixedAllowance = () => {
-        const newItem = { id: Date.now(), name: '수당추가', amount: 0 };
-        setAppData(prev => ({
-          ...prev,
-          corporate: {
-            ...prev.corporate,
-            fixedAllowanceItems: [...(prev.corporate?.fixedAllowanceItems || []), newItem]
-          }
-        }));
+      const setHudSpeedLimit = (limit) => {
+        setAppData(prev => ({ ...prev, hudSpeedLimit: limit }));
       };
 
-      const handleUpdateFixedAllowance = (id, field, value) => {
-        setAppData(prev => ({
-          ...prev,
-          corporate: {
-            ...prev.corporate,
-            fixedAllowanceItems: (prev.corporate?.fixedAllowanceItems || []).map(item =>
-              item.id === id ? { ...item, [field]: field === 'amount' ? Number(value) : value } : item
-            )
-          }
-        }));
-      };
+      // 출퇴근 원클릭 버튼 처리
+      const handleQuickClock = (type) => { // type: 'start' | 'end'
+        const today = getTodayKey();
+        const nowTime = getCurrentTimeStr();
+        const todayRec = appData[activeType]?.records?.[today] || {};
 
-      const handleDeleteFixedAllowance = (id) => {
-        setAppData(prev => ({
-          ...prev,
-          corporate: {
-            ...prev.corporate,
-            fixedAllowanceItems: (prev.corporate?.fixedAllowanceItems || []).filter(item => item.id !== id)
-          }
-        }));
-      };
+        let updatedRec = { ...todayRec };
+        if (type === 'start') {
+          updatedRec.startTime = nowTime;
+          if (!updatedRec.endTime) updatedRec.endTime = '';
+        } else {
+          updatedRec.endTime = nowTime;
+          if (!updatedRec.startTime) updatedRec.startTime = nowTime;
+        }
 
-      // 고정비 공제 관리
-      const handleAddFixedExpense = () => {
-        const newItem = { id: Date.now(), name: '항목추가', amount: 0 };
-        setAppData(prev => ({
-          ...prev,
-          corporate: {
-            ...prev.corporate,
-            fixedExpenseItems: [...(prev.corporate?.fixedExpenseItems || []), newItem]
-          }
-        }));
-      };
+        updatedRec.workMinutes = calculateMinutes(updatedRec.startTime, updatedRec.endTime);
 
-      const handleUpdateFixedExpense = (id, field, value) => {
-        setAppData(prev => ({
-          ...prev,
-          corporate: {
-            ...prev.corporate,
-            fixedExpenseItems: (prev.corporate?.fixedExpenseItems || []).map(item =>
-              item.id === id ? { ...item, [field]: field === 'amount' ? Number(value) : value } : item
-            )
-          }
-        }));
-      };
-
-      const handleDeleteFixedExpense = (id) => {
-        setAppData(prev => ({
-          ...prev,
-          corporate: {
-            ...prev.corporate,
-            fixedExpenseItems: (prev.corporate?.fixedExpenseItems || []).filter(item => item.id !== id)
-          }
-        }));
-      };
-
-      // 일별 기록 저장
-      const handleSaveRecord = (dateKey, recordData) => {
         setAppData(prev => ({
           ...prev,
           [activeType]: {
             ...prev[activeType],
             records: {
               ...(prev[activeType]?.records || {}),
-              [dateKey]: recordData
+              [today]: updatedRec
+            }
+          }
+        }));
+      };
+
+      // 일별 기록 저장
+      const handleSaveRecord = (dateKey, recordData) => {
+        const workMins = calculateMinutes(recordData.startTime, recordData.endTime);
+        const finalData = { ...recordData, workMinutes: workMins };
+
+        setAppData(prev => ({
+          ...prev,
+          [activeType]: {
+            ...prev[activeType],
+            records: {
+              ...(prev[activeType]?.records || {}),
+              [dateKey]: finalData
             }
           }
         }));
@@ -485,20 +325,7 @@
         }));
       };
 
-      const handleDeleteSpeedLog = (id) => {
-        setAppData(prev => ({
-          ...prev,
-          speedingLogs: (prev.speedingLogs || []).filter(item => item.id !== id)
-        }));
-      };
-
-      const handleClearAllSpeedLogs = () => {
-        if (confirm('모든 단속 의심 이력을 삭제하시겠습니까?')) {
-          setAppData(prev => ({ ...prev, speedingLogs: [] }));
-        }
-      };
-
-      // 자동 합산액 계산
+      // 수당 & 고정비
       const totalFixedAllowances = useMemo(() => {
         const items = appData?.corporate?.fixedAllowanceItems || [];
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
@@ -509,13 +336,14 @@
         return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       }, [appData?.corporate?.fixedExpenseItems]);
 
-      // 월별 정산 통계
+      // 월별 정산 및 근무시간 통계
       const currentMonthStats = useMemo(() => {
         const records = appData[activeType]?.records || {};
         const entries = Object.entries(records).filter(([date]) => date && String(date).startsWith(currentYearMonth));
 
         let workDays = 0;
         let holidayDays = 0;
+        let totalWorkMinutes = 0;
 
         if (activeType === 'corporate') {
           const dailyDeposit = Number(appData.corporate?.dailyDeposit || 201000);
@@ -535,6 +363,7 @@
               totalRevenue += rev;
               totalGasCompany += Number(r?.gas || 0);
               totalDriverExpense += Number(r?.driverExpense || 0);
+              totalWorkMinutes += Number(r?.workMinutes || 0);
 
               const dailyOver = Math.max(0, rev - dailyDeposit);
               totalIncentive += Math.round(dailyOver * 0.7);
@@ -550,6 +379,7 @@
           return {
             workDays,
             holidayDays,
+            totalWorkMinutes,
             dailyDeposit,
             totalFixedAllowances,
             totalRevenue,
@@ -582,6 +412,7 @@
               tollTotal += Number(r?.toll || 0);
               maintTotal += Number(r?.maint || 0);
               otherTotal += Number(r?.other || 0);
+              totalWorkMinutes += Number(r?.workMinutes || 0);
             }
           });
 
@@ -592,6 +423,7 @@
           return {
             workDays,
             holidayDays,
+            totalWorkMinutes,
             cardTotal,
             cashTotal,
             totalRevenue,
@@ -605,16 +437,14 @@
         }
       }, [appData, activeType, currentYearMonth, totalFixedAllowances, totalFixedExpenses]);
 
-      // 달력 날짜 생성
+      // 달력 날짜 셀
       const calendarCells = useMemo(() => {
         const [y, m] = currentYearMonth.split('-').map(Number);
         const firstDayWeekIndex = new Date(y, m - 1, 1).getDay();
         const totalDaysInMonth = new Date(y, m, 0).getDate();
 
         const cells = [];
-        for (let i = 0; i < firstDayWeekIndex; i++) {
-          cells.push(null);
-        }
+        for (let i = 0; i < firstDayWeekIndex; i++) cells.push(null);
         for (let d = 1; d <= totalDaysInMonth; d++) {
           const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
           cells.push(dateStr);
@@ -622,66 +452,15 @@
         return cells;
       }, [currentYearMonth]);
 
-      // 세무서 텍스트
-      const taxReportText = useMemo(() => {
-        if (activeType !== 'private') return '';
-        const stats = currentMonthStats;
-        const carNum = appData.private?.carNumber || '미등록';
-
-        return `[세무서 제출용 간편 소득 요약서]
-■ 귀속기간: ${currentYearMonth}
-■ 차량번호: ${carNum}
-------------------------------------
-1. 총 수입금액 (매출)
- - 카드 및 앱 매출: ${formatMoney(stats.cardTotal)}
- - 현금 결제 매출: ${formatMoney(stats.cashTotal)}
- * 매출 총 합계: ${formatMoney(stats.totalRevenue)}
-
-2. 필요경비 합계 (지출)
- - 가스비 (유류비): ${formatMoney(stats.gasTotal)}
- - 도로 통행료: ${formatMoney(stats.tollTotal)}
- - 차량 정비/유지비: ${formatMoney(stats.maintTotal)}
- - 기타 사업경비: ${formatMoney(stats.otherTotal)}
- * 필요경비 총 합계: ${formatMoney(stats.totalExpense)}
-------------------------------------
-3. 소득금액 (과세표준 대상): ${formatMoney(stats.netIncome)}
-------------------------------------
-※ 본 자료는 K-TAXI에서 자동 산출된 자료입니다.`;
-      }, [appData, activeType, currentMonthStats, currentYearMonth]);
-
-      const exportBackup = () => {
-        const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `K-TAXI_BACKUP_${getTodayKey()}.json`;
-        a.click();
-      };
-
-      const importBackup = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          try {
-            const parsed = JSON.parse(evt.target.result);
-            if (parsed.corporate && parsed.private) {
-              setAppData(parsed);
-              alert('데이터 복원이 완료되었습니다.');
-            } else {
-              alert('올바른 백업 파일 형식이 아닙니다.');
-            }
-          } catch (err) {
-            alert('파일을 읽는 중 오류가 발생했습니다.');
-          }
-        };
-        reader.readAsText(file);
-      };
+      // 오늘 출퇴근 상태
+      const todayRecord = appData[activeType]?.records?.[getTodayKey()] || {};
 
       const openModalForDate = (dateStr) => {
         setSelectedDate(dateStr);
         setShowDailyModal(true);
       };
+
+      const isOverSpeed = gpsSpeed > (appData.hudSpeedLimit || 50);
 
       const currentRecords = appData[activeType]?.records || {};
       const sortedMonthEntries = Object.entries(currentRecords)
@@ -695,7 +474,7 @@
           <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
             <div className="flex items-center gap-2">
               <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
-              <span className="text-sm font-bold text-white tracking-tight truncate max-w-[150px]">
+              <span className="text-sm font-bold text-white tracking-tight truncate max-w-[130px]">
                 {appData[activeType]?.carNumber || (activeType === 'corporate' ? '법인택시' : '개인택시')}
               </span>
             </div>
@@ -703,7 +482,7 @@
             <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
               <button
                 onClick={() => setVehicleType('corporate')}
-                className={`px-3 py-1 text-xs font-bold rounded-md transition ${
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
                   activeType === 'corporate' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
                 }`}
               >
@@ -711,7 +490,7 @@
               </button>
               <button
                 onClick={() => setVehicleType('private')}
-                className={`px-3 py-1 text-xs font-bold rounded-md transition ${
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
                   activeType === 'private' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
                 }`}
               >
@@ -721,11 +500,40 @@
           </header>
 
           {/* 메인 뷰 */}
-          <main className="flex-1 p-3.5 pb-24 overflow-y-auto">
+          <main className="flex-1 p-3 pb-24 overflow-y-auto">
             
             {/* 탭 1: 운행일지 & 달력 */}
             {currentTab === 'calendar' && (
-              <div className="space-y-3.5">
+              <div className="space-y-3">
+                
+                {/* 원터치 출퇴근 카드 */}
+                <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
+                  <div className="space-y-0.5">
+                    <span className="text-[11px] text-slate-400 font-bold block">오늘의 근무 기록</span>
+                    <div className="text-xs text-slate-200">
+                      출근 <span className="text-yellow-400 font-bold">{todayRecord.startTime || '--:--'}</span> ~ 퇴근 <span className="text-yellow-400 font-bold">{todayRecord.endTime || '--:--'}</span>
+                      {todayRecord.workMinutes > 0 && (
+                        <span className="ml-1.5 text-[11px] text-green-400 font-bold">({formatMinutesToHours(todayRecord.workMinutes)})</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => handleQuickClock('start')}
+                      className="px-2.5 py-1.5 bg-blue-600 active:bg-blue-500 text-white font-bold text-xs rounded-xl shadow"
+                    >
+                      출근
+                    </button>
+                    <button
+                      onClick={() => handleQuickClock('end')}
+                      className="px-2.5 py-1.5 bg-orange-600 active:bg-orange-500 text-white font-bold text-xs rounded-xl shadow"
+                    >
+                      퇴근
+                    </button>
+                  </div>
+                </div>
+
+                {/* 월 선택 바 */}
                 <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
                   <button
                     onClick={() => {
@@ -740,7 +548,7 @@
                   <div className="text-center">
                     <span className="text-base font-black text-yellow-400">{currentYearMonth}</span>
                     <div className="text-[11px] text-slate-400 font-medium">
-                      {currentMonthStats.workDays}일 운행 / {currentMonthStats.holidayDays}일 휴무
+                      {currentMonthStats.workDays}일 운행 / 총 {formatMinutesToHours(currentMonthStats.totalWorkMinutes)}
                     </div>
                   </div>
                   <button
@@ -755,6 +563,7 @@
                   </button>
                 </div>
 
+                {/* 요약 카드 */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
                     <span className="text-[11px] text-slate-400 block font-semibold">이번 달 총 매출</span>
@@ -774,7 +583,7 @@
                   </div>
                 </div>
 
-                {/* 미니 캘린더 */}
+                {/* 달력 */}
                 <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
                   <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
                     <span className="text-red-400">일</span>
@@ -788,9 +597,7 @@
 
                   <div className="grid grid-cols-7 gap-1">
                     {calendarCells.map((dateStr, idx) => {
-                      if (!dateStr) {
-                        return <div key={`empty-${idx}`} className="h-12 rounded-lg bg-transparent"></div>;
-                      }
+                      if (!dateStr) return <div key={`empty-${idx}`} className="h-12 rounded-lg bg-transparent"></div>;
                       const dayNum = Number(dateStr.split('-')[2]);
                       const rec = currentRecords[dateStr];
                       const isSelected = selectedDate === dateStr;
@@ -832,7 +639,7 @@
                   </div>
                 </div>
 
-                {/* 일별 기록 */}
+                {/* 운행 일지 리스트 */}
                 <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800 space-y-2">
                   <div className="flex justify-between items-center pb-1">
                     <span className="text-xs font-bold text-slate-300">운행 일지 ({sortedMonthEntries.length}건)</span>
@@ -867,6 +674,9 @@
                                     : formatMoney(Number(rec?.cardRev || 0) + Number(rec?.cashRev || 0))}
                                 </span>
                               )}
+                              {rec?.workMinutes > 0 && (
+                                <span className="text-[10px] text-slate-400 font-medium">({formatMinutesToHours(rec.workMinutes)})</span>
+                              )}
                             </div>
                             {rec?.memo && <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{rec.memo}</div>}
                           </div>
@@ -894,7 +704,7 @@
 
             {/* 탭 2: 월간 정산 */}
             {currentTab === 'settlement' && (
-              <div className="space-y-3.5">
+              <div className="space-y-3">
                 <div className="flex justify-between items-center bg-slate-900 p-3 rounded-2xl border border-slate-800">
                   <span className="text-sm font-bold text-yellow-400">{currentYearMonth} 정산 명세서</span>
                   {activeType === 'private' && (
@@ -905,6 +715,20 @@
                       세무서 양식 추출
                     </button>
                   )}
+                </div>
+
+                {/* 총 근무시간 및 운행 일수 요약 카드 */}
+                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 grid grid-cols-2 gap-2 text-center">
+                  <div className="border-r border-slate-800">
+                    <span className="text-[11px] text-slate-400 font-semibold block">총 운행 일수</span>
+                    <span className="text-base font-black text-white mt-0.5 block">{currentMonthStats.workDays}일</span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-slate-400 font-semibold block">총 근무 시간</span>
+                    <span className="text-base font-black text-blue-400 mt-0.5 block">
+                      {formatMinutesToHours(currentMonthStats.totalWorkMinutes)}
+                    </span>
+                  </div>
                 </div>
 
                 {activeType === 'corporate' ? (
@@ -976,81 +800,94 @@
               </div>
             )}
 
-            {/* 탭 3: 안전운행 HUD */}
+            {/* 탭 3: 5:5 초대형 안전운행 HUD (상하 1/2 분할) */}
             {currentTab === 'hud' && (
-              <div className="flex flex-col justify-between h-full min-h-[460px] py-4 select-none">
-                <div className="flex justify-between items-center">
-                  <button
-                    onClick={() => setHudMirrored(!hudMirrored)}
-                    className="text-xs px-3 py-1.5 bg-slate-800 text-slate-300 rounded-xl"
-                  >
-                    {hudMirrored ? '미러 모드 (반사용)' : '일반 모드'}
-                  </button>
-                  {!audioReady ? (
+              <div className={`flex flex-col h-[75vh] select-none rounded-3xl overflow-hidden transition-all duration-300 ${
+                isOverSpeed ? 'animate-overspeed' : 'bg-slate-950'
+              } ${
+                hudMirrorMode === 'landscape' ? 'hud-mirror-landscape' : hudMirrorMode === 'portrait-rot' ? 'hud-mirror-portrait-rot' : ''
+              }`}>
+                
+                {/* HUD 컨트롤 상단 바 */}
+                <div className="flex justify-between items-center px-3 py-2 bg-slate-900/60 backdrop-blur z-20">
+                  <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
                     <button
-                      onClick={initAudioChannel}
-                      className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-xl font-bold animate-bounce"
+                      onClick={() => setHudMirrorMode('normal')}
+                      className={`px-2 py-1 text-[11px] font-bold rounded-lg transition ${hudMirrorMode === 'normal' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}
                     >
-                      🔊 블루투스/음성 켜기
+                      일반
                     </button>
-                  ) : (
-                    <span className="text-xs text-green-400 flex items-center gap-1 font-semibold">
-                      <span className="w-2 h-2 bg-green-400 rounded-full animate-ping"></span>
-                      음성 활성 (DB {ENFORCEMENT_CAMERAS.length}개)
+                    <button
+                      onClick={() => setHudMirrorMode('landscape')}
+                      className={`px-2 py-1 text-[11px] font-bold rounded-lg transition ${hudMirrorMode === 'landscape' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}
+                    >
+                      가로 반사 (HUD)
+                    </button>
+                    <button
+                      onClick={() => setHudMirrorMode('portrait-rot')}
+                      className={`px-2 py-1 text-[11px] font-bold rounded-lg transition ${hudMirrorMode === 'portrait-rot' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}
+                    >
+                      90도 반사
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-semibold">
+                    {isOverSpeed ? '⚠️ 속도 초과!' : 'GPS 정상 수신'}
+                  </span>
+                </div>
+
+                {/* 상단 1/2: 초대형 제한속도 표지판 */}
+                <div className="flex-1 flex flex-col items-center justify-center p-2 border-b border-slate-800/80">
+                  <div className="flex items-center justify-center w-36 h-36 rounded-full border-[10px] border-red-600 bg-white text-black shadow-2xl relative">
+                    <div className="flex flex-col items-center justify-center leading-none">
+                      <span className="text-5xl font-black tracking-tight">{appData.hudSpeedLimit || 50}</span>
+                      <span className="text-[10px] font-black text-red-600 tracking-wider mt-0.5">LIMIT</span>
+                    </div>
+                  </div>
+
+                  {/* 제한속도 빠른 선택 프리셋 버튼 */}
+                  <div className="flex gap-1.5 mt-2">
+                    {SPEED_LIMIT_PRESETS.map((limit) => (
+                      <button
+                        key={limit}
+                        onClick={() => setHudSpeedLimit(limit)}
+                        className={`px-2.5 py-1 text-xs font-black rounded-lg transition ${
+                          (appData.hudSpeedLimit || 50) === limit
+                            ? 'bg-red-600 text-white shadow'
+                            : 'bg-slate-900 text-slate-400 border border-slate-800'
+                        }`}
+                      >
+                        {limit}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 하단 1/2: 초대형 디지털 속도계 */}
+                <div className="flex-1 flex flex-col items-center justify-center p-2">
+                  <div className="flex items-baseline justify-center">
+                    <span className={`text-8xl font-black tracking-tighter transition-colors ${
+                      isOverSpeed ? 'text-red-500 animate-pulse' : 'text-green-400'
+                    }`}>
+                      {gpsSpeed}
+                    </span>
+                    <span className="text-2xl font-bold ml-2 text-slate-400">km/h</span>
+                  </div>
+                  {isOverSpeed && (
+                    <span className="text-xs font-bold text-red-400 mt-1">
+                      +{(gpsSpeed - (appData.hudSpeedLimit || 50))} km/h 초과 감속 필요
                     </span>
                   )}
-                </div>
-
-                <div className={`flex flex-col items-center justify-center my-auto transition-transform ${hudMirrored ? 'hud-mirror' : ''}`}>
-                  <div className="h-8 flex items-center text-center mb-2">
-                    {nearestCamera ? (
-                      <span className="text-yellow-400 font-bold text-base animate-pulse-slow">
-                        ⚠️ {nearestCamera.distance}m 앞 [{nearestCamera.limitSpeed}km/h] {nearestCamera.desc}
-                      </span>
-                    ) : (
-                      <span className="text-slate-500 text-xs">안전 속도를 준수하십시오</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-center gap-5 my-4">
-                    <div className="flex flex-col items-center justify-center w-20 h-20 rounded-full border-4 border-red-600 bg-white text-black shadow-2xl flex-shrink-0">
-                      <span className="text-[10px] font-black text-red-600 leading-none">제한</span>
-                      <span className="text-2xl font-black leading-tight">
-                        {nearestCamera ? nearestCamera.limitSpeed : 50}
-                      </span>
-                      <span className="text-[8px] font-bold text-slate-500 leading-none">km/h</span>
-                    </div>
-
-                    <div className="flex items-baseline">
-                      <span className={`text-7xl font-black tracking-tighter ${
-                        nearestCamera && gpsSpeed > nearestCamera.limitSpeed ? 'text-red-500 animate-bounce' : 'text-green-400'
-                      }`}>
-                        {gpsSpeed}
-                      </span>
-                      <span className="text-xl font-bold ml-1.5 text-slate-400">km/h</span>
-                    </div>
-                  </div>
-
-                  {nearestCamera && gpsSpeed > nearestCamera.limitSpeed && (
-                    <div className="w-full bg-red-600/90 text-white text-center py-1 rounded-xl font-bold text-xs mt-2">
-                      속도 초과! 감속하십시오 (+{gpsSpeed - nearestCamera.limitSpeed} km/h)
-                    </div>
-                  )}
-                </div>
-
-                <div className="text-center text-[11px] text-slate-500">
-                  단속 통과 시 과속 이력은 [설정 > 단속의심]에서 확인됩니다.
                 </div>
               </div>
             )}
 
             {/* 탭 4: 설정 및 백업 */}
             {currentTab === 'settings' && (
-              <div className="space-y-3.5">
+              <div className="space-y-3">
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between pb-1 border-b border-slate-800">
                     <h3 className="text-xs font-bold text-slate-300">차량 및 기준 설정</h3>
-                    <span className="text-[10px] text-green-400 font-semibold">● 실시간 자동 저장 보호 중</span>
+                    <span className="text-[10px] text-green-400 font-semibold">● 실시간 자동 저장 보호</span>
                   </div>
                   
                   <div className="flex items-center justify-between text-xs">
@@ -1077,7 +914,7 @@
                       </div>
 
                       <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
-                        <span className="text-slate-400">고정 수당 목록 ({appData.corporate?.fixedAllowanceItems?.length || 0}개)</span>
+                        <span className="text-slate-400">고정 수당 ({appData.corporate?.fixedAllowanceItems?.length || 0}개)</span>
                         <button
                           onClick={() => setShowFixedAllowanceModal(true)}
                           className="px-3 py-1 bg-slate-800 text-blue-300 font-bold rounded-xl border border-blue-500/30"
@@ -1113,19 +950,6 @@
                   )}
                 </div>
 
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-slate-300 block">과속 단속 의심 이력</span>
-                    <span className="text-[10px] text-slate-500">카메라 통과 시 과속 감지 로그</span>
-                  </div>
-                  <button
-                    onClick={() => setShowSpeedLogModal(true)}
-                    className="px-3 py-1.5 bg-red-950/80 border border-red-800 text-red-300 font-bold rounded-xl text-xs"
-                  >
-                    확인 ({appData.speedingLogs?.length || 0}건)
-                  </button>
-                </div>
-
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-2.5">
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-bold text-slate-300">장부 데이터 백업 & 복원</span>
@@ -1133,14 +957,44 @@
                   </div>
                   <div className="flex gap-2">
                     <button
-                      onClick={exportBackup}
+                      onClick={() => {
+                        const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `K-TAXI_BACKUP_${getTodayKey()}.json`;
+                        a.click();
+                      }}
                       className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700"
                     >
                       백업 파일 저장 (.json)
                     </button>
                     <label className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 text-center cursor-pointer">
                       백업 파일 복원
-                      <input type="file" accept=".json" onChange={importBackup} className="hidden" />
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={(e) => {
+                          const file = e.target.files[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = (evt) => {
+                            try {
+                              const parsed = JSON.parse(evt.target.result);
+                              if (parsed.corporate && parsed.private) {
+                                setAppData(parsed);
+                                alert('데이터 복원이 완료되었습니다.');
+                              } else {
+                                alert('올바른 백업 파일 형식이 아닙니다.');
+                              }
+                            } catch (err) {
+                              alert('파일을 읽는 중 오류가 발생했습니다.');
+                            }
+                          };
+                          reader.readAsText(file);
+                        }}
+                        className="hidden"
+                      />
                     </label>
                   </div>
                 </div>
@@ -1191,7 +1045,7 @@
             />
           )}
 
-          {/* 수당 모달 */}
+          {/* 고정 수당 모달 */}
           {showFixedAllowanceModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
@@ -1205,24 +1059,26 @@
                       <input
                         type="text"
                         value={item.name}
-                        onChange={(e) => handleUpdateFixedAllowance(item.id, 'name', e.target.value)}
+                        onChange={(e) => {
+                          const updated = (appData.corporate?.fixedAllowanceItems || []).map(it => it.id === item.id ? { ...it, name: e.target.value } : it);
+                          setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedAllowanceItems: updated } }));
+                        }}
                         className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold"
                       />
                       <div className="flex-1">
                         <SmartMoneyInput
                           value={item.amount}
-                          onChange={(val) => handleUpdateFixedAllowance(item.id, 'amount', val)}
+                          onChange={(val) => {
+                            const updated = (appData.corporate?.fixedAllowanceItems || []).map(it => it.id === item.id ? { ...it, amount: Number(val) } : it);
+                            setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedAllowanceItems: updated } }));
+                          }}
                           colorClass="text-blue-300"
                         />
                       </div>
-                      <button onClick={() => handleDeleteFixedAllowance(item.id)} className="text-slate-500 hover:text-red-400 text-xs px-1">✕</button>
                     </div>
                   ))}
                 </div>
-                <div className="pt-2 border-t border-slate-800 flex gap-2">
-                  <button onClick={handleAddFixedAllowance} className="flex-1 py-2 bg-slate-800 text-yellow-400 font-bold rounded-xl text-xs">+ 수당 추가</button>
-                  <button onClick={() => setShowFixedAllowanceModal(false)} className="px-5 py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs">완료</button>
-                </div>
+                <button onClick={() => setShowFixedAllowanceModal(false)} className="w-full py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs">완료</button>
               </div>
             </div>
           )}
@@ -1241,60 +1097,26 @@
                       <input
                         type="text"
                         value={item.name}
-                        onChange={(e) => handleUpdateFixedExpense(item.id, 'name', e.target.value)}
+                        onChange={(e) => {
+                          const updated = (appData.corporate?.fixedExpenseItems || []).map(it => it.id === item.id ? { ...it, name: e.target.value } : it);
+                          setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedExpenseItems: updated } }));
+                        }}
                         className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold"
                       />
                       <div className="flex-1">
                         <SmartMoneyInput
                           value={item.amount}
-                          onChange={(val) => handleUpdateFixedExpense(item.id, 'amount', val)}
+                          onChange={(val) => {
+                            const updated = (appData.corporate?.fixedExpenseItems || []).map(it => it.id === item.id ? { ...it, amount: Number(val) } : it);
+                            setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedExpenseItems: updated } }));
+                          }}
                           colorClass="text-orange-400"
                         />
                       </div>
-                      <button onClick={() => handleDeleteFixedExpense(item.id)} className="text-slate-500 hover:text-red-400 text-xs px-1">✕</button>
                     </div>
                   ))}
                 </div>
-                <div className="pt-2 border-t border-slate-800 flex gap-2">
-                  <button onClick={handleAddFixedExpense} className="flex-1 py-2 bg-slate-800 text-yellow-400 font-bold rounded-xl text-xs">+ 항목 추가</button>
-                  <button onClick={() => setShowFixedExpenseModal(false)} className="px-5 py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs">완료</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 과속 단속 의심 모달 */}
-          {showSpeedLogModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3 max-h-[80vh] flex flex-col">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h3 className="text-xs font-bold text-red-400">과속 단속 의심 이력 ({appData.speedingLogs?.length || 0}건)</h3>
-                  <button onClick={() => setShowSpeedLogModal(false)} className="text-slate-400 text-base font-bold">✕</button>
-                </div>
-                <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-                  {(!appData.speedingLogs || appData.speedingLogs.length === 0) ? (
-                    <div className="text-center py-8 text-xs text-slate-500">기록된 단속 의심 이력이 없습니다.</div>
-                  ) : (
-                    appData.speedingLogs.map((log) => (
-                      <div key={log.id} className="bg-slate-950 p-2.5 rounded-xl border border-red-950 space-y-0.5">
-                        <div className="flex justify-between text-xs font-bold text-slate-200">
-                          <span>{log.desc}</span>
-                          <button onClick={() => handleDeleteSpeedLog(log.id)} className="text-[10px] text-slate-500">삭제</button>
-                        </div>
-                        <div className="text-[10px] text-slate-400">{log.timestamp}</div>
-                        <div className="flex justify-between text-xs pt-1">
-                          <span className="text-slate-400">제한 {log.limitSpeed} / 통과 {log.passSpeed}km/h</span>
-                          <span className="text-red-400 font-bold">+{log.overSpeed} km/h 초과</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {appData.speedingLogs && appData.speedingLogs.length > 0 && (
-                  <button onClick={handleClearAllSpeedLogs} className="w-full py-2 bg-red-950 text-red-300 font-bold rounded-xl text-xs">
-                    이력 전체 삭제
-                  </button>
-                )}
+                <button onClick={() => setShowFixedExpenseModal(false)} className="w-full py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs">완료</button>
               </div>
             </div>
           )}
@@ -1309,12 +1131,12 @@
                 </div>
                 <textarea
                   readOnly
-                  value={taxReportText}
-                  className="w-full h-56 bg-slate-950 text-slate-200 text-xs font-mono p-2.5 rounded-xl border border-slate-800 resize-none focus:outline-none"
+                  value={`[세무서 제출용 간편 소득 요약서]\n귀속기간: ${currentYearMonth}\n차량번호: ${appData.private?.carNumber || '미등록'}\n매출합계: ${formatMoney(currentMonthStats.totalRevenue)}\n경비합계: ${formatMoney(currentMonthStats.totalExpense)}\n과세소득: ${formatMoney(currentMonthStats.netIncome)}`}
+                  className="w-full h-44 bg-slate-950 text-slate-200 text-xs font-mono p-2.5 rounded-xl border border-slate-800 resize-none focus:outline-none"
                 />
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(taxReportText);
+                    navigator.clipboard.writeText(`[세무서 제출용 간편 소득 요약서]\n귀속기간: ${currentYearMonth}\n차량번호: ${appData.private?.carNumber || '미등록'}\n매출합계: ${formatMoney(currentMonthStats.totalRevenue)}\n경비합계: ${formatMoney(currentMonthStats.totalExpense)}\n과세소득: ${formatMoney(currentMonthStats.netIncome)}`);
                     alert('복사되었습니다.');
                   }}
                   className="w-full py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs"
@@ -1328,10 +1150,12 @@
       );
     }
 
-    // 일별 기록 모달
+    // 일별 기록 모달 (출퇴근 시간 입력 포함)
     function DailyRecordModal({ activeType, dateKey, existingData, onSave, onClose }) {
       const [isHoliday, setIsHoliday] = useState(existingData?.isHoliday || false);
       const [memo, setMemo] = useState(existingData?.memo || '');
+      const [startTime, setStartTime] = useState(existingData?.startTime || '');
+      const [endTime, setEndTime] = useState(existingData?.endTime || '');
 
       const [revenue, setRevenue] = useState(existingData?.revenue || 0);
       const [gas, setGas] = useState(existingData?.gas || 0);
@@ -1344,19 +1168,20 @@
       const [maint, setMaint] = useState(existingData?.maint || 0);
       const [other, setOther] = useState(existingData?.other || 0);
 
+      const calculatedMins = calculateMinutes(startTime, endTime);
+
       const handleSave = () => {
+        const base = { isHoliday, memo, startTime, endTime, workMinutes: calculatedMins };
         if (activeType === 'corporate') {
           onSave({
-            isHoliday,
-            memo,
+            ...base,
             revenue: Number(revenue) || 0,
             gas: Number(gas) || 0,
             driverExpense: Number(driverExpense) || 0
           });
         } else {
           onSave({
-            isHoliday,
-            memo,
+            ...base,
             cardRev: Number(cardRev) || 0,
             cashRev: Number(cashRev) || 0,
             gas: Number(privGas) || 0,
@@ -1387,6 +1212,36 @@
 
             {!isHoliday && (
               <div className="space-y-2.5">
+                {/* 출퇴근 시간 입력 영역 */}
+                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[11px] font-bold text-slate-300">근무 시간 (출·퇴근)</span>
+                    {calculatedMins > 0 && (
+                      <span className="text-[11px] font-bold text-blue-400">{formatMinutesToHours(calculatedMins)}</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">출근 시간</label>
+                      <input
+                        type="time"
+                        value={startTime}
+                        onChange={(e) => setStartTime(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs text-white text-center font-bold focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">퇴근 시간</label>
+                      <input
+                        type="time"
+                        value={endTime}
+                        onChange={(e) => setEndTime(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs text-white text-center font-bold focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 {activeType === 'corporate' ? (
                   <>
                     <div>
@@ -1424,16 +1279,6 @@
                         <SmartMoneyInput value={toll} onChange={setToll} />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-slate-400 block mb-1">정비비</label>
-                        <SmartMoneyInput value={maint} onChange={setMaint} />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-slate-400 block mb-1">기타경비</label>
-                        <SmartMoneyInput value={other} onChange={setOther} />
-                      </div>
-                    </div>
                   </>
                 )}
 
@@ -1463,7 +1308,7 @@
       );
     }
 
-    // --- 4단계: Error Boundary 보호막 ---
+    // Error Boundary 보호막
     class ErrorBoundary extends React.Component {
       constructor(props) {
         super(props);
@@ -1486,35 +1331,15 @@
                 <div>
                   <h2 className="text-base font-bold text-red-400">데이터 안전 보호 모드</h2>
                   <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                    시스템 업데이트가 적용되는 과정입니다. 기사님의 기존 운행 기록 데이터는 안전하게 보관되어 있습니다.
+                    시스템이 안전하게 업데이트되었습니다. 기존 운행 기록은 보존되어 있습니다.
                   </p>
                 </div>
-                <div className="space-y-2 pt-2">
-                  <button
-                    onClick={() => window.location.reload()}
-                    className="w-full py-2.5 bg-yellow-500 hover:bg-yellow-400 text-black font-bold text-xs rounded-xl shadow"
-                  >
-                    화면 새로고침 (정상 복구)
-                  </button>
-                  <button
-                    onClick={() => {
-                      try {
-                        const data = localStorage.getItem(CURRENT_STORAGE_KEY) || localStorage.getItem('K_TAXI_RECORD_DATA_V12') || '{}';
-                        const blob = new Blob([data], { type: 'application/json' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `K-TAXI_SAFETY_BACKUP_${new Date().toISOString().slice(0, 10)}.json`;
-                        a.click();
-                      } catch (e) {
-                        alert('백업 생성 실패');
-                      }
-                    }}
-                    className="w-full py-2.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl border border-slate-700"
-                  >
-                    긴급 데이터 백업 다운로드
-                  </button>
-                </div>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="w-full py-2.5 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow"
+                >
+                  화면 새로고침 (정상 복구)
+                </button>
               </div>
             </div>
           );
