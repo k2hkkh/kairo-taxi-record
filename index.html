@@ -51,10 +51,10 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v1.4.1';
+    const APP_VERSION = 'v1.4.2';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
 
-    // 통화 및 시간 포맷 유틸
+    // 포맷 유틸
     const formatMoney = (val) => {
       const num = Number(String(val).replace(/[^0-9]/g, '')) || 0;
       return num.toLocaleString('ko-KR');
@@ -100,7 +100,7 @@
       return `${hours}시간 ${mins}분`;
     };
 
-    // 스토리지 기본 스키마
+    // 스토리지 스키마
     const DEFAULT_STORAGE = {
       activeType: 'corporate',
       hudSpeedLimit: 50,
@@ -126,7 +126,6 @@
       }
     };
 
-    // 데이터 안전 로더
     const loadSafeData = () => {
       try {
         let saved = null;
@@ -165,7 +164,7 @@
       return DEFAULT_STORAGE;
     };
 
-    // 스마트 금액 입력 인풋
+    // 스마트 금액 인풋
     function SmartMoneyInput({ value, onChange, placeholder = "0", className = "", colorClass = "text-white" }) {
       const numVal = Number(value) || 0;
       const displayVal = numVal > 0 ? numVal.toLocaleString('ko-KR') : '';
@@ -198,7 +197,7 @@
       );
     }
 
-    // 메인 App 컴포넌트
+    // 메인 App
     function App() {
       const [appData, setAppData] = useState(loadSafeData);
       const [currentTab, setCurrentTab] = useState('calendar'); // 'calendar' | 'settlement' | 'hud' | 'settings'
@@ -214,12 +213,12 @@
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
 
-      // GPS & HUD 상태
+      // GPS & HUD 상태 (기본값을 90도 반사 모드로 설정)
       const [gpsSpeed, setGpsSpeed] = useState(0);
-      const [hudMirrorMode, setHudMirrorMode] = useState('normal'); // 'normal' | 'flipY' | 'rot90'
-      const SPEED_LIMIT_PRESETS = [30, 50, 60, 70, 80, 100];
+      const [hudMirrorMode, setHudMirrorMode] = useState('rot90'); // 'rot90' | 'flipY' | 'normal'
+      const SPEED_LIMIT_LIST = [50, 60, 70, 80, 100, 30];
 
-      // 스토리지 동기화
+      // 스토리지 저장
       useEffect(() => {
         try {
           localStorage.setItem(CURRENT_STORAGE_KEY, JSON.stringify(appData));
@@ -228,7 +227,7 @@
         }
       }, [appData]);
 
-      // GPS 감시
+      // GPS 속도 수신
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -264,12 +263,24 @@
         }));
       };
 
-      const setHudSpeedLimit = (limit) => {
-        setAppData(prev => ({ ...prev, hudSpeedLimit: limit }));
+      // 제한속도 원터치 순환 변경 (표지판 클릭 시)
+      const handleCycleSpeedLimit = (e) => {
+        e.stopPropagation();
+        const currentLimit = appData.hudSpeedLimit || 50;
+        const currentIndex = SPEED_LIMIT_LIST.indexOf(currentLimit);
+        const nextIndex = (currentIndex + 1) % SPEED_LIMIT_LIST.length;
+        setAppData(prev => ({ ...prev, hudSpeedLimit: SPEED_LIMIT_LIST[nextIndex] }));
       };
 
-      // 출퇴근 버튼 처리
-      const handleQuickClock = (type) => { // 'start' | 'end'
+      // HUD 화면 탭 시 반사 모드 순환 전환
+      const handleCycleMirrorMode = () => {
+        if (hudMirrorMode === 'rot90') setHudMirrorMode('flipY');
+        else if (hudMirrorMode === 'flipY') setHudMirrorMode('normal');
+        else setHudMirrorMode('rot90');
+      };
+
+      // 출퇴근 버튼
+      const handleQuickClock = (type) => {
         const today = getTodayKey();
         const nowTime = getCurrentTimeStr();
         const todayRec = appData[activeType]?.records?.[today] || {};
@@ -297,7 +308,7 @@
         }));
       };
 
-      // 출퇴근 초기화 버튼
+      // 출퇴근 초기화
       const handleResetClock = () => {
         if (!confirm('오늘의 출퇴근 시간을 초기화하시겠습니까?')) return;
         const today = getTodayKey();
@@ -456,7 +467,7 @@
         }
       }, [appData, activeType, currentYearMonth, totalFixedAllowances, totalFixedExpenses]);
 
-      // 달력 날짜 셀
+      // 달력 셀
       const calendarCells = useMemo(() => {
         const [y, m] = currentYearMonth.split('-').map(Number);
         const firstDayWeekIndex = new Date(y, m - 1, 1).getDay();
@@ -471,15 +482,12 @@
         return cells;
       }, [currentYearMonth]);
 
-      // 오늘 출퇴근 상태
       const todayRecord = appData[activeType]?.records?.[getTodayKey()] || {};
 
       const openModalForDate = (dateStr) => {
         setSelectedDate(dateStr);
         setShowDailyModal(true);
       };
-
-      const isOverSpeed = gpsSpeed > (appData.hudSpeedLimit || 50);
 
       const currentRecords = appData[activeType]?.records || {};
       const sortedMonthEntries = Object.entries(currentRecords)
@@ -493,46 +501,54 @@
         return '';
       };
 
+      const getMirrorModeLabel = () => {
+        if (hudMirrorMode === 'rot90') return '90° 회전 반사';
+        if (hudMirrorMode === 'flipY') return '가로 반사';
+        return '일반 모드';
+      };
+
       return (
         <div className="max-w-md mx-auto w-full min-h-screen flex flex-col bg-slate-950 border-x border-slate-800 relative">
           
-          {/* 상단 헤더 */}
-          <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
-            <div className="flex items-center gap-2">
-              <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
-              <span className="text-sm font-bold text-white tracking-tight truncate max-w-[130px]">
-                {appData[activeType]?.carNumber || (activeType === 'corporate' ? '법인택시' : '개인택시')}
-              </span>
-            </div>
+          {/* 상단 헤더 (HUD 모드일 때는 화면을 넓게 쓰기 위해 숨김) */}
+          {currentTab !== 'hud' && (
+            <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
+              <div className="flex items-center gap-2">
+                <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
+                <span className="text-sm font-bold text-white tracking-tight truncate max-w-[130px]">
+                  {appData[activeType]?.carNumber || (activeType === 'corporate' ? '법인택시' : '개인택시')}
+                </span>
+              </div>
 
-            <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-              <button
-                onClick={() => setVehicleType('corporate')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
-                  activeType === 'corporate' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
-                }`}
-              >
-                법인
-              </button>
-              <button
-                onClick={() => setVehicleType('private')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
-                  activeType === 'private' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
-                }`}
-              >
-                개인
-              </button>
-            </div>
-          </header>
+              <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                <button
+                  onClick={() => setVehicleType('corporate')}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                    activeType === 'corporate' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
+                  }`}
+                >
+                  법인
+                </button>
+                <button
+                  onClick={() => setVehicleType('private')}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                    activeType === 'private' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
+                  }`}
+                >
+                  개인
+                </button>
+              </div>
+            </header>
+          )}
 
           {/* 메인 뷰 */}
-          <main className="flex-1 p-3 pb-24 overflow-y-auto">
+          <main className={`flex-1 overflow-y-auto ${currentTab === 'hud' ? 'p-2 pb-20 flex flex-col' : 'p-3 pb-24'}`}>
             
             {/* 탭 1: 운행일지 & 달력 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3">
                 
-                {/* 원터치 출퇴근 카드 (초기화 버튼 탑재) */}
+                {/* 원터치 출퇴근 카드 */}
                 <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
                   <div className="space-y-0.5">
                     <span className="text-[11px] text-slate-400 font-bold block">오늘의 근무 기록</span>
@@ -834,96 +850,44 @@
               </div>
             )}
 
-            {/* 탭 3: 5:5 초대형 안전운행 HUD */}
+            {/* 탭 3: 순수 초경량 5:5 HUD (상단 버튼 완전 제거, 화면 터치로 모드 전환) */}
             {currentTab === 'hud' && (
-              <div className={`flex flex-col h-[75vh] select-none rounded-3xl overflow-hidden transition-all duration-300 ${
-                isOverSpeed ? 'animate-overspeed' : 'bg-slate-950'
-              }`}>
-                
-                {/* 1. 상단 고정 조작 바 (반사 모드에서도 뒤집히지 않고 항상 정방향 유지) */}
-                <div className="p-2.5 bg-slate-900/90 border-b border-slate-800 space-y-2 z-20">
-                  <div className="flex justify-between items-center">
-                    <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-                      <button
-                        onClick={() => setHudMirrorMode('normal')}
-                        className={`px-2 py-1 text-[11px] font-bold rounded-lg transition ${hudMirrorMode === 'normal' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}
-                      >
-                        일반
-                      </button>
-                      <button
-                        onClick={() => setHudMirrorMode('flipY')}
-                        className={`px-2 py-1 text-[11px] font-bold rounded-lg transition ${hudMirrorMode === 'flipY' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}
-                      >
-                        가로 반사
-                      </button>
-                      <button
-                        onClick={() => setHudMirrorMode('rot90')}
-                        className={`px-2 py-1 text-[11px] font-bold rounded-lg transition ${hudMirrorMode === 'rot90' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}
-                      >
-                        90° 회전 반사
-                      </button>
-                    </div>
-
-                    {/* 실시간 GPS 수신 상태 안내 램프 */}
-                    <div className={`px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 ${
-                      isOverSpeed
-                        ? 'bg-red-950 border-red-500 text-red-300 animate-pulse'
-                        : 'bg-slate-950 border-slate-700 text-green-400'
-                    }`}>
-                      <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                      {isOverSpeed ? '⚠️ 과속 주의' : 'GPS 정상 수신'}
-                    </div>
-                  </div>
-
-                  {/* 목표 제한속도 변경 프리셋 버튼 */}
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
-                    <span className="text-[10px] font-bold text-slate-400">목표 제한속도:</span>
-                    <div className="flex gap-1">
-                      {SPEED_LIMIT_PRESETS.map((limit) => (
-                        <button
-                          key={limit}
-                          onClick={() => setHudSpeedLimit(limit)}
-                          className={`px-2 py-0.5 text-[11px] font-black rounded-lg transition ${
-                            (appData.hudSpeedLimit || 50) === limit
-                              ? 'bg-red-600 text-white shadow'
-                              : 'bg-slate-950 text-slate-400 border border-slate-800'
-                          }`}
-                        >
-                          {limit}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              <div
+                onClick={handleCycleMirrorMode}
+                className="flex-1 flex flex-col justify-between select-none rounded-3xl overflow-hidden bg-slate-950 border border-slate-800/80 cursor-pointer relative"
+              >
+                {/* 상단 모드 안내 미니 힌트 */}
+                <div className="absolute top-3 left-0 right-0 flex justify-center items-center pointer-events-none z-10">
+                  <span className="px-2.5 py-0.5 rounded-full bg-slate-900/80 text-[10px] text-slate-400 font-bold border border-slate-700/50">
+                    {getMirrorModeLabel()} (화면 터치 시 전환)
+                  </span>
                 </div>
 
-                {/* 2. 상단 1/2: 속도제한 표지판 (숫자만 개별 회전/반사) */}
-                <div className="flex-1 flex flex-col items-center justify-center p-2 border-b border-slate-800/80 overflow-hidden">
-                  <div className={`flex items-center justify-center transition-transform duration-300 ${getHudInnerTransformClass()}`}>
-                    <div className="flex items-center justify-center w-36 h-36 rounded-full border-[10px] border-red-600 bg-white text-black shadow-2xl">
+                {/* 상단 1/2: 초대형 속도제한 표지판 (터치 시 숫자 순환 변경) */}
+                <div className="flex-1 flex items-center justify-center p-2 border-b border-slate-800/60 overflow-hidden">
+                  <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
+                    <div
+                      onClick={handleCycleSpeedLimit}
+                      title="터치하여 제한속도 변경"
+                      className="flex items-center justify-center w-40 h-40 rounded-full border-[12px] border-red-600 bg-white text-black shadow-2xl active:scale-95 transition-transform"
+                    >
                       <div className="flex flex-col items-center justify-center leading-none">
-                        <span className="text-5xl font-black tracking-tight">{appData.hudSpeedLimit || 50}</span>
-                        <span className="text-[10px] font-black text-red-600 tracking-wider mt-0.5">LIMIT</span>
+                        <span className="text-6xl font-black tracking-tight">{appData.hudSpeedLimit || 50}</span>
+                        <span className="text-[10px] font-black text-red-600 tracking-wider mt-1">LIMIT</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 3. 하단 1/2: 초대형 디지털 속도계 (숫자만 개별 회전/반사) */}
-                <div className="flex-1 flex flex-col items-center justify-center p-2 overflow-hidden">
-                  <div className={`flex flex-col items-center justify-center transition-transform duration-300 ${getHudInnerTransformClass()}`}>
+                {/* 하단 1/2: 초대형 디지털 속도계 */}
+                <div className="flex-1 flex items-center justify-center p-2 overflow-hidden">
+                  <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
                     <div className="flex items-baseline justify-center">
-                      <span className={`text-8xl font-black tracking-tighter transition-colors ${
-                        isOverSpeed ? 'text-red-500 animate-pulse' : 'text-green-400'
-                      }`}>
+                      <span className="text-9xl font-black tracking-tighter text-green-400 font-mono">
                         {gpsSpeed}
                       </span>
-                      <span className="text-2xl font-bold ml-2 text-slate-400">km/h</span>
+                      <span className="text-3xl font-bold ml-2 text-slate-400">km/h</span>
                     </div>
-                    {isOverSpeed && (
-                      <span className="text-xs font-bold text-red-400 mt-1">
-                        +{(gpsSpeed - (appData.hudSpeedLimit || 50))} km/h 초과 감속 필요
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>
@@ -935,7 +899,7 @@
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between pb-1 border-b border-slate-800">
                     <h3 className="text-xs font-bold text-slate-300">차량 및 기준 설정</h3>
-                    <span className="text-[10px] text-green-400 font-semibold">● 실시간 자동 저장 보호</span>
+                    <span className="text-[10px] text-green-400 font-semibold">● 자동 저장 보호</span>
                   </div>
                   
                   <div className="flex items-center justify-between text-xs">
