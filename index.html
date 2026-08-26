@@ -91,7 +91,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v3.1.0';
+    const APP_VERSION = 'v3.2.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -119,14 +119,16 @@
       return Math.round(R * c);
     };
 
-    // --- 100% 무조건 재생되는 고성능 음향 모델링 엔진 ---
-    let activeAudioNodes = [];
+    // =========================================================================
+    // 100% 무조건 재생되는 리얼 사운드 생성 및 재생 엔진 (WAV PCM 빌더)
+    // =========================================================================
+    let currentActiveSources = [];
 
     const getAudioContext = () => {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContext) return null;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
       if (!window._kTaxiAudioCtx) {
-        window._kTaxiAudioCtx = new AudioContext();
+        window._kTaxiAudioCtx = new AudioCtx();
       }
       if (window._kTaxiAudioCtx.state === 'suspended') {
         window._kTaxiAudioCtx.resume();
@@ -134,27 +136,28 @@
       return window._kTaxiAudioCtx;
     };
 
-    // 즉시 모든 사운드 강제 종료
+    // 사운드 즉시 강제 소멸 함수
     const stopAllAudio = () => {
-      activeAudioNodes.forEach((node) => {
+      currentActiveSources.forEach((src) => {
         try {
-          if (node.stop) node.stop();
-          if (node.disconnect) node.disconnect();
+          if (src.stop) src.stop();
+          if (src.disconnect) src.disconnect();
         } catch (e) {}
       });
-      activeAudioNodes = [];
+      currentActiveSources = [];
     };
 
-    // 화이트 노이즈 버퍼 생성기 (동물 목소리 마찰음용)
-    const createNoiseBuffer = (ctx, duration = 0.5) => {
-      const bufferSize = ctx.sampleRate * duration;
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const output = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        output[i] = Math.random() * 2 - 1;
+    // 첫 터치 시 모바일 브라우저 오디오 잠금 즉시 해제
+    const unlockMobileAudio = () => {
+      const ctx = getAudioContext();
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume();
       }
-      return buffer;
+      document.removeEventListener('touchstart', unlockMobileAudio);
+      document.removeEventListener('click', unlockMobileAudio);
     };
+    document.addEventListener('touchstart', unlockMobileAudio, { passive: true });
+    document.addEventListener('click', unlockMobileAudio, { passive: true });
 
     // 실제 동물 소리 재생 함수
     const playGuardianAudio = (type = 'dog', isPassenger = false) => {
@@ -163,11 +166,12 @@
         const ctx = getAudioContext();
         if (!ctx) return;
 
+        const sampleRate = ctx.sampleRate;
         const now = ctx.currentTime;
 
         if (isPassenger) {
-          // [탑승 모드: 조종석 크리스탈 차임 (Ding-Dong)]
-          [0, 0.15].forEach((delay, idx) => {
+          // [탑승 모드: 조종석 맑은 차임 (Ding-Dong)]
+          [0, 0.16].forEach((delay, idx) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.type = 'sine';
@@ -178,117 +182,92 @@
             gain.connect(ctx.destination);
             osc.start(now + delay);
             osc.stop(now + delay + 0.35);
-            activeAudioNodes.push(osc);
+            currentActiveSources.push(osc);
           });
         } else {
           if (type === 'dog') {
             // [강아지: 실제 맹견 2연타 짖는 소리 ("컹! 컹!")]
-            [0, 0.22].forEach((delay) => {
-              // 1. 성대 톤
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              osc.type = 'sawtooth';
-              osc.frequency.setValueAtTime(480, now + delay);
-              osc.frequency.exponentialRampToValueAtTime(140, now + delay + 0.14);
-              gain.gain.setValueAtTime(0.65, now + delay);
-              gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.14);
-              osc.connect(gain);
-              gain.connect(ctx.destination);
-              osc.start(now + delay);
-              osc.stop(now + delay + 0.14);
-              activeAudioNodes.push(osc);
+            const duration = 0.55;
+            const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+            const data = buffer.getChannelData(0);
 
-              // 2. 목소리 마찰 노이즈 (포먼트 필터)
-              const noise = ctx.createBufferSource();
-              noise.buffer = createNoiseBuffer(ctx, 0.15);
-              const filter = ctx.createBiquadFilter();
-              filter.type = 'bandpass';
-              filter.frequency.setValueAtTime(950, now + delay);
-              filter.Q.setValueAtTime(3.0, now + delay);
-              const nGain = ctx.createGain();
-              nGain.gain.setValueAtTime(0.5, now + delay);
-              nGain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.14);
-              noise.connect(filter);
-              filter.connect(nGain);
-              nGain.connect(ctx.destination);
-              noise.start(now + delay);
-              noise.stop(now + delay + 0.14);
-              activeAudioNodes.push(noise);
-            });
+            for (let i = 0; i < data.length; i++) {
+              const t = i / sampleRate;
+              let sample = 0;
+              // 1차 짖음 (0~0.22초)
+              if (t >= 0 && t < 0.22) {
+                const env = Math.exp(-t * 22) * Math.sin(t * Math.PI / 0.22);
+                const freq = 460 * Math.exp(-t * 12);
+                const body = Math.sin(2 * Math.PI * freq * t) + 0.5 * Math.sin(4 * Math.PI * freq * t);
+                const noise = (Math.random() * 2 - 1) * 0.45;
+                sample = (body * 0.6 + noise) * env;
+              }
+              // 2차 짖음 (0.26~0.52초)
+              else if (t >= 0.26 && t < 0.52) {
+                const t2 = t - 0.26;
+                const env = Math.exp(-t2 * 20) * Math.sin(t2 * Math.PI / 0.26);
+                const freq = 420 * Math.exp(-t2 * 12);
+                const body = Math.sin(2 * Math.PI * freq * t2) + 0.5 * Math.sin(4 * Math.PI * freq * t2);
+                const noise = (Math.random() * 2 - 1) * 0.45;
+                sample = (body * 0.6 + noise) * env;
+              }
+              data[i] = sample * 0.9;
+            }
+
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(ctx.destination);
+            source.start(now);
+            source.stop(now + duration);
+            currentActiveSources.push(source);
+
           } else if (type === 'cat') {
-            // [고양이: 리얼 울음소리 ("야-옹~")]
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            const filter = ctx.createBiquadFilter();
-            
-            osc.type = 'triangle';
-            // 야-옹 피치 곡선
-            osc.frequency.setValueAtTime(380, now);
-            osc.frequency.exponentialRampToValueAtTime(820, now + 0.2);
-            osc.frequency.exponentialRampToValueAtTime(420, now + 0.6);
+            // [고양이: 실제 고양이 울음소리 ("야-옹~")]
+            const duration = 0.75;
+            const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+            const data = buffer.getChannelData(0);
 
-            // 포먼트 공명 필터 (입모양 변화 '야' ➔ '옹')
-            filter.type = 'bandpass';
-            filter.frequency.setValueAtTime(1200, now);
-            filter.frequency.linearRampToValueAtTime(2200, now + 0.2);
-            filter.frequency.linearRampToValueAtTime(900, now + 0.6);
-            filter.Q.setValueAtTime(4.0, now);
+            for (let i = 0; i < data.length; i++) {
+              const t = i / sampleRate;
+              // 고양이 특유의 비음 피치 굴림 (360Hz ➔ 780Hz ➔ 420Hz)
+              const pitch = 360 + 420 * Math.sin(Math.min(t / 0.65, 1) * Math.PI);
+              const env = Math.sin(Math.min(t / 0.75, 1) * Math.PI) * (1 - 0.3 * t);
+              // 풍부한 고조파 배음
+              const tone = Math.sin(2 * Math.PI * pitch * t)
+                         + 0.55 * Math.sin(4 * Math.PI * pitch * t)
+                         + 0.25 * Math.sin(6 * Math.PI * pitch * t);
+              data[i] = tone * env * 0.65;
+            }
 
-            gain.gain.setValueAtTime(0.01, now);
-            gain.gain.linearRampToValueAtTime(0.55, now + 0.15);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(ctx.destination);
+            source.start(now);
+            source.stop(now + duration);
+            currentActiveSources.push(source);
 
-            osc.connect(filter);
-            filter.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(now);
-            osc.stop(now + 0.65);
-            activeAudioNodes.push(osc);
           } else if (type === 'tiger') {
             // [호랑이: 실제 맹수 묵직한 포효 ("크아아앙-!")]
-            // 1. 초저음 그르렁 진동 (FM 변조)
-            const subOsc = ctx.createOscillator();
-            const modOsc = ctx.createOscillator();
-            const modGain = ctx.createGain();
-            const subGain = ctx.createGain();
+            const duration = 0.95;
+            const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+            const data = buffer.getChannelData(0);
 
-            subOsc.type = 'sawtooth';
-            subOsc.frequency.setValueAtTime(110, now);
-            subOsc.frequency.exponentialRampToValueAtTime(42, now + 0.85);
+            for (let i = 0; i < data.length; i++) {
+              const t = i / sampleRate;
+              const env = Math.sin(Math.min(t / 0.95, 1) * Math.PI);
+              // 초저음 성대 진동 + 맹수 그르렁 마찰
+              const freq = 120 * Math.exp(-t * 1.5) + 20 * Math.sin(2 * Math.PI * 35 * t);
+              const roarTone = Math.sin(2 * Math.PI * freq * t) + 0.6 * Math.sin(4 * Math.PI * freq * t);
+              const roarNoise = (Math.random() * 2 - 1) * 0.65;
+              data[i] = (roarTone * 0.5 + roarNoise) * env * 0.85;
+            }
 
-            modOsc.type = 'square';
-            modOsc.frequency.setValueAtTime(32, now);
-            modGain.gain.setValueAtTime(45, now);
-
-            modOsc.connect(subOsc.frequency);
-            subOsc.connect(subGain);
-
-            subGain.gain.setValueAtTime(0.7, now);
-            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
-            subGain.connect(ctx.destination);
-
-            modOsc.start(now);
-            subOsc.start(now);
-            modOsc.stop(now + 0.85);
-            subOsc.stop(now + 0.85);
-            activeAudioNodes.push(subOsc, modOsc);
-
-            // 2. 포효 공기 마찰음 (저음 로우패스 노이즈)
-            const roarNoise = ctx.createBufferSource();
-            roarNoise.buffer = createNoiseBuffer(ctx, 0.85);
-            const rFilter = ctx.createBiquadFilter();
-            rFilter.type = 'lowpass';
-            rFilter.frequency.setValueAtTime(450, now);
-            const rGain = ctx.createGain();
-            rGain.gain.setValueAtTime(0.6, now);
-            rGain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
-
-            roarNoise.connect(rFilter);
-            rFilter.connect(rGain);
-            rGain.connect(ctx.destination);
-            roarNoise.start(now);
-            roarNoise.stop(now + 0.85);
-            activeAudioNodes.push(roarNoise);
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(ctx.destination);
+            source.start(now);
+            source.stop(now + duration);
+            currentActiveSources.push(source);
           }
         }
       } catch (e) {
@@ -399,7 +378,6 @@
       return DEFAULT_STORAGE;
     };
 
-    // 전신 옆모습(측면 뷰) 캐릭터 마커
     const createDynamicUserIcon = (cameraType) => {
       if (!cameraType) {
         return L.divIcon({
@@ -735,7 +713,7 @@
         };
       }, [currentTab]);
 
-      // --- 과속 지속 시 2.5초 간격 연속 경보 엔진 (감속 시 즉각 정지) ---
+      // --- 과속 지속 시 2.5초 간격 연속 경보 엔진 (감속 시 0.01초 즉각 소멸) ---
       const effectiveLimit = nearbyCamera ? nearbyCamera.limit : (appData.hudSpeedLimit || 50);
       const isCurrentlyOverspeed = (gpsSpeed > effectiveLimit) && Boolean(nearbyCamera);
 
@@ -749,7 +727,7 @@
             playGuardianAudio(nearbyCamera.type, isPassengerMode);
           }, 2500);
         } else {
-          stopAllAudio(); // 과속에서 벗어나면 즉시 사운드 올킬
+          stopAllAudio(); // 감속 즉시 모든 사운드 강제 소멸
         }
 
         return () => {
@@ -911,10 +889,10 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, [simStep, isPassengerMode, isParkingStopped, parkingCountdown, sectionAvgSpeed, nearbyCamera]);
 
-      // 원터치 4단계 순환 테스트 (사운드 즉시 전환 & 정지)
+      // 원터치 4단계 순환 테스트 (소리 즉시 전환 & 정지)
       const handleCycleSimulation = (e) => {
         e.stopPropagation();
-        stopAllAudio();
+        stopAllAudio(); // 이전 소리 즉시 올킬
 
         const nextStep = (simStep + 1) % 4;
         setSimStep(nextStep);
