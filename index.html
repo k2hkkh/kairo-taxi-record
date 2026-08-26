@@ -53,7 +53,7 @@
     }
     .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
 
-    /* 속도계 폰트 스타일 (투명 아웃라인 / 초선명 사이언 / 레이저 레드) */
+    /* 속도계 폰트 스타일 */
     .font-speed-hollow {
       color: rgba(255, 255, 255, 0.15);
       -webkit-text-stroke: 2.5px rgba(255, 255, 255, 0.65);
@@ -84,14 +84,14 @@
 <body class="select-none antialiased min-h-screen bg-slate-950">
   <div id="root">
     <div class="min-h-screen flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
-      K-TAXI 가디언 시스템 로딩 중...
+      K-TAXI 리얼 가디언 시스템 로딩 중...
     </div>
   </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v2.8.0';
+    const APP_VERSION = 'v2.9.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -120,105 +120,45 @@
       return Math.round(R * c);
     };
 
-    // 2-Way 사운드 신시사이저 (AudioContext 활성화 탑재)
+    // --- 리얼 고음질 동물 음원 풀 (CORS 호환 표준 CDN 오디오) ---
+    const REAL_SOUND_URLS = {
+      dog: 'https://actions.google.com/sounds/v1/animals/dog_barking.ogg',
+      cat: 'https://actions.google.com/sounds/v1/animals/cat_purr_and_meow.ogg',
+      tiger: 'https://actions.google.com/sounds/v1/animals/lion_roar.ogg',
+      passenger: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg'
+    };
+
+    const audioCache = {};
+    Object.entries(REAL_SOUND_URLS).forEach(([key, url]) => {
+      try {
+        const audio = new Audio(url);
+        audio.preload = 'auto';
+        audioCache[key] = audio;
+      } catch (e) {
+        console.warn('Audio preload error:', e);
+      }
+    });
+
     const playGuardianAudio = (type = 'dog', isPassenger = false) => {
       try {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContext) return;
-        const ctx = new AudioContext();
-        if (ctx.state === 'suspended') {
-          ctx.resume();
+        const soundKey = isPassenger ? 'passenger' : (type || 'dog');
+        let sound = audioCache[soundKey];
+
+        if (!sound) {
+          sound = new Audio(REAL_SOUND_URLS[soundKey]);
+          audioCache[soundKey] = sound;
         }
 
-        if (isPassenger) {
-          if (type === 'dog' || type === 'speed') {
-            [0, 0.14].forEach((delay, idx) => {
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              osc.type = 'sine';
-              osc.frequency.setValueAtTime(idx === 0 ? 880 : 1174, ctx.currentTime + delay);
-              gain.gain.setValueAtTime(0.4, ctx.currentTime + delay);
-              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.12);
-              osc.connect(gain);
-              gain.connect(ctx.destination);
-              osc.start(ctx.currentTime + delay);
-              osc.stop(ctx.currentTime + delay + 0.12);
-            });
-          } else if (type === 'cat') {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(659.25, ctx.currentTime);
-            gain.gain.setValueAtTime(0.3, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(ctx.currentTime);
-            osc.stop(ctx.currentTime + 0.4);
-          } else {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'triangle';
-            osc.frequency.setValueAtTime(440, ctx.currentTime);
-            gain.gain.setValueAtTime(0.3, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.6);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(ctx.currentTime);
-            osc.stop(ctx.currentTime + 0.6);
-          }
-        } else {
-          if (type === 'dog') {
-            [0, 0.16].forEach((delay) => {
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              osc.type = 'sawtooth';
-              osc.frequency.setValueAtTime(650, ctx.currentTime + delay);
-              osc.frequency.exponentialRampToValueAtTime(130, ctx.currentTime + delay + 0.12);
-              gain.gain.setValueAtTime(0.7, ctx.currentTime + delay);
-              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.12);
-              osc.connect(gain);
-              gain.connect(ctx.destination);
-              osc.start(ctx.currentTime + delay);
-              osc.stop(ctx.currentTime + delay + 0.12);
-            });
-          } else if (type === 'cat') {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(390, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.25);
-            osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.55);
-            gain.gain.setValueAtTime(0.5, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.55);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(ctx.currentTime);
-            osc.stop(ctx.currentTime + 0.55);
-          } else if (type === 'tiger') {
-            const osc = ctx.createOscillator();
-            const mod = ctx.createOscillator();
-            const modGain = ctx.createGain();
-            const gain = ctx.createGain();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(95, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(45, ctx.currentTime + 0.85);
-            mod.type = 'square';
-            mod.frequency.setValueAtTime(24, ctx.currentTime);
-            modGain.gain.setValueAtTime(45, ctx.currentTime);
-            mod.connect(osc.frequency);
-            gain.gain.setValueAtTime(0.7, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.85);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            mod.start(ctx.currentTime);
-            osc.start(ctx.currentTime);
-            mod.stop(ctx.currentTime + 0.85);
-            osc.stop(ctx.currentTime + 0.85);
-          }
+        sound.currentTime = 0;
+        sound.volume = 1.0;
+        const playPromise = sound.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('Browser Autoplay Policy Unlock Needed:', err);
+          });
         }
       } catch (e) {
-        console.warn('Audio Synthesizer Error', e);
+        console.warn('Audio Playback Warning:', e);
       }
     };
 
@@ -622,7 +562,6 @@
 
       const [simStep, setSimStep] = useState(0);
       const activeCameraTracking = useRef(null);
-      const lastSoundTime = useRef(0);
 
       const [napTimerSeconds, setNapTimerSeconds] = useState(0);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
@@ -663,6 +602,28 @@
         };
       }, [currentTab]);
 
+      // --- 과속 지속 시 2.5초 간격 연속 경보 엔진 (감속 시 즉각 정지) ---
+      const effectiveLimit = nearbyCamera ? nearbyCamera.limit : (appData.hudSpeedLimit || 50);
+      const isCurrentlyOverspeed = (gpsSpeed > effectiveLimit) && Boolean(nearbyCamera);
+
+      useEffect(() => {
+        let overspeedAlarmInterval = null;
+
+        if (isCurrentlyOverspeed && nearbyCamera) {
+          // 과속 시작 즉시 1차 발동
+          playGuardianAudio(nearbyCamera.type, isPassengerMode);
+
+          // 과속 지속 중 2.5초마다 연속 발동
+          overspeedAlarmInterval = setInterval(() => {
+            playGuardianAudio(nearbyCamera.type, isPassengerMode);
+          }, 2500);
+        }
+
+        return () => {
+          if (overspeedAlarmInterval) clearInterval(overspeedAlarmInterval);
+        };
+      }, [isCurrentlyOverspeed, nearbyCamera, isPassengerMode]);
+
       // 주정차 5분 타이머 엔진
       useEffect(() => {
         let timer = null;
@@ -687,7 +648,7 @@
         return () => clearInterval(timer);
       }, [isParkingStopped, parkingCountdown]);
 
-      // 실시간 GPS 감시 및 방어/적발/평균속도/주정차 판정
+      // 실시간 GPS 감시
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -712,6 +673,10 @@
               });
 
               if (closest && closest.dist <= 350) {
+                // 진입 시점 1회 알림 (과속이 아닌 경우 최초 1회)
+                if (!nearbyCamera) {
+                  playGuardianAudio(closest.type, isPassengerMode);
+                }
                 setNearbyCamera(closest);
 
                 // 1. 주정차 구역 정차 감지
@@ -762,12 +727,6 @@
                     activeCameraTracking.current.maxSpeed = speedKmh;
                   }
                 }
-
-                const now = Date.now();
-                if (now - lastSoundTime.current > 8000) {
-                  playGuardianAudio(closest.type, isPassengerMode);
-                  lastSoundTime.current = now;
-                }
               } else {
                 if (activeCameraTracking.current && minDistance > 400) {
                   const { name, limit, type, maxSpeed } = activeCameraTracking.current;
@@ -816,7 +775,7 @@
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
-      }, [simStep, isPassengerMode, isParkingStopped, parkingCountdown, sectionAvgSpeed]);
+      }, [simStep, isPassengerMode, isParkingStopped, parkingCountdown, sectionAvgSpeed, nearbyCamera]);
 
       // 원터치 4단계 순환 테스트
       const handleCycleSimulation = (e) => {
@@ -843,7 +802,6 @@
         } else if (nextStep === 1) {
           setGpsSpeed(68);
           setNearbyCamera({ id: 'sim_dog', name: '불당대로 (신호·과속)', limit: 50, dist: 220, type: 'dog' });
-          playGuardianAudio('dog', isPassengerMode);
           setIsParkingStopped(false);
         } else if (nextStep === 2) {
           setGpsSpeed(0);
@@ -856,7 +814,6 @@
           setSectionAvgSpeed(78);
           setNearbyCamera({ id: 'sim_tiger', name: '남부대로 (구간단속)', limit: 70, dist: 380, type: 'tiger' });
           setIsParkingStopped(false);
-          playGuardianAudio('tiger', isPassengerMode);
         }
       };
 
@@ -1059,9 +1016,8 @@
         return '일반 모드';
       };
 
-      const effectiveSpeedLimit = nearbyCamera ? nearbyCamera.limit : (appData.hudSpeedLimit || 50);
-      const isOverSpeed = gpsSpeed > effectiveSpeedLimit;
-      const isNearCamera = !!nearbyCamera;
+      const isOverSpeed = isCurrentlyOverspeed;
+      const isNearCamera = Boolean(nearbyCamera);
 
       const handleCycleMirrorMode = () => {
         if (hudMirrorMode === 'rot90') setHudMirrorMode('flipY');
@@ -1124,9 +1080,7 @@
 
           <main className={`flex-1 flex flex-col ${currentTab === 'hud' ? 'p-0 overflow-hidden relative' : 'p-3 pb-24 overflow-y-auto'}`}>
             
-            {/* ======================================================== */}
             {/* 탭 1: 🏎️ 5:5 가디언 HUD & 누적 과태료 방어/적발 레이더 */}
-            {/* ======================================================== */}
             {currentTab === 'hud' && (
               <div
                 className={`flex-1 flex flex-col justify-between select-none relative w-full h-full overflow-hidden ${
@@ -1186,10 +1140,10 @@
                       />
                     </div>
 
-                    {/* 2. 전면: 5:5 초투명 가디언 HUD 오버레이 (터치 관통) */}
+                    {/* 2. 전면: 5:5 초투명 가디언 HUD 오버레이 */}
                     <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-16 pointer-events-none">
                       
-                      {/* 상단 1/2: 속도제한 표지판 (초투명 글래스 ➔ 단속 시 붉은 네온 점등) */}
+                      {/* 상단 1/2: 속도제한 표지판 (초투명 글래스) */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
                         <div className={`flex items-center justify-center w-44 h-44 rounded-full border-[5px] transition-all duration-300 ${
                           isNearCamera
@@ -1197,12 +1151,12 @@
                             : 'border-white/20 bg-slate-950/20 backdrop-blur-[1px] text-white/30 shadow-xl'
                         }`}>
                           <div className="flex flex-col items-center justify-center leading-none">
-                            <span className="text-7xl font-black tracking-tight">{effectiveSpeedLimit}</span>
+                            <span className="text-7xl font-black tracking-tight drop-shadow-md">{effectiveLimit}</span>
                             <span className={`text-[10px] font-black tracking-widest mt-0.5 ${isNearCamera ? 'text-red-600' : 'text-slate-400/40'}`}>LIMIT</span>
                           </div>
                         </div>
 
-                        {/* 단속 카메라 정보 & 주정차/구간단속 라이브 배지 */}
+                        {/* 단속 정보 & 라이브 배지 */}
                         {nearbyCamera ? (
                           <div className="mt-2 px-4 py-1 rounded-2xl bg-red-950/95 border border-red-500 text-red-300 font-black text-xs shadow-2xl animate-bounce pointer-events-auto">
                             <span>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'}</span>
@@ -1212,26 +1166,25 @@
                           <span className="text-[10px] font-bold text-slate-400/30 mt-1">정상 주행 구간</span>
                         )}
 
-                        {/* 주정차 5분 타이머 라이브 표시 */}
+                        {/* 주정차 5분 타이머 */}
                         {isParkingStopped && (
                           <div className="mt-1 px-3 py-0.5 rounded-xl bg-amber-950/95 border border-yellow-400 text-yellow-300 font-black text-xs shadow-2xl animate-pulse pointer-events-auto">
                             ⏱️ 주정차 유예: {Math.floor(parkingCountdown / 60)}분 {String(parkingCountdown % 60).padStart(2, '0')}초 남음
                           </div>
                         )}
 
-                        {/* 구간단속 실시간 평균속도 라이브 표시 */}
+                        {/* 구간단속 실시간 평균속도 */}
                         {nearbyCamera?.type === 'tiger' && sectionAvgSpeed > 0 && (
                           <div className="mt-1 px-3 py-0.5 rounded-xl bg-orange-950/95 border border-orange-500 text-orange-200 font-black text-xs shadow-2xl pointer-events-auto">
-                            🐯 구간 평균속도: <span className={sectionAvgSpeed > effectiveSpeedLimit ? 'text-red-400 font-black' : 'text-cyan-300 font-black'}>{sectionAvgSpeed} km/h</span>
+                            🐯 구간 평균속도: <span className={sectionAvgSpeed > effectiveLimit ? 'text-red-400 font-black' : 'text-cyan-300 font-black'}>{sectionAvgSpeed} km/h</span>
                           </div>
                         )}
                       </div>
 
-                      {/* 하단 1/2: 초대형 디지털 속도계 (정중앙 위치 & 상황별 고대비 폰트) */}
+                      {/* 하단 1/2: 초대형 디지털 속도계 (정중앙 위치 & 고대비 폰트) */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2 text-center">
                         <div className={`transition-all duration-300 flex flex-col items-center justify-center w-full ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
                           
-                          {/* 초대형 숫자 (정중앙 정렬) */}
                           <div className="w-full flex items-center justify-center leading-none">
                             <span className={`text-[11rem] font-black tracking-tighter font-mono text-center select-none ${
                               isOverSpeed
@@ -1244,12 +1197,11 @@
                             </span>
                           </div>
 
-                          {/* km/h 단위 & 경고 배지 */}
                           <div className="flex items-center justify-center gap-2 mt-[-10px]">
                             <span className="text-xl font-black text-slate-400/70 tracking-wider">KM/H</span>
                             {isOverSpeed && (
                               <span className="text-[11px] font-black text-red-200 bg-red-950/95 px-3 py-0.5 rounded-full border border-red-500 shadow-xl animate-bounce">
-                                ⚠️ 감속 필요 (+{gpsSpeed - effectiveSpeedLimit} km/h 초과)
+                                ⚠️ 즉시 감속 (+{gpsSpeed - effectiveLimit} km/h 초과)
                               </span>
                             )}
                           </div>
@@ -1257,7 +1209,7 @@
                       </div>
                     </div>
 
-                    {/* 3. 하단 고정: 누적 과태료 방어/적발 전광판 배너 (터치 시 상세 팝업) */}
+                    {/* 3. 하단 고정: 누적 과태료 방어/적발 전광판 배너 */}
                     <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto">
                       <div
                         onClick={() => setShowDefenseListModal(true)}
@@ -1293,7 +1245,7 @@
                             isNearCamera ? 'border-red-600 bg-white text-black animate-top-pump shadow-2xl' : 'border-red-600 bg-white text-black shadow-2xl'
                           }`}>
                             <div className="flex flex-col items-center justify-center leading-none">
-                              <span className="text-5xl font-black tracking-tight">{effectiveSpeedLimit}</span>
+                              <span className="text-5xl font-black tracking-tight">{effectiveLimit}</span>
                               <span className="text-[9px] font-black text-red-600 tracking-wider mt-0.5">LIMIT</span>
                             </div>
                           </div>
@@ -1322,7 +1274,7 @@
 
                           {isOverSpeed ? (
                             <span className="text-xs font-black text-red-400 mt-1 bg-red-950/90 px-3 py-0.5 rounded-full border border-red-500/80">
-                              ⚠️ 즉시 감속 (+{gpsSpeed - effectiveSpeedLimit} km/h 초과)
+                              ⚠️ 즉시 감속 (+{gpsSpeed - effectiveLimit} km/h 초과)
                             </span>
                           ) : (
                             <span className="text-[10px] font-bold text-slate-400 mt-1">
