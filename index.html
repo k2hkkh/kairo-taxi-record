@@ -91,7 +91,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v2.9.0';
+    const APP_VERSION = 'v3.0.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -107,7 +107,6 @@
       { id: 'cam8', name: '남부대로 구간단속 (유량~목천)', lat: 36.7820, lon: 127.1650, limit: 70, type: 'tiger' }
     ];
 
-    // 하버사인 거리 계산 (m)
     const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371e3;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -120,10 +119,10 @@
       return Math.round(R * c);
     };
 
-    // --- 리얼 고음질 동물 음원 풀 (CORS 호환 표준 CDN 오디오) ---
+    // --- 리얼 숏폼(1~1.5초) 고음질 동물 음원 풀 ---
     const REAL_SOUND_URLS = {
       dog: 'https://actions.google.com/sounds/v1/animals/dog_barking.ogg',
-      cat: 'https://actions.google.com/sounds/v1/animals/cat_purr_and_meow.ogg',
+      cat: 'https://cdn.freesound.org/previews/412/412017_5121236-lq.mp3',
       tiger: 'https://actions.google.com/sounds/v1/animals/lion_roar.ogg',
       passenger: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg'
     };
@@ -135,12 +134,31 @@
         audio.preload = 'auto';
         audioCache[key] = audio;
       } catch (e) {
-        console.warn('Audio preload error:', e);
+        console.warn('Audio Init Error:', e);
       }
     });
 
+    let autoStopTimeout = null;
+
+    // 모든 소리 즉시 강제 정지 함수
+    const stopAllAudio = () => {
+      if (autoStopTimeout) {
+        clearTimeout(autoStopTimeout);
+        autoStopTimeout = null;
+      }
+      Object.values(audioCache).forEach((audio) => {
+        if (audio) {
+          audio.pause();
+          audio.currentTime = 0;
+        }
+      });
+    };
+
+    // 1.5초 숏폼 리얼 사운드 재생 함수
     const playGuardianAudio = (type = 'dog', isPassenger = false) => {
       try {
+        stopAllAudio(); // 이전 소리 즉시 정지
+
         const soundKey = isPassenger ? 'passenger' : (type || 'dog');
         let sound = audioCache[soundKey];
 
@@ -153,12 +171,18 @@
         sound.volume = 1.0;
         const playPromise = sound.play();
         if (playPromise !== undefined) {
-          playPromise.catch((err) => {
-            console.warn('Browser Autoplay Policy Unlock Needed:', err);
-          });
+          playPromise.catch((err) => console.warn('Audio Autoplay Blocked:', err));
         }
+
+        // 최대 1.4초 후 자동 정지 (소리가 절대 길게 늘어지지 않음)
+        autoStopTimeout = setTimeout(() => {
+          if (sound) {
+            sound.pause();
+            sound.currentTime = 0;
+          }
+        }, 1400);
       } catch (e) {
-        console.warn('Audio Playback Warning:', e);
+        console.warn('Audio Playback Error:', e);
       }
     };
 
@@ -265,7 +289,6 @@
       return DEFAULT_STORAGE;
     };
 
-    // 전신 옆모습(측면 뷰) 캐릭터 마커
     const createDynamicUserIcon = (cameraType) => {
       if (!cameraType) {
         return L.divIcon({
@@ -364,7 +387,6 @@
       }
     };
 
-    // 풀스크린 실시간 지도 컴포넌트
     function FullscreenLiveMapView({ currentCoords, nearbyCamera, isAutoTracking, setIsAutoTracking }) {
       const mapContainerRef = useRef(null);
       const mapInstanceRef = useRef(null);
@@ -610,17 +632,18 @@
         let overspeedAlarmInterval = null;
 
         if (isCurrentlyOverspeed && nearbyCamera) {
-          // 과속 시작 즉시 1차 발동
           playGuardianAudio(nearbyCamera.type, isPassengerMode);
 
-          // 과속 지속 중 2.5초마다 연속 발동
           overspeedAlarmInterval = setInterval(() => {
             playGuardianAudio(nearbyCamera.type, isPassengerMode);
           }, 2500);
+        } else {
+          stopAllAudio(); // 과속 벗어나면 즉시 소리 차단
         }
 
         return () => {
           if (overspeedAlarmInterval) clearInterval(overspeedAlarmInterval);
+          stopAllAudio();
         };
       }, [isCurrentlyOverspeed, nearbyCamera, isPassengerMode]);
 
@@ -673,7 +696,6 @@
               });
 
               if (closest && closest.dist <= 350) {
-                // 진입 시점 1회 알림 (과속이 아닌 경우 최초 1회)
                 if (!nearbyCamera) {
                   playGuardianAudio(closest.type, isPassengerMode);
                 }
@@ -767,6 +789,7 @@
                 }
                 setNearbyCamera(null);
                 setIsParkingStopped(false);
+                stopAllAudio();
               }
             }
           },
@@ -777,13 +800,16 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, [simStep, isPassengerMode, isParkingStopped, parkingCountdown, sectionAvgSpeed, nearbyCamera]);
 
-      // 원터치 4단계 순환 테스트
+      // 원터치 4단계 순환 테스트 (사운드 즉시 전환 & 정지)
       const handleCycleSimulation = (e) => {
         e.stopPropagation();
+        stopAllAudio(); // 버튼 터치 즉시 이전 사운드 올킬
+
         const nextStep = (simStep + 1) % 4;
         setSimStep(nextStep);
 
         if (nextStep === 0) {
+          stopAllAudio();
           const simEntry = {
             id: Date.now(),
             time: getCurrentTimeStr(),
@@ -803,6 +829,7 @@
           setGpsSpeed(68);
           setNearbyCamera({ id: 'sim_dog', name: '불당대로 (신호·과속)', limit: 50, dist: 220, type: 'dog' });
           setIsParkingStopped(false);
+          playGuardianAudio('dog', isPassengerMode);
         } else if (nextStep === 2) {
           setGpsSpeed(0);
           setNearbyCamera({ id: 'sim_cat', name: '천안역 광장 (주정차구역)', limit: 30, dist: 140, type: 'cat' });
@@ -814,6 +841,7 @@
           setSectionAvgSpeed(78);
           setNearbyCamera({ id: 'sim_tiger', name: '남부대로 (구간단속)', limit: 70, dist: 380, type: 'tiger' });
           setIsParkingStopped(false);
+          playGuardianAudio('tiger', isPassengerMode);
         }
       };
 
@@ -1130,7 +1158,7 @@
                 {hudViewMode === 'map' ? (
                   <div className="relative w-full h-full flex-1 flex flex-col">
                     
-                    {/* 1. 배경: 선명한 실시간 지도 (터치 100% 작동) */}
+                    {/* 1. 배경: 선명한 실시간 지도 */}
                     <div className="absolute inset-0 z-0">
                       <FullscreenLiveMapView
                         currentCoords={currentCoords}
@@ -1143,7 +1171,7 @@
                     {/* 2. 전면: 5:5 초투명 가디언 HUD 오버레이 */}
                     <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-16 pointer-events-none">
                       
-                      {/* 상단 1/2: 속도제한 표지판 (초투명 글래스) */}
+                      {/* 상단 1/2: 속도제한 표지판 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
                         <div className={`flex items-center justify-center w-44 h-44 rounded-full border-[5px] transition-all duration-300 ${
                           isNearCamera
@@ -1156,7 +1184,7 @@
                           </div>
                         </div>
 
-                        {/* 단속 정보 & 라이브 배지 */}
+                        {/* 단속 정보 배지 */}
                         {nearbyCamera ? (
                           <div className="mt-2 px-4 py-1 rounded-2xl bg-red-950/95 border border-red-500 text-red-300 font-black text-xs shadow-2xl animate-bounce pointer-events-auto">
                             <span>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'}</span>
@@ -1181,7 +1209,7 @@
                         )}
                       </div>
 
-                      {/* 하단 1/2: 초대형 디지털 속도계 (정중앙 위치 & 고대비 폰트) */}
+                      {/* 하단 1/2: 초대형 디지털 속도계 (정중앙 위치) */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2 text-center">
                         <div className={`transition-all duration-300 flex flex-col items-center justify-center w-full ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
                           
