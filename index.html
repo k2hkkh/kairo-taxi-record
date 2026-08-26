@@ -51,7 +51,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v1.6.1';
+    const APP_VERSION = 'v1.6.2';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
 
     // --- Web Audio 사운드 시스템 ---
@@ -264,7 +264,7 @@
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       });
 
-      // 내비 목적지 검색창
+      // 내비 검색어
       const [navQuery, setNavQuery] = useState('');
 
       // 건강 루틴 추가
@@ -368,7 +368,7 @@
         setAppData(prev => ({ ...prev, defaultOffDay: Number(dayIndex) }));
       };
 
-      // 내비 런처 (팝업 차단 없는 직접 호출)
+      // 내비 런처 (카카오맵 직접 검색으로 인증 에러 해결)
       const openNavApp = (appType) => {
         const query = navQuery.trim() || '가스충전소';
         const encoded = encodeURIComponent(query);
@@ -376,7 +376,7 @@
         if (appType === 'tmap') {
           window.location.href = `tmap://search?name=${encoded}`;
         } else if (appType === 'kakao') {
-          window.location.href = `kakaonavi://navigate?name=${encoded}`;
+          window.location.href = `kakaomap://search?q=${encoded}`;
         } else if (appType === 'naver') {
           window.location.href = `nmap://search?query=${encoded}&appname=k-taxi`;
         }
