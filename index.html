@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>K-TAXI 스마트 가디언 지도 & HUD</title>
+  <title>K-TAXI 스마트 가디언 풀스크린 지도 & HUD</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Leaflet 지도 라이브러리 -->
@@ -25,6 +25,7 @@
       color: #f8fafc;
       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
       -webkit-tap-highlight-color: transparent;
+      overflow-x: hidden;
     }
     .hud-flip-y { transform: scaleY(-1); }
     .hud-rot90-flip { transform: rotate(-90deg) scaleY(-1); }
@@ -52,7 +53,7 @@
     }
     .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
 
-    /* 리플릿 지도 컨테이너 */
+    /* 리플릿 풀스크린 지도 컨테이너 */
     .leaflet-container {
       background-color: #1e293b !important;
       font-family: inherit;
@@ -73,8 +74,9 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v2.0.0';
+    const APP_VERSION = 'v2.1.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
+    const DEFAULT_MAP_ZOOM = 17; // 기본 근접 주행 줌 레벨
 
     // 천안·아산 주요 단속 포인트 DB
     const CAMERA_DB = [
@@ -303,7 +305,7 @@
       return DEFAULT_STORAGE;
     };
 
-    // 풀스크린 지도 컴포넌트 (스마트 탐색 & 위치 복귀 기능 탑재)
+    // 풀스크린 실시간 지도 컴포넌트 ("내 위치로" 시 기본 줌 17 리셋)
     function FullscreenLiveMapView({ currentCoords, nearbyCamera, isAutoTracking, setIsAutoTracking }) {
       const mapContainerRef = useRef(null);
       const mapInstanceRef = useRef(null);
@@ -319,32 +321,32 @@
         if (!mapInstanceRef.current) {
           const map = L.map(mapContainerRef.current, {
             center: [defaultLat, defaultLon],
-            zoom: 17,
+            zoom: DEFAULT_MAP_ZOOM,
             zoomControl: false,
             attributionControl: false
           });
 
-          // 100% 한글 도로망 타일
+          // 100% 한글 정밀 도로망 타일
           L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             minZoom: 12
           }).addTo(map);
 
-          // 사용자가 손가락으로 지도 조작 시 자동 추적 일시정지
+          // 사용자가 손가락으로 드래그하거나 확대/축소 시 자동 추적 일시 정지
           map.on('dragstart zoomstart', () => {
             setIsAutoTracking(false);
             if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
           });
 
-          // 6초간 조작 없으면 자동으로 내 차량 위치 추적 재개
-          map.on('dragend', () => {
+          // 조작 중단 6초 후 자동 추적 복귀
+          map.on('dragend zoomend', () => {
             if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
             autoResumeTimer.current = setTimeout(() => {
               setIsAutoTracking(true);
             }, 6000);
           });
 
-          // 단속 카메라 마커
+          // 단속 카메라 마커 등록
           CAMERA_DB.forEach((cam) => {
             const camIcon = L.divIcon({
               className: 'custom-cam-pin',
@@ -380,7 +382,7 @@
         };
       }, []);
 
-      // 자동 추적 활성화 시에만 지도 중심 이동
+      // 자동 추적 활성화 시 GPS 위치로 스무스 이동
       useEffect(() => {
         if (mapInstanceRef.current && currentCoords) {
           const { lat, lon } = currentCoords;
@@ -393,32 +395,36 @@
         }
       }, [currentCoords, isAutoTracking]);
 
+      // [내 위치로] 버튼 클릭 시: 위치 이동 + 원래 배율(17단계)로 완전 복귀
       const handleRecenter = (e) => {
         e.stopPropagation();
         if (mapInstanceRef.current && currentCoords) {
-          mapInstanceRef.current.panTo([currentCoords.lat, currentCoords.lon], { animate: true, duration: 0.8 });
+          mapInstanceRef.current.setView([currentCoords.lat, currentCoords.lon], DEFAULT_MAP_ZOOM, {
+            animate: true,
+            duration: 0.8
+          });
           setIsAutoTracking(true);
         }
       };
 
       return (
-        <div className="w-full h-full relative flex-1 flex flex-col">
+        <div className="w-full h-full relative flex-1 flex flex-col bg-slate-950">
           <div ref={mapContainerRef} className="w-full h-full flex-1" />
 
-          {/* 수동 탐색 중일 때 나타나는 [내 위치 복귀] 버튼 */}
+          {/* 수동 탐색 중일 때 나타나는 [📍 내 위치로] 복귀 버튼 */}
           {!isAutoTracking && (
             <button
               onClick={handleRecenter}
-              className="absolute bottom-6 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition"
+              className="absolute bottom-24 right-4 z-[450] px-4 py-2.5 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition"
             >
-              <span className="text-base">📍</span> 내 위치로
+              <span className="text-base">📍</span> 내 위치로 (17배율)
             </button>
           )}
 
           {/* 하단 GPS 상태 배지 */}
-          <div className="absolute bottom-2 left-3 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow">
+          <div className="absolute bottom-20 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-3 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow">
             <span className={`w-2 h-2 rounded-full ${isAutoTracking ? 'bg-emerald-400 animate-pulse' : 'bg-orange-400'}`}></span>
-            {isAutoTracking ? '주행 추적 중' : '지도 자유 탐색 모드'}
+            {isAutoTracking ? '실시간 주행 추적 중' : '자유 탐색 모드'}
           </div>
         </div>
       );
@@ -477,7 +483,7 @@
       // GPS & HUD & 지도 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [currentCoords, setCurrentCoords] = useState(null);
-      const [hudViewMode, setHudViewMode] = useState('map'); // 'map' (풀맵+HUD오버레이) | 'mirror' (순수 HUD)
+      const [hudViewMode, setHudViewMode] = useState('map'); // 'map' (풀스크린 지도+HUD) | 'mirror' (대시보드 반사 HUD)
       const [hudMirrorMode, setHudMirrorMode] = useState('rot90');
       const [isAutoTracking, setIsAutoTracking] = useState(true);
       const [nearbyCamera, setNearbyCamera] = useState(null);
@@ -811,45 +817,47 @@
       return (
         <div className="max-w-md mx-auto w-full min-h-screen flex flex-col bg-slate-950 border-x border-slate-800 relative">
           
-          <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
-            <div className="flex items-center gap-2">
-              <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
-              <span className="text-sm font-bold text-white tracking-tight truncate max-w-[150px]">
-                {appData[activeType]?.carNumber || (activeType === 'corporate' ? '법인택시' : '개인택시')}
+          {/* 가디언 지도 탭이 아닐 때만 일반 상단 헤더 표시 */}
+          {currentTab !== 'hud' && (
+            <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
+              <div className="flex items-center gap-2">
+                <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
+                <span className="text-sm font-bold text-white tracking-tight truncate max-w-[150px]">
+                  {appData[activeType]?.carNumber || (activeType === 'corporate' ? '법인택시' : '개인택시')}
+                </span>
+              </div>
+              <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold border border-slate-700">
+                {activeType === 'corporate' ? '법인 모드' : '개인 모드'}
               </span>
-            </div>
-            <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold border border-slate-700">
-              {activeType === 'corporate' ? '법인 모드' : '개인 모드'}
-            </span>
-          </header>
+            </header>
+          )}
 
-          <main className="flex-1 overflow-y-auto p-3 pb-24 flex flex-col">
+          {/* 메인 뷰: 가디언지도일 때는 여백 없이 100% 꽉 찬 전체화면 적용 */}
+          <main className={`flex-1 flex flex-col ${currentTab === 'hud' ? 'p-0 overflow-hidden relative' : 'p-3 pb-24 overflow-y-auto'}`}>
             
             {/* ======================================================== */}
             {/* 탭 1: 🏎️ 스마트 가디언 풀스크린 지도 & HUD 오버레이 */}
             {/* ======================================================== */}
             {currentTab === 'hud' && (
               <div
-                className={`flex-1 flex flex-col justify-between select-none rounded-3xl overflow-hidden border transition-all duration-300 relative min-h-[520px] ${
+                className={`flex-1 flex flex-col justify-between select-none relative w-full h-full overflow-hidden ${
                   isNearCamera && isOverSpeed
-                    ? 'animate-strobe-alert border-red-500'
-                    : isNearCamera
-                    ? 'bg-slate-950 border-yellow-500/80'
-                    : 'bg-slate-950 border-slate-800/80'
+                    ? 'animate-strobe-alert'
+                    : 'bg-slate-950'
                 }`}
               >
-                {/* 상단 통합 제어 바 */}
-                <div className="p-2.5 bg-slate-900/95 backdrop-blur border-b border-slate-800 flex justify-between items-center z-30">
-                  <div className="flex gap-1.5">
+                {/* 상단 통합 플로팅 제어 알약 바 */}
+                <div className="absolute top-3 left-3 right-3 z-[450] flex justify-between items-center pointer-events-auto">
+                  <div className="flex gap-1.5 bg-slate-950/80 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
                     <button
                       onClick={() => {
                         setIsPassengerMode(!isPassengerMode);
                         playGuardianAudio('dog', !isPassengerMode);
                       }}
-                      className={`px-2.5 py-1 rounded-xl text-[10px] font-black border flex items-center gap-1 transition ${
+                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black border flex items-center gap-1 transition active:scale-95 ${
                         isPassengerMode
-                          ? 'bg-blue-900/90 text-blue-200 border-blue-400'
-                          : 'bg-yellow-500 text-black border-yellow-300'
+                          ? 'bg-blue-900/90 text-blue-200 border-blue-400 shadow-md'
+                          : 'bg-yellow-500 text-black border-yellow-300 shadow-md'
                       }`}
                     >
                       {isPassengerMode ? '👥 탑승(에티켓)' : '🚕 빈차(동물음)'}
@@ -857,7 +865,7 @@
 
                     <button
                       onClick={() => setHudViewMode(hudViewMode === 'map' ? 'mirror' : 'map')}
-                      className="px-2.5 py-1 bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-[10px] font-bold"
+                      className="px-2.5 py-1.5 bg-slate-800/90 border border-slate-600 text-slate-200 rounded-xl text-[10px] font-bold active:scale-95"
                     >
                       {hudViewMode === 'map' ? '🪞 HUD 전용' : '🗺️ 지도 보기'}
                     </button>
@@ -865,10 +873,10 @@
 
                   <button
                     onClick={toggleSimulation}
-                    className={`px-2.5 py-1 rounded-xl text-[10px] font-black border transition ${
+                    className={`px-3 py-1.5 rounded-2xl text-[10px] font-black border shadow-2xl transition active:scale-95 ${
                       isSimulationActive
                         ? 'bg-red-600 text-white border-white animate-pulse'
-                        : 'bg-slate-800 text-yellow-400 border-yellow-500/40'
+                        : 'bg-slate-950/80 backdrop-blur-md text-yellow-400 border-yellow-500/50'
                     }`}
                   >
                     {isSimulationActive ? '⚡ 테스트 중지' : '⚡ 단속 테스트'}
@@ -877,7 +885,7 @@
 
                 {/* 과태료 방어 성공 알림 토스트 */}
                 {showDefenseToast && (
-                  <div className="absolute top-14 left-4 right-4 z-[500] bg-gradient-to-r from-emerald-600 to-green-500 text-white p-2.5 rounded-2xl shadow-2xl flex items-center justify-between animate-bounce">
+                  <div className="absolute top-16 left-4 right-4 z-[500] bg-gradient-to-r from-emerald-600 to-green-500 text-white p-2.5 rounded-2xl shadow-2xl flex items-center justify-between animate-bounce">
                     <div className="flex items-center gap-2">
                       <span className="text-xl">🛡️</span>
                       <div>
@@ -889,12 +897,12 @@
                   </div>
                 )}
 
-                {/* 메인 화면 영역 */}
+                {/* 메인 뷰 전환 영역 */}
                 {hudViewMode === 'map' ? (
-                  // [풀스크린 지도 + 플로팅 HUD 오버레이 뷰]
-                  <div className="relative w-full flex-1 flex flex-col overflow-hidden">
+                  // [A. 100% 꽉 찬 풀스크린 지도 + 플로팅 HUD 오버레이]
+                  <div className="relative w-full h-full flex-1 flex flex-col">
                     
-                    {/* 1. 배경: 풀스크린 실시간 지도 */}
+                    {/* 풀스크린 실시간 지도 */}
                     <FullscreenLiveMapView
                       currentCoords={currentCoords}
                       nearbyCamera={nearbyCamera}
@@ -902,8 +910,8 @@
                       setIsAutoTracking={setIsAutoTracking}
                     />
 
-                    {/* 2. 상단 좌측 플로팅 HUD: 제한속도 표지판 & 단속 거리 */}
-                    <div className="absolute top-3 left-3 z-[400] pointer-events-none">
+                    {/* 상단 좌측 플로팅 HUD: 제한속도 표지판 & 단속 거리 */}
+                    <div className="absolute top-16 left-3.5 z-[400] pointer-events-none">
                       <div className="flex items-center gap-2">
                         <div className={`flex items-center justify-center w-20 h-20 rounded-full border-[6px] bg-white text-black shadow-2xl transition-all duration-300 ${
                           isNearCamera ? 'border-red-600 animate-top-pump' : 'border-red-600'
@@ -915,7 +923,7 @@
                         </div>
 
                         {nearbyCamera && (
-                          <div className="px-2.5 py-1 rounded-xl bg-slate-950/90 border border-red-500 text-red-300 font-black text-[11px] shadow-2xl animate-bounce">
+                          <div className="px-3 py-1.5 rounded-2xl bg-slate-950/95 border border-red-500 text-red-300 font-black text-[11px] shadow-2xl animate-bounce">
                             <div>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'}</div>
                             <div className="text-yellow-400 font-bold">{nearbyCamera.dist}m 전방</div>
                           </div>
@@ -923,12 +931,12 @@
                       </div>
                     </div>
 
-                    {/* 3. 하단 중앙 플로팅 HUD: 초대형 디지털 속도계 */}
-                    <div className="absolute bottom-12 left-0 right-0 z-[400] flex justify-center pointer-events-none">
-                      <div className={`px-6 py-2 rounded-3xl backdrop-blur-md border shadow-2xl flex flex-col items-center transition-all duration-300 ${
+                    {/* 하단 중앙 플로팅 HUD: 초대형 디지털 속도계 */}
+                    <div className="absolute bottom-16 left-0 right-0 z-[400] flex justify-center pointer-events-none">
+                      <div className={`px-7 py-2.5 rounded-3xl backdrop-blur-md border shadow-2xl flex flex-col items-center transition-all duration-300 ${
                         isOverSpeed
                           ? 'bg-red-950/90 border-red-500 animate-pulse'
-                          : 'bg-slate-950/80 border-slate-700/80'
+                          : 'bg-slate-950/85 border-slate-700/80'
                       }`}>
                         <div className="flex items-baseline justify-center">
                           <span className={`text-6xl font-black tracking-tighter font-mono ${
@@ -940,7 +948,7 @@
                         </div>
 
                         {isOverSpeed && (
-                          <span className="text-[10px] font-black text-red-300 bg-red-900/80 px-2 py-0.5 rounded-full border border-red-400 mt-0.5">
+                          <span className="text-[10px] font-black text-red-300 bg-red-900/80 px-2.5 py-0.5 rounded-full border border-red-400 mt-0.5">
                             ⚠️ 감속 필요 (+{gpsSpeed - effectiveSpeedLimit}km/h 초과)
                           </span>
                         )}
@@ -948,10 +956,10 @@
                     </div>
                   </div>
                 ) : (
-                  // [순수 5:5 대시보드 반사용 HUD 뷰]
+                  // [B. 순수 5:5 대시보드 반사용 HUD 뷰]
                   <div
                     onClick={handleCycleMirrorMode}
-                    className="flex-1 flex flex-col justify-between p-2 cursor-pointer"
+                    className="flex-1 flex flex-col justify-between p-3 cursor-pointer"
                   >
                     <div className="flex-1 flex flex-col items-center justify-center p-2 border-b border-slate-800/60 overflow-hidden">
                       <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
@@ -1323,6 +1331,7 @@
             )}
           </main>
 
+          {/* 하단 네비게이션 탭 바 */}
           <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
             <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언지도</span>
