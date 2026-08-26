@@ -67,16 +67,16 @@
 <body class="select-none antialiased min-h-screen bg-slate-950">
   <div id="root">
     <div class="min-h-screen flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
-      K-TAXI 풀스크린 가디언 로딩 중...
+      K-TAXI 가디언 변신 레이더 로딩 중...
     </div>
   </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v2.1.0';
+    const APP_VERSION = 'v2.2.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
-    const DEFAULT_MAP_ZOOM = 17; // 기본 근접 주행 줌 레벨
+    const DEFAULT_MAP_ZOOM = 17;
 
     // 천안·아산 주요 단속 포인트 DB
     const CAMERA_DB = [
@@ -305,7 +305,72 @@
       return DEFAULT_STORAGE;
     };
 
-    // 풀스크린 실시간 지도 컴포넌트 ("내 위치로" 시 기본 줌 17 리셋)
+    // 동적 카멜레온 마커 생성 함수 (상황별 택시/강아지/고양이/호랑이 자동 변신)
+    const createDynamicUserIcon = (cameraType) => {
+      if (!cameraType) {
+        // [평상시: 네온 스마트 택시]
+        return L.divIcon({
+          className: 'custom-user-morph-marker',
+          html: `
+            <div class="relative flex items-center justify-center w-10 h-10">
+              <div class="absolute inset-0 rounded-full bg-blue-500/30 animate-ping"></div>
+              <div class="w-10 h-10 rounded-full bg-slate-950 border-2 border-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.9)] flex items-center justify-center text-xl">
+                🚕
+              </div>
+            </div>
+          `,
+          iconSize: [40, 40],
+          iconAnchor: [20, 20]
+        });
+      } else if (cameraType === 'dog') {
+        // [신호·과속 단속 접근: 강아지 붉은 스트로브 링]
+        return L.divIcon({
+          className: 'custom-user-morph-marker',
+          html: `
+            <div class="relative flex items-center justify-center w-12 h-12 animate-bounce">
+              <div class="absolute inset-0 rounded-full bg-red-600/60 animate-ping"></div>
+              <div class="w-12 h-12 rounded-full bg-red-950 border-2 border-red-500 shadow-[0_0_20px_rgba(239,68,68,1)] flex items-center justify-center text-2xl">
+                🐶
+              </div>
+            </div>
+          `,
+          iconSize: [48, 48],
+          iconAnchor: [24, 24]
+        });
+      } else if (cameraType === 'cat') {
+        // [주정차 단속 구역: 고양이 옐로우/퍼플 링]
+        return L.divIcon({
+          className: 'custom-user-morph-marker',
+          html: `
+            <div class="relative flex items-center justify-center w-12 h-12 animate-pulse">
+              <div class="absolute inset-0 rounded-full bg-amber-500/60 animate-ping"></div>
+              <div class="w-12 h-12 rounded-full bg-amber-950 border-2 border-yellow-400 shadow-[0_0_20px_rgba(245,158,11,1)] flex items-center justify-center text-2xl">
+                🐱
+              </div>
+            </div>
+          `,
+          iconSize: [48, 48],
+          iconAnchor: [24, 24]
+        });
+      } else if (cameraType === 'tiger') {
+        // [구간 단속 구간: 호랑이 파이어 오렌지 링]
+        return L.divIcon({
+          className: 'custom-user-morph-marker',
+          html: `
+            <div class="relative flex items-center justify-center w-12 h-12 animate-top-pump">
+              <div class="absolute inset-0 rounded-full bg-orange-600/60 animate-ping"></div>
+              <div class="w-12 h-12 rounded-full bg-orange-950 border-2 border-orange-500 shadow-[0_0_22px_rgba(249,115,22,1)] flex items-center justify-center text-2xl">
+                🐯
+              </div>
+            </div>
+          `,
+          iconSize: [48, 48],
+          iconAnchor: [24, 24]
+        });
+      }
+    };
+
+    // 풀스크린 실시간 지도 컴포넌트
     function FullscreenLiveMapView({ currentCoords, nearbyCamera, isAutoTracking, setIsAutoTracking }) {
       const mapContainerRef = useRef(null);
       const mapInstanceRef = useRef(null);
@@ -332,13 +397,11 @@
             minZoom: 12
           }).addTo(map);
 
-          // 사용자가 손가락으로 드래그하거나 확대/축소 시 자동 추적 일시 정지
           map.on('dragstart zoomstart', () => {
             setIsAutoTracking(false);
             if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
           });
 
-          // 조작 중단 6초 후 자동 추적 복귀
           map.on('dragend zoomend', () => {
             if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
             autoResumeTimer.current = setTimeout(() => {
@@ -359,14 +422,11 @@
               .bindPopup(`<b>${cam.name}</b><br>제한속도: ${cam.limit}km/h`);
           });
 
-          // 내 차량 위치 마커 (파란색 펄스 핀)
-          const userIcon = L.divIcon({
-            className: 'user-pin',
-            html: `<div style="background-color:#0284c7;border:3px solid #ffffff;border-radius:9999px;width:24px;height:24px;box-shadow:0 0 14px #38bdf8;"></div>`,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
-          });
-          userMarkerRef.current = L.marker([defaultLat, defaultLon], { icon: userIcon }).addTo(map);
+          // 초기 내 위치 마커 등록 (기본 택시 모양)
+          userMarkerRef.current = L.marker([defaultLat, defaultLon], {
+            icon: createDynamicUserIcon(null)
+          }).addTo(map);
+
           mapInstanceRef.current = map;
         }
 
@@ -382,7 +442,15 @@
         };
       }, []);
 
-      // 자동 추적 활성화 시 GPS 위치로 스무스 이동
+      // 단속 상황 변화에 따른 마커 모양 동적 변경 (택시 ↔ 강아지 ↔ 고양이 ↔ 호랑이)
+      useEffect(() => {
+        if (userMarkerRef.current) {
+          const activeType = nearbyCamera ? nearbyCamera.type : null;
+          userMarkerRef.current.setIcon(createDynamicUserIcon(activeType));
+        }
+      }, [nearbyCamera]);
+
+      // GPS 좌표 갱신에 따른 마커 이동
       useEffect(() => {
         if (mapInstanceRef.current && currentCoords) {
           const { lat, lon } = currentCoords;
@@ -395,7 +463,7 @@
         }
       }, [currentCoords, isAutoTracking]);
 
-      // [내 위치로] 버튼 클릭 시: 위치 이동 + 원래 배율(17단계)로 완전 복귀
+      // [내 위치로] 버튼 클릭 시
       const handleRecenter = (e) => {
         e.stopPropagation();
         if (mapInstanceRef.current && currentCoords) {
@@ -483,7 +551,7 @@
       // GPS & HUD & 지도 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [currentCoords, setCurrentCoords] = useState(null);
-      const [hudViewMode, setHudViewMode] = useState('map'); // 'map' (풀스크린 지도+HUD) | 'mirror' (대시보드 반사 HUD)
+      const [hudViewMode, setHudViewMode] = useState('map');
       const [hudMirrorMode, setHudMirrorMode] = useState('rot90');
       const [isAutoTracking, setIsAutoTracking] = useState(true);
       const [nearbyCamera, setNearbyCamera] = useState(null);
@@ -817,7 +885,6 @@
       return (
         <div className="max-w-md mx-auto w-full min-h-screen flex flex-col bg-slate-950 border-x border-slate-800 relative">
           
-          {/* 가디언 지도 탭이 아닐 때만 일반 상단 헤더 표시 */}
           {currentTab !== 'hud' && (
             <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
               <div className="flex items-center gap-2">
@@ -832,11 +899,10 @@
             </header>
           )}
 
-          {/* 메인 뷰: 가디언지도일 때는 여백 없이 100% 꽉 찬 전체화면 적용 */}
           <main className={`flex-1 flex flex-col ${currentTab === 'hud' ? 'p-0 overflow-hidden relative' : 'p-3 pb-24 overflow-y-auto'}`}>
             
             {/* ======================================================== */}
-            {/* 탭 1: 🏎️ 스마트 가디언 풀스크린 지도 & HUD 오버레이 */}
+            {/* 탭 1: 🏎️ 스마트 가디언 풀스크린 지도 & 동적 마커 HUD */}
             {/* ======================================================== */}
             {currentTab === 'hud' && (
               <div
@@ -897,12 +963,11 @@
                   </div>
                 )}
 
-                {/* 메인 뷰 전환 영역 */}
+                {/* 메인 뷰 */}
                 {hudViewMode === 'map' ? (
-                  // [A. 100% 꽉 찬 풀스크린 지도 + 플로팅 HUD 오버레이]
                   <div className="relative w-full h-full flex-1 flex flex-col">
                     
-                    {/* 풀스크린 실시간 지도 */}
+                    {/* 풀스크린 실시간 지도 & 동적 마커 */}
                     <FullscreenLiveMapView
                       currentCoords={currentCoords}
                       nearbyCamera={nearbyCamera}
@@ -910,7 +975,7 @@
                       setIsAutoTracking={setIsAutoTracking}
                     />
 
-                    {/* 상단 좌측 플로팅 HUD: 제한속도 표지판 & 단속 거리 */}
+                    {/* 상단 좌측 플로팅 HUD */}
                     <div className="absolute top-16 left-3.5 z-[400] pointer-events-none">
                       <div className="flex items-center gap-2">
                         <div className={`flex items-center justify-center w-20 h-20 rounded-full border-[6px] bg-white text-black shadow-2xl transition-all duration-300 ${
@@ -931,7 +996,7 @@
                       </div>
                     </div>
 
-                    {/* 하단 중앙 플로팅 HUD: 초대형 디지털 속도계 */}
+                    {/* 하단 중앙 플로팅 속도계 */}
                     <div className="absolute bottom-16 left-0 right-0 z-[400] flex justify-center pointer-events-none">
                       <div className={`px-7 py-2.5 rounded-3xl backdrop-blur-md border shadow-2xl flex flex-col items-center transition-all duration-300 ${
                         isOverSpeed
@@ -956,7 +1021,6 @@
                     </div>
                   </div>
                 ) : (
-                  // [B. 순수 5:5 대시보드 반사용 HUD 뷰]
                   <div
                     onClick={handleCycleMirrorMode}
                     className="flex-1 flex flex-col justify-between p-3 cursor-pointer"
@@ -1331,7 +1395,7 @@
             )}
           </main>
 
-          {/* 하단 네비게이션 탭 바 */}
+          {/* 하단 탭 바 */}
           <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
             <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언지도</span>
@@ -1416,6 +1480,7 @@
             </div>
           )}
 
+          {/* 세무서 양식 모달 */}
           {showTaxModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
