@@ -52,9 +52,9 @@
     }
     .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
 
-    /* 리플릿 컨테이너 스타일 */
+    /* 리플릿 지도 컨테이너 */
     .leaflet-container {
-      background-color: #090d16 !important;
+      background-color: #1e293b !important;
       font-family: inherit;
       width: 100% !important;
       height: 100% !important;
@@ -65,14 +65,14 @@
 <body class="select-none antialiased min-h-screen bg-slate-950">
   <div id="root">
     <div class="min-h-screen flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
-      K-TAXI 실시간 내비 가디언 로딩 중...
+      K-TAXI 한글 내비 가디언 로딩 중...
     </div>
   </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v1.9.1';
+    const APP_VERSION = 'v1.9.2';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
 
     // 천안·아산 주요 단속 포인트 DB
@@ -199,7 +199,6 @@
       }
     };
 
-    // 유틸리티
     const formatMoney = (val) => Number(String(val).replace(/[^0-9]/g, '') || 0).toLocaleString('ko-KR');
     const formatShortMoney = (val) => {
       const num = Number(val) || 0;
@@ -303,7 +302,7 @@
       return DEFAULT_STORAGE;
     };
 
-    // 실시간 다크 내비 지도 컴포넌트
+    // 100% 한글 도로망 & 17단계 근접 뷰 지도 컴포넌트
     function LiveMapView({ currentCoords, nearbyCamera }) {
       const mapContainerRef = useRef(null);
       const mapInstanceRef = useRef(null);
@@ -316,37 +315,39 @@
         const defaultLon = currentCoords?.lon || 127.1135;
 
         if (!mapInstanceRef.current) {
+          // 줌 레벨 17: 실제 차량 내비게이션 근접 주행 시점
           const map = L.map(mapContainerRef.current, {
             center: [defaultLat, defaultLon],
-            zoom: 15,
+            zoom: 17,
             zoomControl: false,
             attributionControl: false
           });
 
-          // CartoDB 어두운 내비 전용 타일
-          L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19
+          // 100% 한글 도로망 타일 적용 (OpenStreetMap 정밀 타일)
+          L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            minZoom: 12
           }).addTo(map);
 
           // 카메라 마커 추가
           CAMERA_DB.forEach((cam) => {
             const camIcon = L.divIcon({
               className: 'custom-cam-pin',
-              html: `<div style="background-color:#dc2626;color:white;font-weight:900;border:2px solid #ffffff;border-radius:9999px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;box-shadow:0 0 10px rgba(0,0,0,0.8);">${cam.limit}</div>`,
-              iconSize: [30, 30],
-              iconAnchor: [15, 15]
+              html: `<div style="background-color:#dc2626;color:white;font-weight:900;border:3px solid #ffffff;border-radius:9999px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.6);">${cam.limit}</div>`,
+              iconSize: [32, 32],
+              iconAnchor: [16, 16]
             });
             L.marker([cam.lat, cam.lon], { icon: camIcon })
               .addTo(map)
               .bindPopup(`<b>${cam.name}</b><br>제한속도: ${cam.limit}km/h`);
           });
 
-          // 내 차량 위치 마커
+          // 내 차량 위치 마커 (파란색 레이더 핀)
           const userIcon = L.divIcon({
             className: 'user-pin',
-            html: `<div style="background-color:#0284c7;border:3px solid #ffffff;border-radius:9999px;width:22px;height:22px;box-shadow:0 0 14px #38bdf8;"></div>`,
-            iconSize: [22, 22],
-            iconAnchor: [11, 11]
+            html: `<div style="background-color:#0284c7;border:3px solid #ffffff;border-radius:9999px;width:24px;height:24px;box-shadow:0 0 12px #38bdf8;"></div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
           });
           userMarkerRef.current = L.marker([defaultLat, defaultLon], { icon: userIcon }).addTo(map);
           mapInstanceRef.current = map;
@@ -361,10 +362,11 @@
         return () => clearTimeout(resizeTimer);
       }, []);
 
+      // GPS 위치 변경 시 지도 중심 자동 이동
       useEffect(() => {
         if (mapInstanceRef.current && currentCoords) {
           const { lat, lon } = currentCoords;
-          mapInstanceRef.current.panTo([lat, lon], { animate: true, duration: 1.0 });
+          mapInstanceRef.current.panTo([lat, lon], { animate: true, duration: 0.8 });
           if (userMarkerRef.current) {
             userMarkerRef.current.setLatLng([lat, lon]);
           }
@@ -372,11 +374,11 @@
       }, [currentCoords]);
 
       return (
-        <div className="w-full h-full min-h-[220px] relative rounded-2xl overflow-hidden border border-slate-700 shadow-2xl flex-1 flex flex-col">
-          <div ref={mapContainerRef} className="w-full h-full flex-1" style={{ minHeight: '220px' }} />
-          <div className="absolute bottom-2 left-2 z-[400] bg-slate-900/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow">
+        <div className="w-full h-full min-h-[230px] relative rounded-2xl overflow-hidden border border-slate-700 shadow-2xl flex-1 flex flex-col">
+          <div ref={mapContainerRef} className="w-full h-full flex-1" style={{ minHeight: '230px' }} />
+          <div className="absolute bottom-2 left-2 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            실시간 GPS 단속 레이더 연동 중
+            한글 실시간 도로망 연동 중 (줌 17단계)
           </div>
         </div>
       );
@@ -416,7 +418,7 @@
 
     function App() {
       const [appData, setAppData] = useState(loadSafeData);
-      const [currentTab, setCurrentTab] = useState('hud'); // 가디언지도를 기본 탭으로 설정
+      const [currentTab, setCurrentTab] = useState('hud');
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
         const now = new Date();
@@ -432,10 +434,9 @@
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
 
-      // GPS & HUD 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [currentCoords, setCurrentCoords] = useState(null);
-      const [hudViewMode, setHudViewMode] = useState('map'); // 'map' (지도+HUD) | 'mirror' (순수 HUD)
+      const [hudViewMode, setHudViewMode] = useState('map');
       const [hudMirrorMode, setHudMirrorMode] = useState('rot90');
       const [nearbyCamera, setNearbyCamera] = useState(null);
       const [isPassengerMode, setIsPassengerMode] = useState(false);
@@ -768,7 +769,6 @@
       return (
         <div className="max-w-md mx-auto w-full min-h-screen flex flex-col bg-slate-950 border-x border-slate-800 relative">
           
-          {/* 상단 헤더 */}
           <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
             <div className="flex items-center gap-2">
               <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
@@ -783,9 +783,7 @@
 
           <main className="flex-1 overflow-y-auto p-3 pb-24 flex flex-col">
             
-            {/* ======================================================== */}
-            {/* 탭 1: 🏎️ 스마트 가디언 지도 & HUD (실시간 내비 맵) */}
-            {/* ======================================================== */}
+            {/* 탭 1: 🏎️ 스마트 가디언 지도 & HUD */}
             {currentTab === 'hud' && (
               <div
                 className={`flex-1 flex flex-col justify-between select-none rounded-3xl overflow-hidden border transition-all duration-300 relative ${
@@ -847,8 +845,8 @@
                   </div>
                 )}
 
-                {/* 상단 1/2: 실시간 내비 지도 영역 */}
-                <div className="flex-1 p-2 border-b border-slate-800/60 overflow-hidden relative flex flex-col items-center justify-center min-h-[220px]">
+                {/* 상단 1/2: 실시간 한글 내비 지도 영역 */}
+                <div className="flex-1 p-2 border-b border-slate-800/60 overflow-hidden relative flex flex-col items-center justify-center min-h-[230px]">
                   {hudViewMode === 'map' ? (
                     <LiveMapView currentCoords={currentCoords} nearbyCamera={nearbyCamera} />
                   ) : (
@@ -1228,7 +1226,6 @@
             )}
           </main>
 
-          {/* 하단 탭 바 (가디언지도가 첫 번째 핵심) */}
           <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
             <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언지도</span>
@@ -1284,7 +1281,6 @@
             </div>
           )}
 
-          {/* 고정비 모달 */}
           {showFixedExpenseModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
@@ -1313,7 +1309,6 @@
             </div>
           )}
 
-          {/* 세무서 양식 모달 */}
           {showTaxModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
