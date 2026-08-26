@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>K-TAXI 스마트 가디언 HUD & 운행관리</title>
+  <title>K-TAXI 스마트 가디언 레이더 & 건강관리</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React 18 & ReactDOM (Cloudflare CDN) -->
@@ -32,24 +32,24 @@
     .pb-safe {
       padding-bottom: env(safe-area-inset-bottom, 1.25rem);
     }
-    
-    /* 5:5 교대 펌핑 (Grow & Shrink) 애니메이션 */
-    @keyframes pulse-grow {
+
+    /* 5:5 교대 펌핑 애니메이션 */
+    @keyframes pulse-top-grow {
       0%, 100% { transform: scale(1.18); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.9)); }
-      50% { transform: scale(0.85); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.5)); }
+      50% { transform: scale(0.86); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
     }
-    @keyframes pulse-shrink {
-      0%, 100% { transform: scale(0.85); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.5)); }
+    @keyframes pulse-bottom-grow {
+      0%, 100% { transform: scale(0.86); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
       50% { transform: scale(1.18); filter: drop-shadow(0 0 25px rgba(34, 197, 94, 0.9)); }
     }
-    .animate-grow-pulse {
-      animation: pulse-grow 0.9s infinite ease-in-out;
+    .animate-top-pump {
+      animation: pulse-top-grow 0.85s infinite ease-in-out;
     }
-    .animate-shrink-pulse {
-      animation: pulse-shrink 0.9s infinite ease-in-out;
+    .animate-bottom-pump {
+      animation: pulse-bottom-grow 0.85s infinite ease-in-out;
     }
 
-    /* 화려한 네온 스트로브 경고 점멸 */
+    /* 네온 스트로브 경고 점멸 */
     @keyframes strobe-warning {
       0% { background-color: rgba(239, 68, 68, 0.35); border-color: #ef4444; }
       25% { background-color: rgba(234, 179, 8, 0.35); border-color: #eab308; }
@@ -72,22 +72,22 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v1.7.0';
+    const APP_VERSION = 'v1.8.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
 
-    // --- 천안·아산 주요 단속 포인트 DB (기본 내장) ---
+    // --- 천안·아산 주요 단속 포인트 DB ---
     const CAMERA_DB = [
-      { id: 'cam1', name: '불당대로 (시청 앞)', lat: 36.8152, lon: 127.1135, limit: 50, type: 'dog' }, // 과속/신호
+      { id: 'cam1', name: '불당대로 (시청 앞)', lat: 36.8152, lon: 127.1135, limit: 50, type: 'dog' },
       { id: 'cam2', name: '번영로 (종합운동장)', lat: 36.8285, lon: 127.1210, limit: 60, type: 'dog' },
       { id: 'cam3', name: '충무로 (쌍용고사거리)', lat: 36.7950, lon: 127.1260, limit: 50, type: 'dog' },
       { id: 'cam4', name: '서부대로 (봉명역 인근)', lat: 36.8010, lon: 127.1350, limit: 50, type: 'dog' },
       { id: 'cam5', name: '온천대로 (아산시청 앞)', lat: 36.7895, lon: 127.0035, limit: 50, type: 'dog' },
       { id: 'cam6', name: '배방로 (배방역 광장)', lat: 36.7770, lon: 127.0520, limit: 50, type: 'dog' },
-      { id: 'cam7', name: '천안역 서부광장 주정차구역', lat: 36.8105, lon: 127.1460, limit: 30, type: 'cat' }, // 주정차
-      { id: 'cam8', name: '남부대로 구간단속 (유량~목천)', lat: 36.7820, lon: 127.1650, limit: 70, type: 'tiger' } // 구간단속
+      { id: 'cam7', name: '천안역 서부광장 주정차구역', lat: 36.8105, lon: 127.1460, limit: 30, type: 'cat' },
+      { id: 'cam8', name: '남부대로 구간단속 (유량~목천)', lat: 36.7820, lon: 127.1650, limit: 70, type: 'tiger' }
     ];
 
-    // 하버사인 공식 (거리 m 계산)
+    // 하버사인 거리 공식 (미터)
     const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371e3;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -100,78 +100,104 @@
       return Math.round(R * c);
     };
 
-    // --- Web Audio 사운드 신시사이저 (개·고양이·호랑이 소리 합성) ---
-    const playAnimalSound = (type = 'dog') => {
+    // --- 2-Way 사운드 신시사이저 (빈차: 동물음 / 탑승: 콕핏 에티켓음) ---
+    const playGuardianAudio = (type = 'dog', isPassenger = false) => {
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
         const ctx = new AudioContext();
 
-        if (type === 'dog') {
-          // [개 짖는 소리] 날카롭고 강렬한 더블 하향 얍! 얍!
-          [0, 0.18].forEach((delay) => {
+        if (isPassenger) {
+          // [손님 탑승 모드: 조종석 비프 & 부드러운 차임]
+          if (type === 'dog' || type === 'speed') {
+            [0, 0.14].forEach((delay, idx) => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(idx === 0 ? 880 : 1174, ctx.currentTime + delay);
+              gain.gain.setValueAtTime(0.3, ctx.currentTime + delay);
+              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.12);
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.start(ctx.currentTime + delay);
+              osc.stop(ctx.currentTime + delay + 0.12);
+            });
+          } else if (type === 'cat') {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(650, ctx.currentTime + delay);
-            osc.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + delay + 0.12);
-            gain.gain.setValueAtTime(0.5, ctx.currentTime + delay);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.12);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(659.25, ctx.currentTime);
+            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
             osc.connect(gain);
             gain.connect(ctx.destination);
-            osc.start(ctx.currentTime + delay);
-            osc.stop(ctx.currentTime + delay + 0.12);
-          });
-        } else if (type === 'cat') {
-          // [고양이 울음] 부드럽게 올라갔다 내려오는 야옹~
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(380, ctx.currentTime);
-          osc.frequency.exponentialRampToValueAtTime(820, ctx.currentTime + 0.25);
-          osc.frequency.exponentialRampToValueAtTime(450, ctx.currentTime + 0.55);
-          gain.gain.setValueAtTime(0.35, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.55);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 0.55);
-        } else if (type === 'tiger') {
-          // [호랑이 포효] 저음 진동과 거친 럼블 사운드 어흥~
-          const osc = ctx.createOscillator();
-          const mod = ctx.createOscillator();
-          const modGain = ctx.createGain();
-          const gain = ctx.createGain();
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(95, ctx.currentTime);
-          osc.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.8);
-          mod.type = 'square';
-          mod.frequency.setValueAtTime(25, ctx.currentTime);
-          modGain.gain.setValueAtTime(40, ctx.currentTime);
-          mod.connect(osc.frequency);
-          gain.gain.setValueAtTime(0.5, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          mod.start(ctx.currentTime);
-          osc.start(ctx.currentTime);
-          mod.stop(ctx.currentTime + 0.8);
-          osc.stop(ctx.currentTime + 0.8);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.4);
+          } else {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(440, ctx.currentTime);
+            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.6);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.6);
+          }
         } else {
-          // 기본 알람 차임
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(523.25, ctx.currentTime);
-          gain.gain.setValueAtTime(0.3, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.2);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 1.2);
+          // [빈차 모드: 각성 극대화 동물 사운드]
+          if (type === 'dog') {
+            [0, 0.16].forEach((delay) => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.type = 'sawtooth';
+              osc.frequency.setValueAtTime(620, ctx.currentTime + delay);
+              osc.frequency.exponentialRampToValueAtTime(130, ctx.currentTime + delay + 0.11);
+              gain.gain.setValueAtTime(0.55, ctx.currentTime + delay);
+              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.11);
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.start(ctx.currentTime + delay);
+              osc.stop(ctx.currentTime + delay + 0.11);
+            });
+          } else if (type === 'cat') {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(390, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.22);
+            osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.5);
+            gain.gain.setValueAtTime(0.4, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.5);
+          } else if (type === 'tiger') {
+            const osc = ctx.createOscillator();
+            const mod = ctx.createOscillator();
+            const modGain = ctx.createGain();
+            const gain = ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(90, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(48, ctx.currentTime + 0.75);
+            mod.type = 'square';
+            mod.frequency.setValueAtTime(22, ctx.currentTime);
+            modGain.gain.setValueAtTime(38, ctx.currentTime);
+            mod.connect(osc.frequency);
+            gain.gain.setValueAtTime(0.55, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.75);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            mod.start(ctx.currentTime);
+            osc.start(ctx.currentTime);
+            mod.stop(ctx.currentTime + 0.75);
+            osc.stop(ctx.currentTime + 0.75);
+          }
         }
       } catch (e) {
-        console.warn('Animal Audio Error', e);
+        console.warn('Guardian Audio Error', e);
       }
     };
 
@@ -213,7 +239,7 @@
       return mins === 0 ? `${hours}시간` : `${hours}시간 ${mins}분`;
     };
 
-    // 기본 스키마
+    // 기본 스토리지 스키마
     const DEFAULT_STORAGE = {
       hasSelectedType: false,
       activeType: 'corporate',
@@ -331,13 +357,17 @@
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
 
-      // GPS & HUD & 카메라 감지 상태
+      // GPS & 가디언 레이더 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
-      const [currentCoords, setCurrentCoords] = useState(null);
       const [hudMirrorMode, setHudMirrorMode] = useState('rot90');
-      const [nearbyCamera, setNearbyCamera] = useState(null); // { name, dist, limit, type }
+      const [nearbyCamera, setNearbyCamera] = useState(null);
+      const [isPassengerMode, setIsPassengerMode] = useState(false); // false: 빈차(동물음), true: 탑승(에티켓)
+      const [savedFineTotal, setSavedFineTotal] = useState(0); // 오늘 방어한 과태료 누적
+      const [showDefenseToast, setShowDefenseToast] = useState(false);
       const [isSimulationActive, setIsSimulationActive] = useState(false);
-      const lastSoundTriggerTime = useRef(0);
+
+      const activeCameraTracking = useRef(null);
+      const lastSoundTime = useRef(0);
 
       // 쪽잠 타이머
       const [napTimerSeconds, setNapTimerSeconds] = useState(0);
@@ -351,7 +381,7 @@
         }
       }, [appData]);
 
-      // 실시간 GPS 감시 및 단속 카메라 거리 계산 엔진
+      // 실시간 GPS 및 단속 방어 판정 엔진
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -361,10 +391,8 @@
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
             setGpsSpeed(speedKmh);
-            setCurrentCoords({ lat, lon });
 
             if (!isSimulationActive) {
-              // 가장 가까운 단속 카메라 탐색
               let closest = null;
               let minDistance = 99999;
 
@@ -376,45 +404,64 @@
                 }
               });
 
-              // 350m 이내 접근 시 감지
+              // 350m 이내 접근 시 감지 및 사운드 출력
               if (closest && closest.dist <= 350) {
                 setNearbyCamera(closest);
-                // 10초 쿨다운 후 동물 사운드 출력
+                if (!activeCameraTracking.current) {
+                  activeCameraTracking.current = { id: closest.id, limit: closest.limit, overspeed: false };
+                }
+                if (speedKmh > closest.limit) {
+                  activeCameraTracking.current.overspeed = true;
+                }
+
                 const now = Date.now();
-                if (now - lastSoundTriggerTime.current > 10000) {
-                  playAnimalSound(closest.type);
-                  lastSoundTriggerTime.current = now;
+                if (now - lastSoundTime.current > 8000) {
+                  playGuardianAudio(closest.type, isPassengerMode);
+                  lastSoundTime.current = now;
                 }
               } else {
+                // 단속 구역 통과 완료 시 방어 판정
+                if (activeCameraTracking.current && minDistance > 400) {
+                  if (!activeCameraTracking.current.overspeed) {
+                    setSavedFineTotal(prev => prev + 40000);
+                    setShowDefenseToast(true);
+                    setTimeout(() => setShowDefenseToast(false), 3500);
+                  }
+                  activeCameraTracking.current = null;
+                }
                 setNearbyCamera(null);
               }
             }
           },
-          (err) => console.warn('GPS Info:', err.message),
+          (err) => console.warn('GPS Radar Warning:', err.message),
           { enableHighAccuracy: true, maximumAge: 1000, timeout: 4000 }
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
-      }, [isSimulationActive]);
+      }, [isSimulationActive, isPassengerMode]);
 
-      // 시뮬레이션 테스트 토글 (가상 단속카메라 250m 진입)
+      // 가상 단속 시뮬레이션 토글
       const toggleSimulation = (e) => {
         e.stopPropagation();
         if (isSimulationActive) {
           setIsSimulationActive(false);
           setNearbyCamera(null);
           setGpsSpeed(0);
+          // 시뮬레이션 종료 시 방어 성공 연출
+          setSavedFineTotal(prev => prev + 40000);
+          setShowDefenseToast(true);
+          setTimeout(() => setShowDefenseToast(false), 3500);
         } else {
           setIsSimulationActive(true);
-          setGpsSpeed(68); // 50 제한도로에서 68km/h 과속 가상 연출
+          setGpsSpeed(68); // 50km/h 도로에서 68km/h 과속 연출
           setNearbyCamera({
-            id: 'sim_cam',
+            id: 'sim_1',
             name: '불당대로 (시뮬레이션)',
             limit: 50,
-            dist: 230,
+            dist: 240,
             type: 'dog'
           });
-          playAnimalSound('dog');
+          playGuardianAudio('dog', isPassengerMode);
         }
       };
 
@@ -425,7 +472,7 @@
           interval = setInterval(() => setNapTimerSeconds(prev => prev - 1), 1000);
         } else if (isNapTimerActive && napTimerSeconds === 0) {
           setIsNapTimerActive(false);
-          playAnimalSound('tiger');
+          playGuardianAudio('tiger', false);
           if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 1000]);
           alert('🔔 20분 쪽잠이 종료되었습니다! 안전 운행을 시작하세요.');
         }
@@ -434,19 +481,11 @@
 
       const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
 
-      const handleInitialSelectType = (type) => {
-        setAppData(prev => ({ ...prev, activeType: type, hasSelectedType: true }));
-      };
+      const handleInitialSelectType = (type) => setAppData(prev => ({ ...prev, activeType: type, hasSelectedType: true }));
       const setVehicleType = (type) => setAppData(prev => ({ ...prev, activeType: type }));
-      const handleCarNumberChange = (val) => {
-        setAppData(prev => ({ ...prev, [activeType]: { ...(prev[activeType] || {}), carNumber: val } }));
-      };
-      const handleCorporateConfigChange = (key, val) => {
-        setAppData(prev => ({ ...prev, corporate: { ...(prev.corporate || {}), [key]: Number(val) || 0 } }));
-      };
-      const handleDefaultOffDayChange = (dayIndex) => {
-        setAppData(prev => ({ ...prev, defaultOffDay: Number(dayIndex) }));
-      };
+      const handleCarNumberChange = (val) => setAppData(prev => ({ ...prev, [activeType]: { ...(prev[activeType] || {}), carNumber: val } }));
+      const handleCorporateConfigChange = (key, val) => setAppData(prev => ({ ...prev, corporate: { ...(prev.corporate || {}), [key]: Number(val) || 0 } }));
+      const handleDefaultOffDayChange = (dayIndex) => setAppData(prev => ({ ...prev, defaultOffDay: Number(dayIndex) }));
 
       // 안드로이드 표준 Intent 내비 런처
       const openNavApp = (appType) => {
@@ -469,19 +508,12 @@
         }
       };
 
-      // 건강 루틴
       const toggleRoutineDone = (id) => {
-        setAppData(prev => ({
-          ...prev,
-          healthRoutines: (prev.healthRoutines || []).map(r => r.id === id ? { ...r, done: !r.done } : r)
-        }));
+        setAppData(prev => ({ ...prev, healthRoutines: (prev.healthRoutines || []).map(r => r.id === id ? { ...r, done: !r.done } : r) }));
       };
       const handleAddRoutine = () => {
         if (!newRoutineText.trim()) return;
-        setAppData(prev => ({
-          ...prev,
-          healthRoutines: [...(prev.healthRoutines || []), { id: Date.now(), text: newRoutineText.trim(), done: false }]
-        }));
+        setAppData(prev => ({ ...prev, healthRoutines: [...(prev.healthRoutines || []), { id: Date.now(), text: newRoutineText.trim(), done: false }] }));
         setNewRoutineText('');
         setShowAddRoutineInput(false);
       };
@@ -536,18 +568,12 @@
         setAppData(prev => ({ ...prev, [activeType]: { ...prev[activeType], records: updatedRecords } }));
       };
 
-      const totalFixedAllowances = useMemo(() => {
-        return (appData?.corporate?.fixedAllowanceItems || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      }, [appData?.corporate?.fixedAllowanceItems]);
-
-      const totalFixedExpenses = useMemo(() => {
-        return (appData?.corporate?.fixedExpenseItems || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      }, [appData?.corporate?.fixedExpenseItems]);
+      const totalFixedAllowances = useMemo(() => (appData?.corporate?.fixedAllowanceItems || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [appData?.corporate?.fixedAllowanceItems]);
+      const totalFixedExpenses = useMemo(() => (appData?.corporate?.fixedExpenseItems || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [appData?.corporate?.fixedExpenseItems]);
 
       const currentMonthStats = useMemo(() => {
         const records = appData[activeType]?.records || {};
         const entries = Object.entries(records).filter(([date]) => date && String(date).startsWith(currentYearMonth));
-
         let workDays = 0, holidayDays = 0, totalWorkMinutes = 0;
 
         if (activeType === 'corporate') {
@@ -571,13 +597,9 @@
           const grossSalary = totalFixedAllowances + totalIncentive;
           const taxAndInsurance = Math.round(grossSalary * deductionRate);
           const totalDeductions = taxAndInsurance + totalFixedExpenses;
-          const netSalaryFromCompany = grossSalary - totalDeductions;
-          const finalNetIncome = netSalaryFromCompany - totalDriverExpense;
-
-          return { workDays, holidayDays, totalWorkMinutes, totalRevenue, totalGasCompany, totalIncentive, grossSalary, taxAndInsurance, totalFixedExpenses, totalDeductions, netSalaryFromCompany, totalDriverExpense, finalNetIncome };
+          return { workDays, holidayDays, totalWorkMinutes, totalRevenue, totalGasCompany, totalIncentive, grossSalary, taxAndInsurance, totalFixedExpenses, totalDeductions, netSalaryFromCompany: grossSalary - totalDeductions, totalDriverExpense, finalNetIncome: grossSalary - totalDeductions - totalDriverExpense };
         } else {
           let cardTotal = 0, cashTotal = 0, gasTotal = 0, tollTotal = 0, maintTotal = 0, otherTotal = 0;
-
           entries.forEach(([_, r]) => {
             if (r?.isHoliday) { holidayDays++; }
             else {
@@ -591,7 +613,6 @@
               totalWorkMinutes += Number(r?.workMinutes || 0);
             }
           });
-
           const totalRevenue = cardTotal + cashTotal;
           const totalExpense = gasTotal + tollTotal + maintTotal + otherTotal;
           return { workDays, holidayDays, totalWorkMinutes, cardTotal, cashTotal, totalRevenue, gasTotal, tollTotal, maintTotal, otherTotal, totalExpense, netIncome: totalRevenue - totalExpense };
@@ -911,7 +932,7 @@
             )}
 
             {/* ======================================================== */}
-            {/* 탭 3: 🏎️ 스마트 가디언 5:5 HUD (교대 펌핑 + 네온 점멸 + 동물 사운드) */}
+            {/* 탭 3: 🏎️ 스마트 가디언 레이더 HUD (v1.8.0 통합) */}
             {/* ======================================================== */}
             {currentTab === 'hud' && (
               <div
@@ -924,11 +945,23 @@
                     : 'bg-slate-950 border-slate-800/80'
                 }`}
               >
-                {/* 상단 컨트롤 배지 (반사모드 안내 & 시뮬레이션 테스트 버튼) */}
-                <div className="absolute top-2 left-0 right-0 px-3 flex justify-between items-center z-20">
-                  <span className="px-2.5 py-0.5 rounded-full bg-slate-900/90 text-[10px] text-slate-400 font-bold border border-slate-700/50">
-                    {getMirrorModeLabel()} (화면 탭 시 전환)
-                  </span>
+                {/* 상단 통합 제어 바 (빈차/탑승 전환 & 시뮬레이션 버튼) */}
+                <div className="absolute top-2.5 left-0 right-0 px-3 flex justify-between items-center z-20">
+                  {/* 빈차 ↔ 탑승 2-Way 사운드 스위치 */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsPassengerMode(!isPassengerMode);
+                      playGuardianAudio(isPassengerMode ? 'dog' : 'dog', !isPassengerMode);
+                    }}
+                    className={`px-3 py-1 rounded-full text-[11px] font-black border flex items-center gap-1 shadow-lg transition active:scale-95 ${
+                      isPassengerMode
+                        ? 'bg-blue-900/90 text-blue-200 border-blue-400'
+                        : 'bg-yellow-500 text-black border-yellow-300'
+                    }`}
+                  >
+                    <span>{isPassengerMode ? '👥 탑승 모드 (에티켓음)' : '🚕 빈차 모드 (동물음)'}</span>
+                  </button>
 
                   {/* 방 안에서도 테스트 가능한 시뮬레이션 버튼 */}
                   <button
@@ -939,19 +972,33 @@
                         : 'bg-slate-900/90 text-yellow-400 border-yellow-500/40'
                     }`}
                   >
-                    {isSimulationActive ? '⚡ 단속 테스트 중지' : '⚡ 단속 테스트 실행'}
+                    {isSimulationActive ? '⚡ 테스트 중지' : '⚡ 단속 테스트'}
                   </button>
                 </div>
 
-                {/* 상단 1/2: 속도제한 표지판 & 단속 거리 (교대 펌핑 애니메이션 탑재) */}
+                {/* 과태료 방어 축하 토스트 */}
+                {showDefenseToast && (
+                  <div className="absolute top-12 left-4 right-4 z-30 bg-gradient-to-r from-emerald-600 to-green-500 text-white p-2.5 rounded-2xl shadow-2xl flex items-center justify-between animate-bounce">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🛡️</span>
+                      <div>
+                        <div className="text-xs font-black">+40,000원 과태료 방어 성공!</div>
+                        <div className="text-[10px] text-green-100">오늘 누적 방어액: {formatMoney(savedFineTotal)}</div>
+                      </div>
+                    </div>
+                    <span className="text-sm font-black">PASS!</span>
+                  </div>
+                )}
+
+                {/* 상단 1/2: 속도제한 표지판 & 펄스 링 (교대 펌핑 애니메이션) */}
                 <div className="flex-1 flex flex-col items-center justify-center p-2 border-b border-slate-800/60 overflow-hidden">
                   <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
                     <div className="flex flex-col items-center justify-center">
                       
-                      {/* 표지판 원형 (카메라 감지 시 animate-grow-pulse로 거대화) */}
+                      {/* 표지판 원형 (카메라 감지 시 animate-top-pump로 펌핑 확대) */}
                       <div className={`flex items-center justify-center w-40 h-40 rounded-full border-[12px] transition-all duration-300 ${
                         isNearCamera
-                          ? 'border-red-600 bg-white text-black animate-grow-pulse'
+                          ? 'border-red-600 bg-white text-black animate-top-pump'
                           : 'border-red-600 bg-white text-black shadow-2xl'
                       }`}>
                         <div className="flex flex-col items-center justify-center leading-none">
@@ -960,9 +1007,9 @@
                         </div>
                       </div>
 
-                      {/* 단속 카메라 접근 정보 뱃지 */}
+                      {/* 단속 카메라 레이더 정보 배지 */}
                       {nearbyCamera && (
-                        <div className="mt-2 px-3 py-1 rounded-full bg-red-950 border border-red-500 text-red-300 font-black text-xs flex items-center gap-1.5 animate-bounce">
+                        <div className="mt-2 px-3 py-1 rounded-full bg-red-950 border border-red-500 text-red-300 font-black text-xs flex items-center gap-1.5 animate-bounce shadow">
                           <span>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'}</span>
                           <span>전방 {nearbyCamera.dist}m</span>
                         </div>
@@ -971,11 +1018,11 @@
                   </div>
                 </div>
 
-                {/* 하단 1/2: 초대형 디지털 속도계 (교대 펌핑 애니메이션 탑재) */}
+                {/* 하단 1/2: 초대형 디지털 속도계 & 방어 카운터 (교대 펌핑 애니메이션) */}
                 <div className="flex-1 flex flex-col items-center justify-center p-2 overflow-hidden">
                   <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
                     <div className={`flex flex-col items-center justify-center transition-all duration-300 ${
-                      isNearCamera ? 'animate-shrink-pulse' : ''
+                      isNearCamera ? 'animate-bottom-pump' : ''
                     }`}>
                       <div className="flex items-baseline justify-center">
                         <span className={`text-9xl font-black tracking-tighter font-mono transition-colors ${
@@ -986,9 +1033,13 @@
                         <span className="text-3xl font-bold ml-2 text-slate-400">km/h</span>
                       </div>
 
-                      {isOverSpeed && (
-                        <span className="text-xs font-black text-red-400 mt-1 bg-red-950/80 px-2.5 py-0.5 rounded-full border border-red-500/60">
-                          ⚠️ 감속 필요 (+{gpsSpeed - effectiveSpeedLimit} km/h 초과)
+                      {isOverSpeed ? (
+                        <span className="text-xs font-black text-red-400 mt-1 bg-red-950/90 px-3 py-0.5 rounded-full border border-red-500/80">
+                          ⚠️ 즉시 감속 (+{gpsSpeed - effectiveSpeedLimit} km/h 초과)
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-400 mt-1">
+                          {savedFineTotal > 0 ? `🛡️ 오늘 방어한 과태료: ${formatMoney(savedFineTotal)}` : getMirrorModeLabel()}
                         </span>
                       )}
                     </div>
@@ -1110,7 +1161,7 @@
               <span className="text-lg">📅</span><span className="text-[10px] mt-0.5">운행일지</span>
             </button>
             <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">안전HUD</span>
+              <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언HUD</span>
             </button>
             <button onClick={() => setCurrentTab('settings')} className={`flex flex-col items-center py-2.5 ${currentTab === 'settings' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">⚙️</span><span className="text-[10px] mt-0.5">정산/설정</span>
