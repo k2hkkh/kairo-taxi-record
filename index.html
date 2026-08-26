@@ -6,9 +6,12 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>K-TAXI 스마트 가디언 레이더 & 건강관리</title>
+  <title>K-TAXI 스마트 가디언 지도 & HUD</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet 지도 라이브러리 (CSS & JS) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <!-- React 18 & ReactDOM (Cloudflare CDN) -->
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -23,31 +26,21 @@
       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
       -webkit-tap-highlight-color: transparent;
     }
-    .hud-flip-y {
-      transform: scaleY(-1);
-    }
-    .hud-rot90-flip {
-      transform: rotate(-90deg) scaleY(-1);
-    }
-    .pb-safe {
-      padding-bottom: env(safe-area-inset-bottom, 1.25rem);
-    }
+    .hud-flip-y { transform: scaleY(-1); }
+    .hud-rot90-flip { transform: rotate(-90deg) scaleY(-1); }
+    .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1.25rem); }
 
     /* 5:5 교대 펌핑 애니메이션 */
     @keyframes pulse-top-grow {
-      0%, 100% { transform: scale(1.18); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.9)); }
-      50% { transform: scale(0.86); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
+      0%, 100% { transform: scale(1.15); filter: drop-shadow(0 0 20px rgba(239, 68, 68, 0.9)); }
+      50% { transform: scale(0.88); filter: drop-shadow(0 0 6px rgba(234, 179, 8, 0.4)); }
     }
     @keyframes pulse-bottom-grow {
-      0%, 100% { transform: scale(0.86); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
-      50% { transform: scale(1.18); filter: drop-shadow(0 0 25px rgba(34, 197, 94, 0.9)); }
+      0%, 100% { transform: scale(0.88); filter: drop-shadow(0 0 6px rgba(234, 179, 8, 0.4)); }
+      50% { transform: scale(1.15); filter: drop-shadow(0 0 20px rgba(34, 197, 94, 0.9)); }
     }
-    .animate-top-pump {
-      animation: pulse-top-grow 0.85s infinite ease-in-out;
-    }
-    .animate-bottom-pump {
-      animation: pulse-bottom-grow 0.85s infinite ease-in-out;
-    }
+    .animate-top-pump { animation: pulse-top-grow 0.85s infinite ease-in-out; }
+    .animate-bottom-pump { animation: pulse-bottom-grow 0.85s infinite ease-in-out; }
 
     /* 네온 스트로브 경고 점멸 */
     @keyframes strobe-warning {
@@ -57,22 +50,30 @@
       75% { background-color: rgba(168, 85, 247, 0.35); border-color: #a855f7; }
       100% { background-color: rgba(239, 68, 68, 0.35); border-color: #ef4444; }
     }
-    .animate-strobe-alert {
-      animation: strobe-warning 0.5s infinite linear;
+    .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
+
+    /* 리플릿 다크 지도 스타일 보정 */
+    .leaflet-container {
+      background-color: #0f172a !important;
+      font-family: inherit;
     }
+    .leaflet-tile {
+      filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.35);
+    }
+    .leaflet-control-attribution { display: none !important; }
   </style>
 </head>
 <body class="select-none antialiased min-h-screen bg-slate-950">
   <div id="root">
     <div class="min-h-screen flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
-      K-TAXI 가디언 시스템 로딩 중...
+      K-TAXI 실시간 내비 가디언 로딩 중...
     </div>
   </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v1.8.0';
+    const APP_VERSION = 'v1.9.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
 
     // --- 천안·아산 주요 단속 포인트 DB ---
@@ -87,7 +88,7 @@
       { id: 'cam8', name: '남부대로 구간단속 (유량~목천)', lat: 36.7820, lon: 127.1650, limit: 70, type: 'tiger' }
     ];
 
-    // 하버사인 거리 공식 (미터)
+    // 하버사인 거리 계산 (m)
     const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371e3;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -100,7 +101,7 @@
       return Math.round(R * c);
     };
 
-    // --- 2-Way 사운드 신시사이저 (빈차: 동물음 / 탑승: 콕핏 에티켓음) ---
+    // --- 2-Way 사운드 신시사이저 ---
     const playGuardianAudio = (type = 'dog', isPassenger = false) => {
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -108,7 +109,7 @@
         const ctx = new AudioContext();
 
         if (isPassenger) {
-          // [손님 탑승 모드: 조종석 비프 & 부드러운 차임]
+          // 탑승 모드: 조종석 비프음
           if (type === 'dog' || type === 'speed') {
             [0, 0.14].forEach((delay, idx) => {
               const osc = ctx.createOscillator();
@@ -146,7 +147,7 @@
             osc.stop(ctx.currentTime + 0.6);
           }
         } else {
-          // [빈차 모드: 각성 극대화 동물 사운드]
+          // 빈차 모드: 동물 각성음
           if (type === 'dog') {
             [0, 0.16].forEach((delay) => {
               const osc = ctx.createOscillator();
@@ -197,7 +198,7 @@
           }
         }
       } catch (e) {
-        console.warn('Guardian Audio Error', e);
+        console.warn('Audio Synthesizer Error', e);
       }
     };
 
@@ -301,11 +302,88 @@
           };
         }
       } catch (e) {
-        console.warn('Storage Load Warning', e);
+        console.warn('Storage Load Fallback', e);
       }
       return DEFAULT_STORAGE;
     };
 
+    // 실시간 Leaflet 지도 서브컴포넌트
+    function LiveMapView({ currentCoords, nearbyCamera }) {
+      const mapRef = useRef(null);
+      const leafletMap = useRef(null);
+      const markerRef = useRef(null);
+
+      useEffect(() => {
+        if (!mapRef.current) return;
+
+        // 기본 위치 (천안/아산 중심)
+        const initialLat = currentCoords?.lat || 36.8152;
+        const initialLon = currentCoords?.lon || 127.1135;
+
+        if (!leafletMap.current) {
+          const map = L.map(mapRef.current, {
+            center: [initialLat, initialLon],
+            zoom: 15,
+            zoomControl: false,
+            attributionControl: false
+          });
+
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19
+          }).addTo(map);
+
+          // 카메라 마커 추가
+          CAMERA_DB.forEach((cam) => {
+            const camIcon = L.divIcon({
+              className: 'custom-cam-icon',
+              html: `<div style="background-color:#dc2626;color:white;font-weight:900;border:2px solid white;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:0 0 8px rgba(0,0,0,0.6);">${cam.limit}</div>`,
+              iconSize: [28, 28],
+              iconAnchor: [14, 14]
+            });
+            L.marker([cam.lat, cam.lon], { icon: camIcon }).addTo(map).bindPopup(`<b>${cam.name}</b><br>제한속도: ${cam.limit}km/h`);
+          });
+
+          // 내 차량 마커
+          const userIcon = L.divIcon({
+            className: 'user-car-icon',
+            html: `<div style="background-color:#38bdf8;border:3px solid white;border-radius:9999px;width:20px;height:20px;box-shadow:0 0 12px #38bdf8;"></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          });
+          markerRef.current = L.marker([initialLat, initialLon], { icon: userIcon }).addTo(map);
+          leafletMap.current = map;
+        }
+
+        const timer = setTimeout(() => {
+          if (leafletMap.current) leafletMap.current.invalidateSize();
+        }, 200);
+
+        return () => clearTimeout(timer);
+      }, []);
+
+      // 위치 업데이트 시 지도 중심 이동
+      useEffect(() => {
+        if (leafletMap.current && currentCoords) {
+          const { lat, lon } = currentCoords;
+          leafletMap.current.panTo([lat, lon], { animate: true, duration: 1.0 });
+          if (markerRef.current) {
+            markerRef.current.setLatLng([lat, lon]);
+          }
+        }
+      }, [currentCoords]);
+
+      return (
+        <div className="w-full h-full relative rounded-2xl overflow-hidden border border-slate-700 shadow-inner">
+          <div ref={mapRef} className="w-full h-full" />
+          <div className="absolute bottom-2 left-2 z-[400] bg-slate-900/90 border border-slate-700 px-2 py-1 rounded-lg text-[10px] text-slate-300 font-bold flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-ping"></span>
+            실시간 GPS 레이더 연동
+          </div>
+        </div>
+      );
+    }
+
+    // 스마트 금액 인풋
     function SmartMoneyInput({ value, onChange, placeholder = "0", className = "", colorClass = "text-white" }) {
       const numVal = Number(value) || 0;
       const displayVal = numVal > 0 ? numVal.toLocaleString('ko-KR') : '';
@@ -357,12 +435,14 @@
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
 
-      // GPS & 가디언 레이더 상태
+      // GPS & 가디언 레이더 & 지도 뷰 모드
       const [gpsSpeed, setGpsSpeed] = useState(0);
+      const [currentCoords, setCurrentCoords] = useState(null);
+      const [hudViewMode, setHudViewMode] = useState('map'); // 'map' (5:5 지도+HUD) | 'mirror' (순수 5:5 HUD)
       const [hudMirrorMode, setHudMirrorMode] = useState('rot90');
       const [nearbyCamera, setNearbyCamera] = useState(null);
-      const [isPassengerMode, setIsPassengerMode] = useState(false); // false: 빈차(동물음), true: 탑승(에티켓)
-      const [savedFineTotal, setSavedFineTotal] = useState(0); // 오늘 방어한 과태료 누적
+      const [isPassengerMode, setIsPassengerMode] = useState(false);
+      const [savedFineTotal, setSavedFineTotal] = useState(0);
       const [showDefenseToast, setShowDefenseToast] = useState(false);
       const [isSimulationActive, setIsSimulationActive] = useState(false);
 
@@ -381,7 +461,7 @@
         }
       }, [appData]);
 
-      // 실시간 GPS 및 단속 방어 판정 엔진
+      // 실시간 GPS 감시 및 단속 감지 엔진
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -391,6 +471,7 @@
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
             setGpsSpeed(speedKmh);
+            setCurrentCoords({ lat, lon });
 
             if (!isSimulationActive) {
               let closest = null;
@@ -404,7 +485,6 @@
                 }
               });
 
-              // 350m 이내 접근 시 감지 및 사운드 출력
               if (closest && closest.dist <= 350) {
                 setNearbyCamera(closest);
                 if (!activeCameraTracking.current) {
@@ -420,7 +500,6 @@
                   lastSoundTime.current = now;
                 }
               } else {
-                // 단속 구역 통과 완료 시 방어 판정
                 if (activeCameraTracking.current && minDistance > 400) {
                   if (!activeCameraTracking.current.overspeed) {
                     setSavedFineTotal(prev => prev + 40000);
@@ -440,20 +519,19 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, [isSimulationActive, isPassengerMode]);
 
-      // 가상 단속 시뮬레이션 토글
+      // 가상 단속 시뮬레이션
       const toggleSimulation = (e) => {
         e.stopPropagation();
         if (isSimulationActive) {
           setIsSimulationActive(false);
           setNearbyCamera(null);
           setGpsSpeed(0);
-          // 시뮬레이션 종료 시 방어 성공 연출
           setSavedFineTotal(prev => prev + 40000);
           setShowDefenseToast(true);
           setTimeout(() => setShowDefenseToast(false), 3500);
         } else {
           setIsSimulationActive(true);
-          setGpsSpeed(68); // 50km/h 도로에서 68km/h 과속 연출
+          setGpsSpeed(68);
           setNearbyCamera({
             id: 'sim_1',
             name: '불당대로 (시뮬레이션)',
@@ -768,10 +846,10 @@
                   </div>
                 </div>
 
-                {/* 내비 런처 */}
+                {/* 원터치 내비 런처 */}
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-300">🧭 원터치 내비 길안내</span>
+                    <span className="text-xs font-bold text-slate-300">🧭 원터치 외부 내비 연동</span>
                     <span className="text-[10px] text-slate-500">목적지 앱 자동 연동</span>
                   </div>
                   <div className="flex gap-1.5">
@@ -932,12 +1010,11 @@
             )}
 
             {/* ======================================================== */}
-            {/* 탭 3: 🏎️ 스마트 가디언 레이더 HUD (v1.8.0 통합) */}
+            {/* 탭 3: 🏎️ 실시간 내비 지도 & 가디언 HUD 통합 (v1.9.0) */}
             {/* ======================================================== */}
             {currentTab === 'hud' && (
               <div
-                onClick={handleCycleMirrorMode}
-                className={`flex-1 flex flex-col justify-between select-none rounded-3xl overflow-hidden border transition-all duration-300 cursor-pointer relative ${
+                className={`flex-1 flex flex-col justify-between select-none rounded-3xl overflow-hidden border transition-all duration-300 relative ${
                   isNearCamera && isOverSpeed
                     ? 'animate-strobe-alert border-red-500'
                     : isNearCamera
@@ -945,82 +1022,93 @@
                     : 'bg-slate-950 border-slate-800/80'
                 }`}
               >
-                {/* 상단 통합 제어 바 (빈차/탑승 전환 & 시뮬레이션 버튼) */}
-                <div className="absolute top-2.5 left-0 right-0 px-3 flex justify-between items-center z-20">
-                  {/* 빈차 ↔ 탑승 2-Way 사운드 스위치 */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsPassengerMode(!isPassengerMode);
-                      playGuardianAudio(isPassengerMode ? 'dog' : 'dog', !isPassengerMode);
-                    }}
-                    className={`px-3 py-1 rounded-full text-[11px] font-black border flex items-center gap-1 shadow-lg transition active:scale-95 ${
-                      isPassengerMode
-                        ? 'bg-blue-900/90 text-blue-200 border-blue-400'
-                        : 'bg-yellow-500 text-black border-yellow-300'
-                    }`}
-                  >
-                    <span>{isPassengerMode ? '👥 탑승 모드 (에티켓음)' : '🚕 빈차 모드 (동물음)'}</span>
-                  </button>
+                {/* 상단 컨트롤 바 */}
+                <div className="p-2 bg-slate-900/90 border-b border-slate-800 flex justify-between items-center z-20">
+                  <div className="flex gap-1.5">
+                    {/* 빈차 ↔ 탑승 스위치 */}
+                    <button
+                      onClick={() => {
+                        setIsPassengerMode(!isPassengerMode);
+                        playGuardianAudio('dog', !isPassengerMode);
+                      }}
+                      className={`px-2.5 py-1 rounded-xl text-[10px] font-black border flex items-center gap-1 transition ${
+                        isPassengerMode
+                          ? 'bg-blue-900/90 text-blue-200 border-blue-400'
+                          : 'bg-yellow-500 text-black border-yellow-300'
+                      }`}
+                    >
+                      {isPassengerMode ? '👥 탑승(에티켓)' : '🚕 빈차(동물음)'}
+                    </button>
 
-                  {/* 방 안에서도 테스트 가능한 시뮬레이션 버튼 */}
+                    {/* 지도 뷰 ↔ 순수 HUD 뷰 전환 */}
+                    <button
+                      onClick={() => setHudViewMode(hudViewMode === 'map' ? 'mirror' : 'map')}
+                      className="px-2 py-1 bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-[10px] font-bold"
+                    >
+                      {hudViewMode === 'map' ? '🪞 HUD 전용' : '🗺️ 실시간 지도'}
+                    </button>
+                  </div>
+
+                  {/* 단속 시뮬레이션 버튼 */}
                   <button
                     onClick={toggleSimulation}
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-black border transition active:scale-95 ${
+                    className={`px-2.5 py-1 rounded-xl text-[10px] font-black border transition ${
                       isSimulationActive
                         ? 'bg-red-600 text-white border-white animate-pulse'
-                        : 'bg-slate-900/90 text-yellow-400 border-yellow-500/40'
+                        : 'bg-slate-800 text-yellow-400 border-yellow-500/40'
                     }`}
                   >
                     {isSimulationActive ? '⚡ 테스트 중지' : '⚡ 단속 테스트'}
                   </button>
                 </div>
 
-                {/* 과태료 방어 축하 토스트 */}
+                {/* 과태료 방어 성공 토스트 */}
                 {showDefenseToast && (
-                  <div className="absolute top-12 left-4 right-4 z-30 bg-gradient-to-r from-emerald-600 to-green-500 text-white p-2.5 rounded-2xl shadow-2xl flex items-center justify-between animate-bounce">
+                  <div className="absolute top-12 left-4 right-4 z-30 bg-gradient-to-r from-emerald-600 to-green-500 text-white p-2 rounded-2xl shadow-2xl flex items-center justify-between animate-bounce">
                     <div className="flex items-center gap-2">
                       <span className="text-xl">🛡️</span>
                       <div>
                         <div className="text-xs font-black">+40,000원 과태료 방어 성공!</div>
-                        <div className="text-[10px] text-green-100">오늘 누적 방어액: {formatMoney(savedFineTotal)}</div>
+                        <div className="text-[10px] text-green-100">오늘 누적: {formatMoney(savedFineTotal)}</div>
                       </div>
                     </div>
-                    <span className="text-sm font-black">PASS!</span>
+                    <span className="text-xs font-black bg-emerald-950/60 px-2 py-1 rounded-lg">PASS</span>
                   </div>
                 )}
 
-                {/* 상단 1/2: 속도제한 표지판 & 펄스 링 (교대 펌핑 애니메이션) */}
-                <div className="flex-1 flex flex-col items-center justify-center p-2 border-b border-slate-800/60 overflow-hidden">
-                  <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
-                    <div className="flex flex-col items-center justify-center">
-                      
-                      {/* 표지판 원형 (카메라 감지 시 animate-top-pump로 펌핑 확대) */}
-                      <div className={`flex items-center justify-center w-40 h-40 rounded-full border-[12px] transition-all duration-300 ${
-                        isNearCamera
-                          ? 'border-red-600 bg-white text-black animate-top-pump'
-                          : 'border-red-600 bg-white text-black shadow-2xl'
-                      }`}>
-                        <div className="flex flex-col items-center justify-center leading-none">
-                          <span className="text-6xl font-black tracking-tight">{effectiveSpeedLimit}</span>
-                          <span className="text-[10px] font-black text-red-600 tracking-wider mt-0.5">LIMIT</span>
+                {/* ================= 상단 1/2 영역 ================= */}
+                <div className="flex-1 p-2 border-b border-slate-800/60 overflow-hidden relative flex flex-col items-center justify-center">
+                  {hudViewMode === 'map' ? (
+                    // [모드 A]: 실시간 주행 지도
+                    <LiveMapView currentCoords={currentCoords} nearbyCamera={nearbyCamera} />
+                  ) : (
+                    // [모드 B]: 대시보드 반사용 속도제한 표지판
+                    <div onClick={handleCycleMirrorMode} className={`cursor-pointer transition-transform duration-300 ${getHudInnerTransformClass()}`}>
+                      <div className="flex flex-col items-center justify-center">
+                        <div className={`flex items-center justify-center w-36 h-36 rounded-full border-[10px] transition-all duration-300 ${
+                          isNearCamera ? 'border-red-600 bg-white text-black animate-top-pump' : 'border-red-600 bg-white text-black shadow-2xl'
+                        }`}>
+                          <div className="flex flex-col items-center justify-center leading-none">
+                            <span className="text-5xl font-black tracking-tight">{effectiveSpeedLimit}</span>
+                            <span className="text-[9px] font-black text-red-600 tracking-wider mt-0.5">LIMIT</span>
+                          </div>
                         </div>
+                        {nearbyCamera && (
+                          <div className="mt-2 px-3 py-0.5 rounded-full bg-red-950 border border-red-500 text-red-300 font-black text-xs animate-bounce">
+                            <span>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'} {nearbyCamera.dist}m</span>
+                          </div>
+                        )}
                       </div>
-
-                      {/* 단속 카메라 레이더 정보 배지 */}
-                      {nearbyCamera && (
-                        <div className="mt-2 px-3 py-1 rounded-full bg-red-950 border border-red-500 text-red-300 font-black text-xs flex items-center gap-1.5 animate-bounce shadow">
-                          <span>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'}</span>
-                          <span>전방 {nearbyCamera.dist}m</span>
-                        </div>
-                      )}
                     </div>
-                  </div>
+                  )}
                 </div>
 
-                {/* 하단 1/2: 초대형 디지털 속도계 & 방어 카운터 (교대 펌핑 애니메이션) */}
-                <div className="flex-1 flex flex-col items-center justify-center p-2 overflow-hidden">
-                  <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
+                {/* ================= 하단 1/2 영역 ================= */}
+                <div
+                  onClick={hudViewMode === 'mirror' ? handleCycleMirrorMode : undefined}
+                  className="flex-1 flex flex-col items-center justify-center p-2 overflow-hidden relative"
+                >
+                  <div className={`transition-transform duration-300 ${hudViewMode === 'mirror' ? getHudInnerTransformClass() : ''}`}>
                     <div className={`flex flex-col items-center justify-center transition-all duration-300 ${
                       isNearCamera ? 'animate-bottom-pump' : ''
                     }`}>
@@ -1030,16 +1118,21 @@
                         }`}>
                           {gpsSpeed}
                         </span>
-                        <span className="text-3xl font-bold ml-2 text-slate-400">km/h</span>
+                        <span className="text-2xl font-bold ml-2 text-slate-400">km/h</span>
                       </div>
 
+                      {/* 단속 정보 & 과속 경고 배지 */}
                       {isOverSpeed ? (
                         <span className="text-xs font-black text-red-400 mt-1 bg-red-950/90 px-3 py-0.5 rounded-full border border-red-500/80">
                           ⚠️ 즉시 감속 (+{gpsSpeed - effectiveSpeedLimit} km/h 초과)
                         </span>
+                      ) : nearbyCamera ? (
+                        <span className="text-xs font-black text-yellow-400 mt-1 bg-yellow-950/80 px-3 py-0.5 rounded-full border border-yellow-500/60 animate-pulse">
+                          🎯 {nearbyCamera.name} 전방 {nearbyCamera.dist}m ({nearbyCamera.limit}km/h 구간)
+                        </span>
                       ) : (
                         <span className="text-[10px] font-bold text-slate-400 mt-1">
-                          {savedFineTotal > 0 ? `🛡️ 오늘 방어한 과태료: ${formatMoney(savedFineTotal)}` : getMirrorModeLabel()}
+                          {savedFineTotal > 0 ? `🛡️ 오늘 방어한 과태료: ${formatMoney(savedFineTotal)}` : '안전 운행 중'}
                         </span>
                       )}
                     </div>
@@ -1161,7 +1254,7 @@
               <span className="text-lg">📅</span><span className="text-[10px] mt-0.5">운행일지</span>
             </button>
             <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언HUD</span>
+              <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언지도</span>
             </button>
             <button onClick={() => setCurrentTab('settings')} className={`flex flex-col items-center py-2.5 ${currentTab === 'settings' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">⚙️</span><span className="text-[10px] mt-0.5">정산/설정</span>
