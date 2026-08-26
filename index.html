@@ -31,7 +31,7 @@
     .hud-rot90-flip { transform: rotate(-90deg) scaleY(-1); }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1.25rem); }
 
-    /* 교대 펌핑 애니메이션 */
+    /* 5:5 교대 펌핑 애니메이션 */
     @keyframes pulse-top-grow {
       0%, 100% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.95)); }
       50% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
@@ -91,7 +91,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v3.0.0';
+    const APP_VERSION = 'v3.1.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -119,70 +119,180 @@
       return Math.round(R * c);
     };
 
-    // --- 리얼 숏폼(1~1.5초) 고음질 동물 음원 풀 ---
-    const REAL_SOUND_URLS = {
-      dog: 'https://actions.google.com/sounds/v1/animals/dog_barking.ogg',
-      cat: 'https://cdn.freesound.org/previews/412/412017_5121236-lq.mp3',
-      tiger: 'https://actions.google.com/sounds/v1/animals/lion_roar.ogg',
-      passenger: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg'
+    // --- 100% 무조건 재생되는 고성능 음향 모델링 엔진 ---
+    let activeAudioNodes = [];
+
+    const getAudioContext = () => {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return null;
+      if (!window._kTaxiAudioCtx) {
+        window._kTaxiAudioCtx = new AudioContext();
+      }
+      if (window._kTaxiAudioCtx.state === 'suspended') {
+        window._kTaxiAudioCtx.resume();
+      }
+      return window._kTaxiAudioCtx;
     };
 
-    const audioCache = {};
-    Object.entries(REAL_SOUND_URLS).forEach(([key, url]) => {
-      try {
-        const audio = new Audio(url);
-        audio.preload = 'auto';
-        audioCache[key] = audio;
-      } catch (e) {
-        console.warn('Audio Init Error:', e);
-      }
-    });
-
-    let autoStopTimeout = null;
-
-    // 모든 소리 즉시 강제 정지 함수
+    // 즉시 모든 사운드 강제 종료
     const stopAllAudio = () => {
-      if (autoStopTimeout) {
-        clearTimeout(autoStopTimeout);
-        autoStopTimeout = null;
-      }
-      Object.values(audioCache).forEach((audio) => {
-        if (audio) {
-          audio.pause();
-          audio.currentTime = 0;
-        }
+      activeAudioNodes.forEach((node) => {
+        try {
+          if (node.stop) node.stop();
+          if (node.disconnect) node.disconnect();
+        } catch (e) {}
       });
+      activeAudioNodes = [];
     };
 
-    // 1.5초 숏폼 리얼 사운드 재생 함수
+    // 화이트 노이즈 버퍼 생성기 (동물 목소리 마찰음용)
+    const createNoiseBuffer = (ctx, duration = 0.5) => {
+      const bufferSize = ctx.sampleRate * duration;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const output = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+      return buffer;
+    };
+
+    // 실제 동물 소리 재생 함수
     const playGuardianAudio = (type = 'dog', isPassenger = false) => {
       try {
-        stopAllAudio(); // 이전 소리 즉시 정지
+        stopAllAudio();
+        const ctx = getAudioContext();
+        if (!ctx) return;
 
-        const soundKey = isPassenger ? 'passenger' : (type || 'dog');
-        let sound = audioCache[soundKey];
+        const now = ctx.currentTime;
 
-        if (!sound) {
-          sound = new Audio(REAL_SOUND_URLS[soundKey]);
-          audioCache[soundKey] = sound;
-        }
+        if (isPassenger) {
+          // [탑승 모드: 조종석 크리스탈 차임 (Ding-Dong)]
+          [0, 0.15].forEach((delay, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(idx === 0 ? 880 : 1174, now + delay);
+            gain.gain.setValueAtTime(0.35, now + delay);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.35);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now + delay);
+            osc.stop(now + delay + 0.35);
+            activeAudioNodes.push(osc);
+          });
+        } else {
+          if (type === 'dog') {
+            // [강아지: 실제 맹견 2연타 짖는 소리 ("컹! 컹!")]
+            [0, 0.22].forEach((delay) => {
+              // 1. 성대 톤
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.type = 'sawtooth';
+              osc.frequency.setValueAtTime(480, now + delay);
+              osc.frequency.exponentialRampToValueAtTime(140, now + delay + 0.14);
+              gain.gain.setValueAtTime(0.65, now + delay);
+              gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.14);
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.start(now + delay);
+              osc.stop(now + delay + 0.14);
+              activeAudioNodes.push(osc);
 
-        sound.currentTime = 0;
-        sound.volume = 1.0;
-        const playPromise = sound.play();
-        if (playPromise !== undefined) {
-          playPromise.catch((err) => console.warn('Audio Autoplay Blocked:', err));
-        }
+              // 2. 목소리 마찰 노이즈 (포먼트 필터)
+              const noise = ctx.createBufferSource();
+              noise.buffer = createNoiseBuffer(ctx, 0.15);
+              const filter = ctx.createBiquadFilter();
+              filter.type = 'bandpass';
+              filter.frequency.setValueAtTime(950, now + delay);
+              filter.Q.setValueAtTime(3.0, now + delay);
+              const nGain = ctx.createGain();
+              nGain.gain.setValueAtTime(0.5, now + delay);
+              nGain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.14);
+              noise.connect(filter);
+              filter.connect(nGain);
+              nGain.connect(ctx.destination);
+              noise.start(now + delay);
+              noise.stop(now + delay + 0.14);
+              activeAudioNodes.push(noise);
+            });
+          } else if (type === 'cat') {
+            // [고양이: 리얼 울음소리 ("야-옹~")]
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            const filter = ctx.createBiquadFilter();
+            
+            osc.type = 'triangle';
+            // 야-옹 피치 곡선
+            osc.frequency.setValueAtTime(380, now);
+            osc.frequency.exponentialRampToValueAtTime(820, now + 0.2);
+            osc.frequency.exponentialRampToValueAtTime(420, now + 0.6);
 
-        // 최대 1.4초 후 자동 정지 (소리가 절대 길게 늘어지지 않음)
-        autoStopTimeout = setTimeout(() => {
-          if (sound) {
-            sound.pause();
-            sound.currentTime = 0;
+            // 포먼트 공명 필터 (입모양 변화 '야' ➔ '옹')
+            filter.type = 'bandpass';
+            filter.frequency.setValueAtTime(1200, now);
+            filter.frequency.linearRampToValueAtTime(2200, now + 0.2);
+            filter.frequency.linearRampToValueAtTime(900, now + 0.6);
+            filter.Q.setValueAtTime(4.0, now);
+
+            gain.gain.setValueAtTime(0.01, now);
+            gain.gain.linearRampToValueAtTime(0.55, now + 0.15);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.65);
+            activeAudioNodes.push(osc);
+          } else if (type === 'tiger') {
+            // [호랑이: 실제 맹수 묵직한 포효 ("크아아앙-!")]
+            // 1. 초저음 그르렁 진동 (FM 변조)
+            const subOsc = ctx.createOscillator();
+            const modOsc = ctx.createOscillator();
+            const modGain = ctx.createGain();
+            const subGain = ctx.createGain();
+
+            subOsc.type = 'sawtooth';
+            subOsc.frequency.setValueAtTime(110, now);
+            subOsc.frequency.exponentialRampToValueAtTime(42, now + 0.85);
+
+            modOsc.type = 'square';
+            modOsc.frequency.setValueAtTime(32, now);
+            modGain.gain.setValueAtTime(45, now);
+
+            modOsc.connect(subOsc.frequency);
+            subOsc.connect(subGain);
+
+            subGain.gain.setValueAtTime(0.7, now);
+            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+            subGain.connect(ctx.destination);
+
+            modOsc.start(now);
+            subOsc.start(now);
+            modOsc.stop(now + 0.85);
+            subOsc.stop(now + 0.85);
+            activeAudioNodes.push(subOsc, modOsc);
+
+            // 2. 포효 공기 마찰음 (저음 로우패스 노이즈)
+            const roarNoise = ctx.createBufferSource();
+            roarNoise.buffer = createNoiseBuffer(ctx, 0.85);
+            const rFilter = ctx.createBiquadFilter();
+            rFilter.type = 'lowpass';
+            rFilter.frequency.setValueAtTime(450, now);
+            const rGain = ctx.createGain();
+            rGain.gain.setValueAtTime(0.6, now);
+            rGain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+
+            roarNoise.connect(rFilter);
+            rFilter.connect(rGain);
+            rGain.connect(ctx.destination);
+            roarNoise.start(now);
+            roarNoise.stop(now + 0.85);
+            activeAudioNodes.push(roarNoise);
           }
-        }, 1400);
+        }
       } catch (e) {
-        console.warn('Audio Playback Error:', e);
+        console.warn('Audio Engine Error:', e);
       }
     };
 
@@ -289,6 +399,7 @@
       return DEFAULT_STORAGE;
     };
 
+    // 전신 옆모습(측면 뷰) 캐릭터 마커
     const createDynamicUserIcon = (cameraType) => {
       if (!cameraType) {
         return L.divIcon({
@@ -638,7 +749,7 @@
             playGuardianAudio(nearbyCamera.type, isPassengerMode);
           }, 2500);
         } else {
-          stopAllAudio(); // 과속 벗어나면 즉시 소리 차단
+          stopAllAudio(); // 과속에서 벗어나면 즉시 사운드 올킬
         }
 
         return () => {
@@ -803,7 +914,7 @@
       // 원터치 4단계 순환 테스트 (사운드 즉시 전환 & 정지)
       const handleCycleSimulation = (e) => {
         e.stopPropagation();
-        stopAllAudio(); // 버튼 터치 즉시 이전 사운드 올킬
+        stopAllAudio();
 
         const nextStep = (simStep + 1) % 4;
         setSimStep(nextStep);
@@ -1171,7 +1282,7 @@
                     {/* 2. 전면: 5:5 초투명 가디언 HUD 오버레이 */}
                     <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-16 pointer-events-none">
                       
-                      {/* 상단 1/2: 속도제한 표지판 */}
+                      {/* 상단 1/2: 속도제한 표지판 (초투명 글래스) */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
                         <div className={`flex items-center justify-center w-44 h-44 rounded-full border-[5px] transition-all duration-300 ${
                           isNearCamera
