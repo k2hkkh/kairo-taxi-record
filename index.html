@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>K-TAXI 건강 운행 관리 & 스마트 HUD</title>
+  <title>K-TAXI 스마트 가디언 HUD & 운행관리</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React 18 & ReactDOM (Cloudflare CDN) -->
@@ -32,100 +32,171 @@
     .pb-safe {
       padding-bottom: env(safe-area-inset-bottom, 1.25rem);
     }
-    @keyframes blink-red {
-      0%, 100% { background-color: rgba(220, 38, 38, 0.15); }
-      50% { background-color: rgba(220, 38, 38, 0.45); }
+    
+    /* 5:5 교대 펌핑 (Grow & Shrink) 애니메이션 */
+    @keyframes pulse-grow {
+      0%, 100% { transform: scale(1.18); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.9)); }
+      50% { transform: scale(0.85); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.5)); }
     }
-    .animate-overspeed {
-      animation: blink-red 0.8s infinite;
+    @keyframes pulse-shrink {
+      0%, 100% { transform: scale(0.85); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.5)); }
+      50% { transform: scale(1.18); filter: drop-shadow(0 0 25px rgba(34, 197, 94, 0.9)); }
+    }
+    .animate-grow-pulse {
+      animation: pulse-grow 0.9s infinite ease-in-out;
+    }
+    .animate-shrink-pulse {
+      animation: pulse-shrink 0.9s infinite ease-in-out;
+    }
+
+    /* 화려한 네온 스트로브 경고 점멸 */
+    @keyframes strobe-warning {
+      0% { background-color: rgba(239, 68, 68, 0.35); border-color: #ef4444; }
+      25% { background-color: rgba(234, 179, 8, 0.35); border-color: #eab308; }
+      50% { background-color: rgba(6, 182, 212, 0.35); border-color: #06b6d4; }
+      75% { background-color: rgba(168, 85, 247, 0.35); border-color: #a855f7; }
+      100% { background-color: rgba(239, 68, 68, 0.35); border-color: #ef4444; }
+    }
+    .animate-strobe-alert {
+      animation: strobe-warning 0.5s infinite linear;
     }
   </style>
 </head>
 <body class="select-none antialiased min-h-screen bg-slate-950">
   <div id="root">
     <div class="min-h-screen flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
-      K-TAXI 시스템 로딩 중...
+      K-TAXI 가디언 시스템 로딩 중...
     </div>
   </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v1.6.3';
+    const APP_VERSION = 'v1.7.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
 
-    // --- Web Audio 사운드 시스템 ---
-    const playSound = (type = 'chime') => {
+    // --- 천안·아산 주요 단속 포인트 DB (기본 내장) ---
+    const CAMERA_DB = [
+      { id: 'cam1', name: '불당대로 (시청 앞)', lat: 36.8152, lon: 127.1135, limit: 50, type: 'dog' }, // 과속/신호
+      { id: 'cam2', name: '번영로 (종합운동장)', lat: 36.8285, lon: 127.1210, limit: 60, type: 'dog' },
+      { id: 'cam3', name: '충무로 (쌍용고사거리)', lat: 36.7950, lon: 127.1260, limit: 50, type: 'dog' },
+      { id: 'cam4', name: '서부대로 (봉명역 인근)', lat: 36.8010, lon: 127.1350, limit: 50, type: 'dog' },
+      { id: 'cam5', name: '온천대로 (아산시청 앞)', lat: 36.7895, lon: 127.0035, limit: 50, type: 'dog' },
+      { id: 'cam6', name: '배방로 (배방역 광장)', lat: 36.7770, lon: 127.0520, limit: 50, type: 'dog' },
+      { id: 'cam7', name: '천안역 서부광장 주정차구역', lat: 36.8105, lon: 127.1460, limit: 30, type: 'cat' }, // 주정차
+      { id: 'cam8', name: '남부대로 구간단속 (유량~목천)', lat: 36.7820, lon: 127.1650, limit: 70, type: 'tiger' } // 구간단속
+    ];
+
+    // 하버사인 공식 (거리 m 계산)
+    const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
+      const R = 6371e3;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Math.round(R * c);
+    };
+
+    // --- Web Audio 사운드 신시사이저 (개·고양이·호랑이 소리 합성) ---
+    const playAnimalSound = (type = 'dog') => {
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
         const ctx = new AudioContext();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
 
-        if (type === 'alarm') {
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-          osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
-          osc.frequency.setValueAtTime(1174.66, ctx.currentTime + 0.3);
-          gain.gain.setValueAtTime(0.4, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.2);
+        if (type === 'dog') {
+          // [개 짖는 소리] 날카롭고 강렬한 더블 하향 얍! 얍!
+          [0, 0.18].forEach((delay) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(650, ctx.currentTime + delay);
+            osc.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + delay + 0.12);
+            gain.gain.setValueAtTime(0.5, ctx.currentTime + delay);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.12);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + delay);
+            osc.stop(ctx.currentTime + delay + 0.12);
+          });
+        } else if (type === 'cat') {
+          // [고양이 울음] 부드럽게 올라갔다 내려오는 야옹~
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(380, ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(820, ctx.currentTime + 0.25);
+          osc.frequency.exponentialRampToValueAtTime(450, ctx.currentTime + 0.55);
+          gain.gain.setValueAtTime(0.35, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.55);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
           osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 1.2);
+          osc.stop(ctx.currentTime + 0.55);
+        } else if (type === 'tiger') {
+          // [호랑이 포효] 저음 진동과 거친 럼블 사운드 어흥~
+          const osc = ctx.createOscillator();
+          const mod = ctx.createOscillator();
+          const modGain = ctx.createGain();
+          const gain = ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(95, ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.8);
+          mod.type = 'square';
+          mod.frequency.setValueAtTime(25, ctx.currentTime);
+          modGain.gain.setValueAtTime(40, ctx.currentTime);
+          mod.connect(osc.frequency);
+          gain.gain.setValueAtTime(0.5, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          mod.start(ctx.currentTime);
+          osc.start(ctx.currentTime);
+          mod.stop(ctx.currentTime + 0.8);
+          osc.stop(ctx.currentTime + 0.8);
         } else {
+          // 기본 알람 차임
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
           osc.type = 'sine';
           osc.frequency.setValueAtTime(523.25, ctx.currentTime);
-          osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.15);
-          osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.3);
-          gain.gain.setValueAtTime(0.25, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.5);
+          gain.gain.setValueAtTime(0.3, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.2);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
           osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 1.5);
+          osc.stop(ctx.currentTime + 1.2);
         }
       } catch (e) {
-        console.warn('Audio Play Error', e);
+        console.warn('Animal Audio Error', e);
       }
     };
 
     // 포맷 유틸
-    const formatMoney = (val) => {
-      const num = Number(String(val).replace(/[^0-9]/g, '')) || 0;
-      return num.toLocaleString('ko-KR');
-    };
-
+    const formatMoney = (val) => Number(String(val).replace(/[^0-9]/g, '') || 0).toLocaleString('ko-KR');
     const formatShortMoney = (val) => {
       const num = Number(val) || 0;
       if (num === 0) return '0';
-      if (num >= 10000) {
-        return (num / 10000).toFixed(num % 10000 === 0 ? 0 : 1) + '만';
-      }
+      if (num >= 10000) return (num / 10000).toFixed(num % 10000 === 0 ? 0 : 1) + '만';
       return (num / 1000).toFixed(0) + '천';
     };
-
     const getTodayKey = () => {
       const now = new Date();
-      const y = now.getFullYear();
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      const d = String(now.getDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     };
-
     const getCurrentTimeStr = () => {
       const now = new Date();
       return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     };
-
     const addMinutesToTime = (timeStr, minsToAdd) => {
       if (!timeStr) return '--:--';
       const [h, m] = timeStr.split(':').map(Number);
       const totalMins = (h * 60 + m + minsToAdd) % (24 * 60);
-      const finalH = Math.floor(totalMins / 60);
-      const finalM = totalMins % 60;
-      return `${String(finalH).padStart(2, '0')}:${String(finalM).padStart(2, '0')}`;
+      return `${String(Math.floor(totalMins / 60)).padStart(2, '0')}:${String(totalMins % 60).padStart(2, '0')}`;
     };
-
     const calculateMinutes = (start, end) => {
       if (!start || !end) return 0;
       const [sh, sm] = start.split(':').map(Number);
@@ -135,13 +206,11 @@
       if (eMin < sMin) eMin += 24 * 60;
       return Math.max(0, eMin - sMin);
     };
-
     const formatMinutesToHours = (totalMins) => {
       if (!totalMins || totalMins <= 0) return '0시간';
       const hours = Math.floor(totalMins / 60);
       const mins = totalMins % 60;
-      if (mins === 0) return `${hours}시간`;
-      return `${hours}시간 ${mins}분`;
+      return mins === 0 ? `${hours}시간` : `${hours}시간 ${mins}분`;
     };
 
     // 기본 스키마
@@ -186,7 +255,6 @@
           if (raw) { saved = raw; break; }
         }
         if (!saved) saved = localStorage.getItem('K_TAXI_RECORD_DATA');
-
         if (saved) {
           const p = JSON.parse(saved);
           return {
@@ -194,25 +262,16 @@
             activeType: (p.activeType || p.activeTab || 'corporate') === 'private' ? 'private' : 'corporate',
             hudSpeedLimit: Number(p.hudSpeedLimit || 50),
             defaultOffDay: Number(p.defaultOffDay !== undefined ? p.defaultOffDay : 1),
-            healthRoutines: Array.isArray(p.healthRoutines) && p.healthRoutines.length > 0
-              ? p.healthRoutines
-              : DEFAULT_STORAGE.healthRoutines,
+            healthRoutines: Array.isArray(p.healthRoutines) && p.healthRoutines.length > 0 ? p.healthRoutines : DEFAULT_STORAGE.healthRoutines,
             corporate: {
               carNumber: p.corporate?.carNumber || '',
               dailyDeposit: Number(p.corporate?.dailyDeposit || p.corporate?.baseDeposit || 201000),
               deductionRate: Number(p.corporate?.deductionRate !== undefined ? p.corporate.deductionRate : 9.0),
-              fixedAllowanceItems: Array.isArray(p.corporate?.fixedAllowanceItems) && p.corporate.fixedAllowanceItems.length > 0
-                ? p.corporate.fixedAllowanceItems
-                : DEFAULT_STORAGE.corporate.fixedAllowanceItems,
-              fixedExpenseItems: Array.isArray(p.corporate?.fixedExpenseItems)
-                ? p.corporate.fixedExpenseItems
-                : DEFAULT_STORAGE.corporate.fixedExpenseItems,
+              fixedAllowanceItems: Array.isArray(p.corporate?.fixedAllowanceItems) && p.corporate.fixedAllowanceItems.length > 0 ? p.corporate.fixedAllowanceItems : DEFAULT_STORAGE.corporate.fixedAllowanceItems,
+              fixedExpenseItems: Array.isArray(p.corporate?.fixedExpenseItems) ? p.corporate.fixedExpenseItems : DEFAULT_STORAGE.corporate.fixedExpenseItems,
               records: p.corporate?.records || {}
             },
-            private: {
-              carNumber: p.private?.carNumber || '',
-              records: p.private?.records || {}
-            }
+            private: { carNumber: p.private?.carNumber || '', records: p.private?.records || {} }
           };
         }
       } catch (e) {
@@ -221,7 +280,6 @@
       return DEFAULT_STORAGE;
     };
 
-    // 스마트 금액 인풋
     function SmartMoneyInput({ value, onChange, placeholder = "0", className = "", colorClass = "text-white" }) {
       const numVal = Number(value) || 0;
       const displayVal = numVal > 0 ? numVal.toLocaleString('ko-KR') : '';
@@ -254,7 +312,7 @@
       );
     }
 
-    // 메인 App
+    // 메인 App 컴포넌트
     function App() {
       const [appData, setAppData] = useState(loadSafeData);
       const [currentTab, setCurrentTab] = useState('today');
@@ -273,10 +331,15 @@
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
 
+      // GPS & HUD & 카메라 감지 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
+      const [currentCoords, setCurrentCoords] = useState(null);
       const [hudMirrorMode, setHudMirrorMode] = useState('rot90');
-      const SPEED_LIMIT_LIST = [50, 60, 70, 80, 100, 30];
+      const [nearbyCamera, setNearbyCamera] = useState(null); // { name, dist, limit, type }
+      const [isSimulationActive, setIsSimulationActive] = useState(false);
+      const lastSoundTriggerTime = useRef(0);
 
+      // 쪽잠 타이머
       const [napTimerSeconds, setNapTimerSeconds] = useState(0);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
 
@@ -288,134 +351,146 @@
         }
       }, [appData]);
 
+      // 실시간 GPS 감시 및 단속 카메라 거리 계산 엔진
       useEffect(() => {
         if (!navigator.geolocation) return;
 
         const watchId = navigator.geolocation.watchPosition(
           (pos) => {
             const speedKmh = pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0;
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
             setGpsSpeed(speedKmh);
+            setCurrentCoords({ lat, lon });
+
+            if (!isSimulationActive) {
+              // 가장 가까운 단속 카메라 탐색
+              let closest = null;
+              let minDistance = 99999;
+
+              CAMERA_DB.forEach((cam) => {
+                const dist = calculateDistanceMeters(lat, lon, cam.lat, cam.lon);
+                if (dist < minDistance) {
+                  minDistance = dist;
+                  closest = { ...cam, dist };
+                }
+              });
+
+              // 350m 이내 접근 시 감지
+              if (closest && closest.dist <= 350) {
+                setNearbyCamera(closest);
+                // 10초 쿨다운 후 동물 사운드 출력
+                const now = Date.now();
+                if (now - lastSoundTriggerTime.current > 10000) {
+                  playAnimalSound(closest.type);
+                  lastSoundTriggerTime.current = now;
+                }
+              } else {
+                setNearbyCamera(null);
+              }
+            }
           },
           (err) => console.warn('GPS Info:', err.message),
           { enableHighAccuracy: true, maximumAge: 1000, timeout: 4000 }
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
-      }, []);
+      }, [isSimulationActive]);
 
+      // 시뮬레이션 테스트 토글 (가상 단속카메라 250m 진입)
+      const toggleSimulation = (e) => {
+        e.stopPropagation();
+        if (isSimulationActive) {
+          setIsSimulationActive(false);
+          setNearbyCamera(null);
+          setGpsSpeed(0);
+        } else {
+          setIsSimulationActive(true);
+          setGpsSpeed(68); // 50 제한도로에서 68km/h 과속 가상 연출
+          setNearbyCamera({
+            id: 'sim_cam',
+            name: '불당대로 (시뮬레이션)',
+            limit: 50,
+            dist: 230,
+            type: 'dog'
+          });
+          playAnimalSound('dog');
+        }
+      };
+
+      // 쪽잠 타이머
       useEffect(() => {
         let interval = null;
         if (isNapTimerActive && napTimerSeconds > 0) {
           interval = setInterval(() => setNapTimerSeconds(prev => prev - 1), 1000);
         } else if (isNapTimerActive && napTimerSeconds === 0) {
           setIsNapTimerActive(false);
-          playSound('alarm');
+          playAnimalSound('tiger');
           if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 1000]);
-          alert('🔔 20분 쪽잠이 종료되었습니다! 가볍게 기지개를 켜고 안전 운행을 시작하세요.');
+          alert('🔔 20분 쪽잠이 종료되었습니다! 안전 운행을 시작하세요.');
         }
         return () => clearInterval(interval);
       }, [isNapTimerActive, napTimerSeconds]);
 
-      const startPowerNapTimer = (mins = 20) => {
-        setNapTimerSeconds(mins * 60);
-        setIsNapTimerActive(true);
-        playSound('chime');
-      };
-
-      const cancelPowerNapTimer = () => {
-        setIsNapTimerActive(false);
-        setNapTimerSeconds(0);
-      };
-
       const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
 
       const handleInitialSelectType = (type) => {
-        setAppData(prev => ({
-          ...prev,
-          activeType: type,
-          hasSelectedType: true
-        }));
+        setAppData(prev => ({ ...prev, activeType: type, hasSelectedType: true }));
       };
-
-      const setVehicleType = (type) => {
-        setAppData(prev => ({ ...prev, activeType: type }));
-      };
-
+      const setVehicleType = (type) => setAppData(prev => ({ ...prev, activeType: type }));
       const handleCarNumberChange = (val) => {
-        setAppData(prev => ({
-          ...prev,
-          [activeType]: { ...(prev[activeType] || {}), carNumber: val }
-        }));
+        setAppData(prev => ({ ...prev, [activeType]: { ...(prev[activeType] || {}), carNumber: val } }));
       };
-
       const handleCorporateConfigChange = (key, val) => {
-        setAppData(prev => ({
-          ...prev,
-          corporate: { ...(prev.corporate || {}), [key]: Number(val) || 0 }
-        }));
+        setAppData(prev => ({ ...prev, corporate: { ...(prev.corporate || {}), [key]: Number(val) || 0 } }));
       };
-
       const handleDefaultOffDayChange = (dayIndex) => {
         setAppData(prev => ({ ...prev, defaultOffDay: Number(dayIndex) }));
       };
 
-      // 안드로이드 표준 Intent 방식 내비게이션 런처 (무반응 및 인증 오류 100% 해결)
+      // 안드로이드 표준 Intent 내비 런처
       const openNavApp = (appType) => {
         const query = navQuery.trim() || '가스충전소';
         const encoded = encodeURIComponent(query);
         const isAndroid = /Android/i.test(navigator.userAgent);
 
         if (appType === 'tmap') {
-          if (isAndroid) {
-            window.location.href = `intent://search?name=${encoded}#Intent;scheme=tmap;package=com.skt.tmap.ku;end`;
-          } else {
-            window.location.href = `tmap://search?name=${encoded}`;
-          }
+          window.location.href = isAndroid
+            ? `intent://search?name=${encoded}#Intent;scheme=tmap;package=com.skt.tmap.ku;end`
+            : `tmap://search?name=${encoded}`;
         } else if (appType === 'kakao') {
-          if (isAndroid) {
-            window.location.href = `intent://search?q=${encoded}#Intent;scheme=kakaomap;package=net.daum.android.map;end`;
-          } else {
-            window.location.href = `https://map.kakao.com/link/search/${encoded}`;
-          }
+          window.location.href = isAndroid
+            ? `intent://search?q=${encoded}#Intent;scheme=kakaomap;package=net.daum.android.map;end`
+            : `https://map.kakao.com/link/search/${encoded}`;
         } else if (appType === 'naver') {
-          if (isAndroid) {
-            window.location.href = `intent://search?query=${encoded}&appname=k-taxi#Intent;scheme=nmap;package=com.nhn.android.nmap;end`;
-          } else {
-            window.location.href = `https://m.map.naver.com/search2/search.naver?query=${encoded}`;
-          }
+          window.location.href = isAndroid
+            ? `intent://search?query=${encoded}&appname=k-taxi#Intent;scheme=nmap;package=com.nhn.android.nmap;end`
+            : `https://m.map.naver.com/search2/search.naver?query=${encoded}`;
         }
       };
 
+      // 건강 루틴
       const toggleRoutineDone = (id) => {
         setAppData(prev => ({
           ...prev,
           healthRoutines: (prev.healthRoutines || []).map(r => r.id === id ? { ...r, done: !r.done } : r)
         }));
       };
-
       const handleAddRoutine = () => {
         if (!newRoutineText.trim()) return;
-        const newRoutine = {
-          id: Date.now(),
-          text: newRoutineText.trim(),
-          done: false
-        };
         setAppData(prev => ({
           ...prev,
-          healthRoutines: [...(prev.healthRoutines || []), newRoutine]
+          healthRoutines: [...(prev.healthRoutines || []), { id: Date.now(), text: newRoutineText.trim(), done: false }]
         }));
         setNewRoutineText('');
         setShowAddRoutineInput(false);
       };
-
       const handleDeleteRoutine = (id) => {
-        if (!confirm('이 건강 관리 항목을 삭제하시겠습니까?')) return;
-        setAppData(prev => ({
-          ...prev,
-          healthRoutines: (prev.healthRoutines || []).filter(r => r.id !== id)
-        }));
+        if (!confirm('삭제하시겠습니까?')) return;
+        setAppData(prev => ({ ...prev, healthRoutines: (prev.healthRoutines || []).filter(r => r.id !== id) }));
       };
 
+      // 출퇴근 처리
       const todayKey = getTodayKey();
       const todayRecord = appData[activeType]?.records?.[todayKey] || {};
 
@@ -429,18 +504,10 @@
           updatedRec.endTime = nowTime;
           if (!updatedRec.startTime) updatedRec.startTime = nowTime;
         }
-
         updatedRec.workMinutes = calculateMinutes(updatedRec.startTime, updatedRec.endTime);
-
         setAppData(prev => ({
           ...prev,
-          [activeType]: {
-            ...prev[activeType],
-            records: {
-              ...(prev[activeType]?.records || {}),
-              [todayKey]: updatedRec
-            }
-          }
+          [activeType]: { ...prev[activeType], records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec } }
         }));
       };
 
@@ -449,29 +516,15 @@
         const updatedRec = { ...todayRecord, startTime: '', endTime: '', workMinutes: 0 };
         setAppData(prev => ({
           ...prev,
-          [activeType]: {
-            ...prev[activeType],
-            records: {
-              ...(prev[activeType]?.records || {}),
-              [todayKey]: updatedRec
-            }
-          }
+          [activeType]: { ...prev[activeType], records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec } }
         }));
       };
 
       const handleSaveRecord = (dateKey, recordData) => {
         const workMins = calculateMinutes(recordData.startTime, recordData.endTime);
-        const finalData = { ...recordData, workMinutes: workMins };
-
         setAppData(prev => ({
           ...prev,
-          [activeType]: {
-            ...prev[activeType],
-            records: {
-              ...(prev[activeType]?.records || {}),
-              [dateKey]: finalData
-            }
-          }
+          [activeType]: { ...prev[activeType], records: { ...(prev[activeType]?.records || {}), [dateKey]: { ...recordData, workMinutes: workMins } } }
         }));
         setShowDailyModal(false);
       };
@@ -480,52 +533,38 @@
         if (!confirm(`${dateKey} 기록을 삭제하시겠습니까?`)) return;
         const updatedRecords = { ...(appData[activeType]?.records || {}) };
         delete updatedRecords[dateKey];
-        setAppData(prev => ({
-          ...prev,
-          [activeType]: { ...prev[activeType], records: updatedRecords }
-        }));
+        setAppData(prev => ({ ...prev, [activeType]: { ...prev[activeType], records: updatedRecords } }));
       };
 
       const totalFixedAllowances = useMemo(() => {
-        const items = appData?.corporate?.fixedAllowanceItems || [];
-        return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+        return (appData?.corporate?.fixedAllowanceItems || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       }, [appData?.corporate?.fixedAllowanceItems]);
 
       const totalFixedExpenses = useMemo(() => {
-        const items = appData?.corporate?.fixedExpenseItems || [];
-        return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+        return (appData?.corporate?.fixedExpenseItems || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       }, [appData?.corporate?.fixedExpenseItems]);
 
       const currentMonthStats = useMemo(() => {
         const records = appData[activeType]?.records || {};
         const entries = Object.entries(records).filter(([date]) => date && String(date).startsWith(currentYearMonth));
 
-        let workDays = 0;
-        let holidayDays = 0;
-        let totalWorkMinutes = 0;
+        let workDays = 0, holidayDays = 0, totalWorkMinutes = 0;
 
         if (activeType === 'corporate') {
           const dailyDeposit = Number(appData.corporate?.dailyDeposit || 201000);
           const deductionRate = Number(appData.corporate?.deductionRate !== undefined ? appData.corporate.deductionRate : 9.0) / 100;
-
-          let totalRevenue = 0;
-          let totalGasCompany = 0;
-          let totalDriverExpense = 0;
-          let totalIncentive = 0;
+          let totalRevenue = 0, totalGasCompany = 0, totalDriverExpense = 0, totalIncentive = 0;
 
           entries.forEach(([_, r]) => {
-            if (r?.isHoliday) {
-              holidayDays++;
-            } else {
+            if (r?.isHoliday) { holidayDays++; }
+            else {
               workDays++;
               const rev = Number(r?.revenue || 0);
               totalRevenue += rev;
               totalGasCompany += Number(r?.gas || 0);
               totalDriverExpense += Number(r?.driverExpense || 0);
               totalWorkMinutes += Number(r?.workMinutes || 0);
-
-              const dailyOver = Math.max(0, rev - dailyDeposit);
-              totalIncentive += Math.round(dailyOver * 0.7);
+              totalIncentive += Math.round(Math.max(0, rev - dailyDeposit) * 0.7);
             }
           });
 
@@ -535,35 +574,13 @@
           const netSalaryFromCompany = grossSalary - totalDeductions;
           const finalNetIncome = netSalaryFromCompany - totalDriverExpense;
 
-          return {
-            workDays,
-            holidayDays,
-            totalWorkMinutes,
-            dailyDeposit,
-            totalFixedAllowances,
-            totalRevenue,
-            totalGasCompany,
-            totalIncentive,
-            grossSalary,
-            taxAndInsurance,
-            totalFixedExpenses,
-            totalDeductions,
-            netSalaryFromCompany,
-            totalDriverExpense,
-            finalNetIncome
-          };
+          return { workDays, holidayDays, totalWorkMinutes, totalRevenue, totalGasCompany, totalIncentive, grossSalary, taxAndInsurance, totalFixedExpenses, totalDeductions, netSalaryFromCompany, totalDriverExpense, finalNetIncome };
         } else {
-          let cardTotal = 0;
-          let cashTotal = 0;
-          let gasTotal = 0;
-          let tollTotal = 0;
-          let maintTotal = 0;
-          let otherTotal = 0;
+          let cardTotal = 0, cashTotal = 0, gasTotal = 0, tollTotal = 0, maintTotal = 0, otherTotal = 0;
 
           entries.forEach(([_, r]) => {
-            if (r?.isHoliday) {
-              holidayDays++;
-            } else {
+            if (r?.isHoliday) { holidayDays++; }
+            else {
               workDays++;
               cardTotal += Number(r?.cardRev || 0);
               cashTotal += Number(r?.cashRev || 0);
@@ -577,22 +594,7 @@
 
           const totalRevenue = cardTotal + cashTotal;
           const totalExpense = gasTotal + tollTotal + maintTotal + otherTotal;
-          const netIncome = totalRevenue - totalExpense;
-
-          return {
-            workDays,
-            holidayDays,
-            totalWorkMinutes,
-            cardTotal,
-            cashTotal,
-            totalRevenue,
-            gasTotal,
-            tollTotal,
-            maintTotal,
-            otherTotal,
-            totalExpense,
-            netIncome
-          };
+          return { workDays, holidayDays, totalWorkMinutes, cardTotal, cashTotal, totalRevenue, gasTotal, tollTotal, maintTotal, otherTotal, totalExpense, netIncome: totalRevenue - totalExpense };
         }
       }, [appData, activeType, currentYearMonth, totalFixedAllowances, totalFixedExpenses]);
 
@@ -600,35 +602,20 @@
         const [y, m] = currentYearMonth.split('-').map(Number);
         const firstDayWeekIndex = new Date(y, m - 1, 1).getDay();
         const totalDaysInMonth = new Date(y, m, 0).getDate();
-
         const cells = [];
         for (let i = 0; i < firstDayWeekIndex; i++) cells.push(null);
-        for (let d = 1; d <= totalDaysInMonth; d++) {
-          const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-          cells.push(dateStr);
-        }
+        for (let d = 1; d <= totalDaysInMonth; d++) cells.push(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
         return cells;
       }, [currentYearMonth]);
 
       const shiftSchedule = useMemo(() => {
         const start = todayRecord.startTime || '16:30';
-        return {
-          start,
-          rest1: addMinutesToTime(start, 240),
-          rest2: '01:30',
-          end: addMinutesToTime(start, 720)
-        };
+        return { start, rest1: addMinutesToTime(start, 240), rest2: '01:30', end: addMinutesToTime(start, 720) };
       }, [todayRecord.startTime]);
 
-      const openModalForDate = (dateStr) => {
-        setSelectedDate(dateStr);
-        setShowDailyModal(true);
-      };
-
+      const openModalForDate = (dateStr) => { setSelectedDate(dateStr); setShowDailyModal(true); };
       const currentRecords = appData[activeType]?.records || {};
-      const sortedMonthEntries = Object.entries(currentRecords)
-        .filter(([date]) => date && String(date).startsWith(currentYearMonth))
-        .sort(([a], [b]) => a.localeCompare(b));
+      const sortedMonthEntries = Object.entries(currentRecords).filter(([date]) => date && String(date).startsWith(currentYearMonth)).sort(([a], [b]) => a.localeCompare(b));
 
       const getHudInnerTransformClass = () => {
         if (hudMirrorMode === 'flipY') return 'hud-flip-y';
@@ -642,13 +629,9 @@
         return '일반 모드';
       };
 
-      const handleCycleSpeedLimit = (e) => {
-        e.stopPropagation();
-        const currentLimit = appData.hudSpeedLimit || 50;
-        const currentIndex = SPEED_LIMIT_LIST.indexOf(currentLimit);
-        const nextIndex = (currentIndex + 1) % SPEED_LIMIT_LIST.length;
-        setAppData(prev => ({ ...prev, hudSpeedLimit: SPEED_LIMIT_LIST[nextIndex] }));
-      };
+      const effectiveSpeedLimit = nearbyCamera ? nearbyCamera.limit : (appData.hudSpeedLimit || 50);
+      const isOverSpeed = gpsSpeed > effectiveSpeedLimit;
+      const isNearCamera = !!nearbyCamera;
 
       const handleCycleMirrorMode = () => {
         if (hudMirrorMode === 'rot90') setHudMirrorMode('flipY');
@@ -664,13 +647,12 @@
             <div className="space-y-2">
               <span className="bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full shadow">K-TAXI</span>
               <h1 className="text-2xl font-black text-white tracking-tight mt-2">운행 모드를 선택해 주세요</h1>
-              <p className="text-xs text-slate-400">선택하신 모드에 최적화된 장부와 계산식이 적용됩니다.<br/>(언제든 설정 탭에서 변경 가능합니다)</p>
+              <p className="text-xs text-slate-400">선택하신 모드에 최적화된 장부와 계산식이 적용됩니다.<br/>(설정 탭에서 언제든 변경 가능)</p>
             </div>
-
             <div className="w-full space-y-3">
               <button
                 onClick={() => handleInitialSelectType('corporate')}
-                className="w-full p-5 bg-slate-900 hover:bg-slate-850 active:scale-98 border-2 border-yellow-500/50 hover:border-yellow-400 rounded-3xl text-left flex items-center justify-between shadow-xl transition"
+                className="w-full p-5 bg-slate-900 border-2 border-yellow-500/50 hover:border-yellow-400 rounded-3xl text-left flex items-center justify-between shadow-xl"
               >
                 <div>
                   <span className="text-base font-black text-yellow-400 block">법인택시 모드</span>
@@ -678,10 +660,9 @@
                 </div>
                 <span className="text-2xl">🚕</span>
               </button>
-
               <button
                 onClick={() => handleInitialSelectType('private')}
-                className="w-full p-5 bg-slate-900 hover:bg-slate-850 active:scale-98 border-2 border-slate-700 hover:border-slate-500 rounded-3xl text-left flex items-center justify-between shadow-xl transition"
+                className="w-full p-5 bg-slate-900 border-2 border-slate-700 hover:border-slate-500 rounded-3xl text-left flex items-center justify-between shadow-xl"
               >
                 <div>
                   <span className="text-base font-black text-emerald-400 block">개인택시 모드</span>
@@ -713,7 +694,7 @@
 
           <main className={`flex-1 overflow-y-auto ${currentTab === 'hud' ? 'p-2 pb-20 flex flex-col' : 'p-3 pb-24'}`}>
             
-            {/* 1단계 탭: 🏠 오늘 & 건강 */}
+            {/* 탭 1: 🏠 오늘 & 건강 */}
             {currentTab === 'today' && (
               <div className="space-y-3.5">
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 shadow-sm space-y-3">
@@ -728,26 +709,10 @@
                       </div>
                     </div>
                     <div className="flex gap-1.5 items-center">
-                      <button
-                        onClick={() => handleQuickClock('start')}
-                        className="px-3 py-1.5 bg-blue-600 active:bg-blue-500 text-white font-bold text-xs rounded-xl shadow"
-                      >
-                        출근
-                      </button>
-                      <button
-                        onClick={() => handleQuickClock('end')}
-                        className="px-3 py-1.5 bg-orange-600 active:bg-orange-500 text-white font-bold text-xs rounded-xl shadow"
-                      >
-                        퇴근
-                      </button>
+                      <button onClick={() => handleQuickClock('start')} className="px-3 py-1.5 bg-blue-600 text-white font-bold text-xs rounded-xl shadow">출근</button>
+                      <button onClick={() => handleQuickClock('end')} className="px-3 py-1.5 bg-orange-600 text-white font-bold text-xs rounded-xl shadow">퇴근</button>
                       {(todayRecord.startTime || todayRecord.endTime) && (
-                        <button
-                          onClick={handleResetClock}
-                          title="출퇴근 시간 초기화"
-                          className="px-2 py-1.5 bg-slate-800 active:bg-slate-700 text-slate-400 hover:text-red-400 font-bold text-xs rounded-xl border border-slate-700"
-                        >
-                          초기화
-                        </button>
+                        <button onClick={handleResetClock} className="px-2 py-1.5 bg-slate-800 text-slate-400 font-bold text-xs rounded-xl border border-slate-700">초기화</button>
                       )}
                     </div>
                   </div>
@@ -756,22 +721,15 @@
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="font-bold text-slate-300">⏱️ 출근 맞춤 건강 일과표</span>
                       {isNapTimerActive ? (
-                        <button
-                          onClick={cancelPowerNapTimer}
-                          className="px-2 py-0.5 bg-red-950 text-red-300 border border-red-500/40 rounded-lg font-bold text-[10px] animate-pulse"
-                        >
+                        <button onClick={() => setIsNapTimerActive(false)} className="px-2 py-0.5 bg-red-950 text-red-300 border border-red-500/40 rounded-lg font-bold text-[10px] animate-pulse">
                           쪽잠 중 ({Math.floor(napTimerSeconds / 60)}:{String(napTimerSeconds % 60).padStart(2, '0')}) 취소
                         </button>
                       ) : (
-                        <button
-                          onClick={() => startPowerNapTimer(20)}
-                          className="px-2 py-0.5 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-200 border border-indigo-500/40 rounded-lg font-bold text-[10px]"
-                        >
+                        <button onClick={() => { setNapTimerSeconds(20 * 60); setIsNapTimerActive(true); }} className="px-2 py-0.5 bg-indigo-900/80 text-indigo-200 border border-indigo-500/40 rounded-lg font-bold text-[10px]">
                           ⚡ 20분 쪽잠 타이머
                         </button>
                       )}
                     </div>
-
                     <div className="grid grid-cols-3 gap-1.5 text-center text-[10px]">
                       <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800">
                         <span className="text-slate-400 block font-semibold">1차 식사/스트레칭</span>
@@ -789,69 +747,37 @@
                   </div>
                 </div>
 
-                {/* 원터치 내비 런처 */}
+                {/* 내비 런처 */}
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                      🧭 원터치 내비 길안내
-                    </span>
+                    <span className="text-xs font-bold text-slate-300">🧭 원터치 내비 길안내</span>
                     <span className="text-[10px] text-slate-500">목적지 앱 자동 연동</span>
                   </div>
-
                   <div className="flex gap-1.5">
                     <input
                       type="text"
                       placeholder="목적지 입력 (미입력 시 '가스충전소')"
                       value={navQuery}
                       onChange={(e) => setNavQuery(e.target.value)}
-                      className="flex-1 bg-slate-950 border border-slate-700 px-3 py-2 text-xs rounded-xl text-white focus:outline-none focus:border-yellow-500"
+                      className="flex-1 bg-slate-950 border border-slate-700 px-3 py-2 text-xs rounded-xl text-white focus:outline-none"
                     />
-                    {navQuery && (
-                      <button
-                        onClick={() => setNavQuery('')}
-                        className="px-2.5 bg-slate-800 text-slate-400 rounded-xl text-xs"
-                      >
-                        ✕
-                      </button>
-                    )}
+                    {navQuery && <button onClick={() => setNavQuery('')} className="px-2.5 bg-slate-800 text-slate-400 rounded-xl text-xs">✕</button>}
                   </div>
-
                   <div className="grid grid-cols-3 gap-2">
-                    <button
-                      onClick={() => openNavApp('tmap')}
-                      className="py-2.5 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1 active:scale-95 transition"
-                    >
-                      <span>🔴</span> 티맵
-                    </button>
-                    <button
-                      onClick={() => openNavApp('kakao')}
-                      className="py-2.5 bg-yellow-950/80 hover:bg-yellow-900 border border-yellow-500/40 text-yellow-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1 active:scale-95 transition"
-                    >
-                      <span>🟡</span> 카카오맵
-                    </button>
-                    <button
-                      onClick={() => openNavApp('naver')}
-                      className="py-2.5 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1 active:scale-95 transition"
-                    >
-                      <span>🟢</span> 네이버지도
-                    </button>
+                    <button onClick={() => openNavApp('tmap')} className="py-2.5 bg-red-950/80 border border-red-500/40 text-red-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🔴</span> 티맵</button>
+                    <button onClick={() => openNavApp('kakao')} className="py-2.5 bg-yellow-950/80 border border-yellow-500/40 text-yellow-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🟡</span> 카카오맵</button>
+                    <button onClick={() => openNavApp('naver')} className="py-2.5 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🟢</span> 네이버지도</button>
                   </div>
                 </div>
 
-                {/* 나만의 건강 체크리스트 */}
+                {/* 건강 루틴 */}
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                      🥗 오늘 실천할 건강 루틴 ({ (appData.healthRoutines || []).filter(r => r.done).length } / { (appData.healthRoutines || []).length })
-                    </span>
-                    <button
-                      onClick={() => setShowAddRoutineInput(!showAddRoutineInput)}
-                      className="text-[11px] text-yellow-400 font-bold px-2 py-0.5 rounded bg-slate-800 border border-slate-700"
-                    >
+                    <span className="text-xs font-bold text-emerald-400">🥗 오늘 실천할 건강 루틴 ({ (appData.healthRoutines || []).filter(r => r.done).length } / { (appData.healthRoutines || []).length })</span>
+                    <button onClick={() => setShowAddRoutineInput(!showAddRoutineInput)} className="text-[11px] text-yellow-400 font-bold px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
                       {showAddRoutineInput ? '닫기' : '+ 항목 추가'}
                     </button>
                   </div>
-
                   {showAddRoutineInput && (
                     <div className="flex gap-1.5 pt-1">
                       <input
@@ -861,43 +787,17 @@
                         onChange={(e) => setNewRoutineText(e.target.value)}
                         className="flex-1 bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs rounded-xl text-white focus:outline-none"
                       />
-                      <button
-                        onClick={handleAddRoutine}
-                        className="px-3 py-1.5 bg-emerald-600 text-white font-bold text-xs rounded-xl"
-                      >
-                        추가
-                      </button>
+                      <button onClick={handleAddRoutine} className="px-3 py-1.5 bg-emerald-600 text-white font-bold text-xs rounded-xl">추가</button>
                     </div>
                   )}
-
                   <div className="space-y-1.5 pt-1">
                     {(appData.healthRoutines || []).map((routine) => (
-                      <div
-                        key={routine.id}
-                        className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition ${
-                          routine.done
-                            ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 line-through'
-                            : 'bg-slate-950 border-slate-800 text-slate-200'
-                        }`}
-                      >
-                        <div
-                          onClick={() => toggleRoutineDone(routine.id)}
-                          className="flex items-center gap-2 flex-1 cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={routine.done}
-                            onChange={() => toggleRoutineDone(routine.id)}
-                            className="w-4 h-4 rounded text-emerald-500 focus:ring-0 cursor-pointer"
-                          />
-                          <span className="font-medium select-none">{routine.text}</span>
+                      <div key={routine.id} className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${routine.done ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 line-through' : 'bg-slate-950 border-slate-800 text-slate-200'}`}>
+                        <div onClick={() => toggleRoutineDone(routine.id)} className="flex items-center gap-2 flex-1 cursor-pointer">
+                          <input type="checkbox" checked={routine.done} onChange={() => toggleRoutineDone(routine.id)} className="w-4 h-4 rounded text-emerald-500 cursor-pointer" />
+                          <span className="font-medium">{routine.text}</span>
                         </div>
-                        <button
-                          onClick={() => handleDeleteRoutine(routine.id)}
-                          className="text-slate-500 hover:text-red-400 px-1 font-bold text-xs"
-                        >
-                          ✕
-                        </button>
+                        <button onClick={() => handleDeleteRoutine(routine.id)} className="text-slate-500 hover:text-red-400 px-1 font-bold text-xs">✕</button>
                       </div>
                     ))}
                   </div>
@@ -905,53 +805,35 @@
               </div>
             )}
 
-            {/* 2단계 탭: 📅 운행일지 */}
+            {/* 탭 2: 📅 운행일지 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3">
-                <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
-                  <button
-                    onClick={() => {
-                      const [y, m] = currentYearMonth.split('-').map(Number);
-                      const prevDate = new Date(y, m - 2, 1);
-                      setCurrentYearMonth(`${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`);
-                    }}
-                    className="w-8 h-8 flex items-center justify-center bg-slate-800 active:bg-slate-700 rounded-xl text-slate-300 font-bold"
-                  >
-                    ◀
-                  </button>
+                <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between">
+                  <button onClick={() => {
+                    const [y, m] = currentYearMonth.split('-').map(Number);
+                    const prevDate = new Date(y, m - 2, 1);
+                    setCurrentYearMonth(`${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`);
+                  }} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">◀</button>
                   <div className="text-center">
                     <span className="text-base font-black text-yellow-400">{currentYearMonth}</span>
-                    <div className="text-[11px] text-slate-400 font-medium">
-                      {currentMonthStats.workDays}일 운행 / 총 {formatMinutesToHours(currentMonthStats.totalWorkMinutes)}
-                    </div>
+                    <div className="text-[11px] text-slate-400 font-medium">{currentMonthStats.workDays}일 운행 / 총 {formatMinutesToHours(currentMonthStats.totalWorkMinutes)}</div>
                   </div>
-                  <button
-                    onClick={() => {
-                      const [y, m] = currentYearMonth.split('-').map(Number);
-                      const nextDate = new Date(y, m, 1);
-                      setCurrentYearMonth(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`);
-                    }}
-                    className="w-8 h-8 flex items-center justify-center bg-slate-800 active:bg-slate-700 rounded-xl text-slate-300 font-bold"
-                  >
-                    ▶
-                  </button>
+                  <button onClick={() => {
+                    const [y, m] = currentYearMonth.split('-').map(Number);
+                    const nextDate = new Date(y, m, 1);
+                    setCurrentYearMonth(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`);
+                  }} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">▶</button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
                     <span className="text-[11px] text-slate-400 block font-semibold">이번 달 총 매출</span>
-                    <span className="text-base font-black text-yellow-400 block mt-0.5">
-                      {formatMoney(currentMonthStats.totalRevenue)}
-                    </span>
+                    <span className="text-base font-black text-yellow-400 block mt-0.5">{formatMoney(currentMonthStats.totalRevenue)}</span>
                   </div>
                   <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
-                    <span className="text-[11px] text-green-400 block font-semibold">
-                      {activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}
-                    </span>
+                    <span className="text-[11px] text-green-400 block font-semibold">{activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}</span>
                     <span className="text-base font-black text-green-400 block mt-0.5">
-                      {activeType === 'corporate'
-                        ? formatMoney(currentMonthStats.netSalaryFromCompany)
-                        : formatMoney(currentMonthStats.netIncome)}
+                      {activeType === 'corporate' ? formatMoney(currentMonthStats.netSalaryFromCompany) : formatMoney(currentMonthStats.netIncome)}
                     </span>
                   </div>
                 </div>
@@ -959,14 +841,11 @@
                 <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
                   <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
                     {DAYS_NAME.map((dName, idx) => (
-                      <span key={dName} className={`${
-                        idx === 0 ? 'text-red-400' : idx === 6 ? 'text-blue-400' : idx === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'
-                      }`}>
+                      <span key={dName} className={`${idx === 0 ? 'text-red-400' : idx === 6 ? 'text-blue-400' : idx === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>
                         {dName}{idx === (appData.defaultOffDay || 1) ? '·휴' : ''}
                       </span>
                     ))}
                   </div>
-
                   <div className="grid grid-cols-7 gap-1">
                     {calendarCells.map((dateStr, idx) => {
                       if (!dateStr) return <div key={`empty-${idx}`} className="h-12 rounded-lg bg-transparent"></div>;
@@ -980,39 +859,20 @@
                         <button
                           key={dateStr}
                           onClick={() => openModalForDate(dateStr)}
-                          className={`h-12 p-1 rounded-xl flex flex-col justify-between items-start text-left border transition active:scale-95 ${
-                            isSelected
-                              ? 'border-yellow-400 bg-yellow-500/20'
-                              : rec?.isHoliday
-                              ? 'border-emerald-800/60 bg-emerald-950/30'
-                              : rec
-                              ? 'border-slate-700 bg-slate-950/80 hover:border-slate-600'
-                              : isDefaultOff
-                              ? 'border-slate-800/80 bg-slate-900/40'
-                              : 'border-slate-800/60 bg-slate-950/30'
+                          className={`h-12 p-1 rounded-xl flex flex-col justify-between items-start text-left border transition ${
+                            isSelected ? 'border-yellow-400 bg-yellow-500/20' : rec?.isHoliday ? 'border-emerald-800/60 bg-emerald-950/30' : rec ? 'border-slate-700 bg-slate-950/80' : isDefaultOff ? 'border-slate-800/80 bg-slate-900/40' : 'border-slate-800/60 bg-slate-950/30'
                           }`}
                         >
                           <div className="flex justify-between w-full items-center">
-                            <span className={`text-[10px] font-bold ${
-                              dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : dayOfWeek === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'
-                            }`}>
-                              {dayNum}
-                            </span>
-                            {isDefaultOff && !rec && (
-                              <span className="text-[7px] text-emerald-500/80 font-bold">휴무</span>
-                            )}
+                            <span className={`text-[10px] font-bold ${dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : dayOfWeek === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>{dayNum}</span>
+                            {isDefaultOff && !rec && <span className="text-[7px] text-emerald-500/80 font-bold">휴무</span>}
                           </div>
-
                           {rec && (
                             rec.isHoliday ? (
-                              <span className="text-[8px] bg-emerald-950 text-emerald-300 font-bold px-1 rounded leading-tight w-full text-center">
-                                휴무
-                              </span>
+                              <span className="text-[8px] bg-emerald-950 text-emerald-300 font-bold px-1 rounded w-full text-center">휴무</span>
                             ) : (
-                              <span className="text-[8px] text-yellow-400 font-bold truncate w-full text-center leading-tight">
-                                {activeType === 'corporate'
-                                  ? formatShortMoney(rec.revenue)
-                                  : formatShortMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
+                              <span className="text-[8px] text-yellow-400 font-bold truncate w-full text-center">
+                                {activeType === 'corporate' ? formatShortMoney(rec.revenue) : formatShortMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
                               </span>
                             )
                           )}
@@ -1025,56 +885,22 @@
                 <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800 space-y-2">
                   <div className="flex justify-between items-center pb-1">
                     <span className="text-xs font-bold text-slate-300">운행 일지 ({sortedMonthEntries.length}건)</span>
-                    <button
-                      onClick={() => openModalForDate(todayKey)}
-                      className="px-2.5 py-1 bg-yellow-500 text-black font-bold text-[11px] rounded-lg shadow active:bg-yellow-400"
-                    >
-                      + 오늘 기록
-                    </button>
+                    <button onClick={() => openModalForDate(todayKey)} className="px-2.5 py-1 bg-yellow-500 text-black font-bold text-[11px] rounded-lg shadow">+ 오늘 기록</button>
                   </div>
-
                   {sortedMonthEntries.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-slate-500">
-                      등록된 운행 기록이 없습니다.<br/>위 달력에서 날짜를 눌러 입력하세요.
-                    </div>
+                    <div className="text-center py-6 text-xs text-slate-500">등록된 운행 기록이 없습니다.</div>
                   ) : (
                     <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                       {sortedMonthEntries.map(([date, rec]) => (
-                        <div
-                          key={date}
-                          className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between text-xs"
-                        >
-                          <div className="space-y-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-300">{date}</span>
-                              {rec?.isHoliday ? (
-                                <span className="bg-emerald-950 text-emerald-300 text-[9px] px-1 rounded font-bold">휴무</span>
-                              ) : (
-                                <span className="text-yellow-400 font-black">
-                                  {activeType === 'corporate'
-                                    ? formatMoney(rec?.revenue)
-                                    : formatMoney(Number(rec?.cardRev || 0) + Number(rec?.cashRev || 0))}
-                                </span>
-                              )}
-                              {rec?.workMinutes > 0 && (
-                                <span className="text-[10px] text-slate-400 font-medium">({formatMinutesToHours(rec.workMinutes)})</span>
-                              )}
-                            </div>
-                            {rec?.memo && <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{rec.memo}</div>}
+                        <div key={date} className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-300">{date}</span>
+                            {rec?.isHoliday ? <span className="bg-emerald-950 text-emerald-300 text-[9px] px-1 rounded font-bold">휴무</span> : <span className="text-yellow-400 font-black">{activeType === 'corporate' ? formatMoney(rec?.revenue) : formatMoney(Number(rec?.cardRev || 0) + Number(rec?.cashRev || 0))}</span>}
+                            {rec?.workMinutes > 0 && <span className="text-[10px] text-slate-400 font-medium">({formatMinutesToHours(rec.workMinutes)})</span>}
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => openModalForDate(date)}
-                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-yellow-400 font-bold rounded-lg text-[10px]"
-                            >
-                              수정
-                            </button>
-                            <button
-                              onClick={() => handleDeleteDailyRecord(date)}
-                              className="text-slate-500 hover:text-red-400 text-xs px-1"
-                            >
-                              ✕
-                            </button>
+                            <button onClick={() => openModalForDate(date)} className="px-2 py-1 bg-slate-800 text-yellow-400 font-bold rounded-lg text-[10px]">수정</button>
+                            <button onClick={() => handleDeleteDailyRecord(date)} className="text-slate-500 hover:text-red-400 text-xs px-1">✕</button>
                           </div>
                         </div>
                       ))}
@@ -1084,62 +910,103 @@
               </div>
             )}
 
-            {/* 3단계 탭: 🏎️ 안전 HUD */}
+            {/* ======================================================== */}
+            {/* 탭 3: 🏎️ 스마트 가디언 5:5 HUD (교대 펌핑 + 네온 점멸 + 동물 사운드) */}
+            {/* ======================================================== */}
             {currentTab === 'hud' && (
               <div
                 onClick={handleCycleMirrorMode}
-                className="flex-1 flex flex-col justify-between select-none rounded-3xl overflow-hidden bg-slate-950 border border-slate-800/80 cursor-pointer relative"
+                className={`flex-1 flex flex-col justify-between select-none rounded-3xl overflow-hidden border transition-all duration-300 cursor-pointer relative ${
+                  isNearCamera && isOverSpeed
+                    ? 'animate-strobe-alert border-red-500'
+                    : isNearCamera
+                    ? 'bg-slate-950 border-yellow-500/80'
+                    : 'bg-slate-950 border-slate-800/80'
+                }`}
               >
-                <div className="absolute top-3 left-0 right-0 flex justify-center items-center pointer-events-none z-10">
-                  <span className="px-2.5 py-0.5 rounded-full bg-slate-900/80 text-[10px] text-slate-400 font-bold border border-slate-700/50">
-                    {getMirrorModeLabel()} (화면 터치 시 모드 전환)
+                {/* 상단 컨트롤 배지 (반사모드 안내 & 시뮬레이션 테스트 버튼) */}
+                <div className="absolute top-2 left-0 right-0 px-3 flex justify-between items-center z-20">
+                  <span className="px-2.5 py-0.5 rounded-full bg-slate-900/90 text-[10px] text-slate-400 font-bold border border-slate-700/50">
+                    {getMirrorModeLabel()} (화면 탭 시 전환)
                   </span>
+
+                  {/* 방 안에서도 테스트 가능한 시뮬레이션 버튼 */}
+                  <button
+                    onClick={toggleSimulation}
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-black border transition active:scale-95 ${
+                      isSimulationActive
+                        ? 'bg-red-600 text-white border-white animate-pulse'
+                        : 'bg-slate-900/90 text-yellow-400 border-yellow-500/40'
+                    }`}
+                  >
+                    {isSimulationActive ? '⚡ 단속 테스트 중지' : '⚡ 단속 테스트 실행'}
+                  </button>
                 </div>
 
-                <div className="flex-1 flex items-center justify-center p-2 border-b border-slate-800/60 overflow-hidden">
+                {/* 상단 1/2: 속도제한 표지판 & 단속 거리 (교대 펌핑 애니메이션 탑재) */}
+                <div className="flex-1 flex flex-col items-center justify-center p-2 border-b border-slate-800/60 overflow-hidden">
                   <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
-                    <div
-                      onClick={handleCycleSpeedLimit}
-                      title="터치하여 제한속도 변경"
-                      className="flex items-center justify-center w-40 h-40 rounded-full border-[12px] border-red-600 bg-white text-black shadow-2xl active:scale-95 transition-transform"
-                    >
-                      <div className="flex flex-col items-center justify-center leading-none">
-                        <span className="text-6xl font-black tracking-tight">{appData.hudSpeedLimit || 50}</span>
-                        <span className="text-[10px] font-black text-red-600 tracking-wider mt-1">LIMIT</span>
+                    <div className="flex flex-col items-center justify-center">
+                      
+                      {/* 표지판 원형 (카메라 감지 시 animate-grow-pulse로 거대화) */}
+                      <div className={`flex items-center justify-center w-40 h-40 rounded-full border-[12px] transition-all duration-300 ${
+                        isNearCamera
+                          ? 'border-red-600 bg-white text-black animate-grow-pulse'
+                          : 'border-red-600 bg-white text-black shadow-2xl'
+                      }`}>
+                        <div className="flex flex-col items-center justify-center leading-none">
+                          <span className="text-6xl font-black tracking-tight">{effectiveSpeedLimit}</span>
+                          <span className="text-[10px] font-black text-red-600 tracking-wider mt-0.5">LIMIT</span>
+                        </div>
                       </div>
+
+                      {/* 단속 카메라 접근 정보 뱃지 */}
+                      {nearbyCamera && (
+                        <div className="mt-2 px-3 py-1 rounded-full bg-red-950 border border-red-500 text-red-300 font-black text-xs flex items-center gap-1.5 animate-bounce">
+                          <span>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'}</span>
+                          <span>전방 {nearbyCamera.dist}m</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                <div className="flex-1 flex items-center justify-center p-2 overflow-hidden">
+                {/* 하단 1/2: 초대형 디지털 속도계 (교대 펌핑 애니메이션 탑재) */}
+                <div className="flex-1 flex flex-col items-center justify-center p-2 overflow-hidden">
                   <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
-                    <div className="flex items-baseline justify-center">
-                      <span className="text-9xl font-black tracking-tighter text-green-400 font-mono">
-                        {gpsSpeed}
-                      </span>
-                      <span className="text-3xl font-bold ml-2 text-slate-400">km/h</span>
+                    <div className={`flex flex-col items-center justify-center transition-all duration-300 ${
+                      isNearCamera ? 'animate-shrink-pulse' : ''
+                    }`}>
+                      <div className="flex items-baseline justify-center">
+                        <span className={`text-9xl font-black tracking-tighter font-mono transition-colors ${
+                          isOverSpeed ? 'text-red-500' : 'text-green-400'
+                        }`}>
+                          {gpsSpeed}
+                        </span>
+                        <span className="text-3xl font-bold ml-2 text-slate-400">km/h</span>
+                      </div>
+
+                      {isOverSpeed && (
+                        <span className="text-xs font-black text-red-400 mt-1 bg-red-950/80 px-2.5 py-0.5 rounded-full border border-red-500/60">
+                          ⚠️ 감속 필요 (+{gpsSpeed - effectiveSpeedLimit} km/h 초과)
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* 4단계 탭: ⚙️ 정산 & 설정 */}
+            {/* 탭 4: ⚙️ 정산 & 설정 */}
             {currentTab === 'settings' && (
               <div className="space-y-3.5">
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center pb-1 border-b border-slate-800">
                     <span className="text-xs font-bold text-yellow-400">{currentYearMonth} 급여 정산서</span>
                     {activeType === 'private' && (
-                      <button
-                        onClick={() => setShowTaxModal(true)}
-                        className="px-2 py-0.5 bg-yellow-500 text-black font-bold rounded-md text-[10px]"
-                      >
-                        세무서 양식
-                      </button>
+                      <button onClick={() => setShowTaxModal(true)} className="px-2 py-0.5 bg-yellow-500 text-black font-bold rounded-md text-[10px]">세무서 양식</button>
                     )}
                   </div>
-
                   {activeType === 'corporate' ? (
                     <div className="space-y-2.5">
                       <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1 text-xs">
@@ -1148,11 +1015,10 @@
                           <span>{formatMoney(currentMonthStats.grossSalary)}</span>
                         </div>
                         <div className="flex justify-between text-slate-400 text-[11px]">
-                          <span>고정수당 합계: {formatMoney(currentMonthStats.totalFixedAllowances)}</span>
+                          <span>고정수당: {formatMoney(currentMonthStats.totalFixedAllowances)}</span>
                           <span>성과급(70%): +{formatMoney(currentMonthStats.totalIncentive)}</span>
                         </div>
                       </div>
-
                       <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1 text-xs">
                         <div className="flex justify-between text-orange-400 font-bold">
                           <span>총 공제액</span>
@@ -1163,7 +1029,6 @@
                           <span>고정회비: -{formatMoney(currentMonthStats.totalFixedExpenses)}</span>
                         </div>
                       </div>
-
                       <div className="bg-gradient-to-r from-slate-950 to-indigo-950 p-3 rounded-xl border border-indigo-500/40 flex justify-between items-center">
                         <span className="text-xs font-bold text-indigo-300">통장 예상 입금액</span>
                         <span className="text-xl font-black text-green-400">{formatMoney(currentMonthStats.netSalaryFromCompany)}</span>
@@ -1171,18 +1036,9 @@
                     </div>
                   ) : (
                     <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 text-xs">
-                      <div className="flex justify-between text-slate-300">
-                        <span>총 수입 (매출):</span>
-                        <span className="font-bold text-green-400">{formatMoney(currentMonthStats.totalRevenue)}</span>
-                      </div>
-                      <div className="flex justify-between text-slate-300">
-                        <span>총 지출 (경비):</span>
-                        <span className="font-bold text-red-400">{formatMoney(currentMonthStats.totalExpense)}</span>
-                      </div>
-                      <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
-                        <span className="font-bold text-yellow-400">과세표준 소득:</span>
-                        <span className="text-lg font-black text-yellow-300">{formatMoney(currentMonthStats.netIncome)}</span>
-                      </div>
+                      <div className="flex justify-between text-slate-300"><span>총 수입:</span><span className="font-bold text-green-400">{formatMoney(currentMonthStats.totalRevenue)}</span></div>
+                      <div className="flex justify-between text-slate-300"><span>총 지출:</span><span className="font-bold text-red-400">{formatMoney(currentMonthStats.totalExpense)}</span></div>
+                      <div className="pt-2 border-t border-slate-800 flex justify-between items-center"><span className="font-bold text-yellow-400">과세표준 소득:</span><span className="text-lg font-black text-yellow-300">{formatMoney(currentMonthStats.netIncome)}</span></div>
                     </div>
                   )}
                 </div>
@@ -1192,100 +1048,23 @@
                     <span className="text-xs font-bold text-slate-300">운행 모드 및 차량 설정</span>
                     <span className="text-[10px] text-green-400 font-semibold">● 자동 저장</span>
                   </div>
-
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-slate-400">현재 운행 모드</span>
                     <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                      <button
-                        onClick={() => setVehicleType('corporate')}
-                        className={`px-3 py-1 text-xs font-bold rounded-md transition ${
-                          activeType === 'corporate' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
-                        }`}
-                      >
-                        법인
-                      </button>
-                      <button
-                        onClick={() => setVehicleType('private')}
-                        className={`px-3 py-1 text-xs font-bold rounded-md transition ${
-                          activeType === 'private' ? 'bg-yellow-500 text-black shadow' : 'text-slate-400'
-                        }`}
-                      >
-                        개인
-                      </button>
+                      <button onClick={() => setVehicleType('corporate')} className={`px-3 py-1 text-xs font-bold rounded-md ${activeType === 'corporate' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>법인</button>
+                      <button onClick={() => setVehicleType('private')} className={`px-3 py-1 text-xs font-bold rounded-md ${activeType === 'private' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>개인</button>
                     </div>
                   </div>
-
                   <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
                     <span className="text-slate-400">차량 번호</span>
-                    <input
-                      type="text"
-                      placeholder="충남31바 1234"
-                      value={appData[activeType]?.carNumber || ''}
-                      onChange={(e) => handleCarNumberChange(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-36 text-white"
-                    />
+                    <input type="text" placeholder="충남31바 1234" value={appData[activeType]?.carNumber || ''} onChange={(e) => handleCarNumberChange(e.target.value)} className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-36 text-white" />
                   </div>
-
                   <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
                     <span className="text-slate-400">기본 정기 휴무 요일</span>
-                    <select
-                      value={appData.defaultOffDay !== undefined ? appData.defaultOffDay : 1}
-                      onChange={(e) => handleDefaultOffDayChange(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-yellow-400 font-bold rounded-xl focus:outline-none"
-                    >
-                      {DAYS_NAME.map((name, idx) => (
-                        <option key={name} value={idx}>매주 {name}요일</option>
-                      ))}
+                    <select value={appData.defaultOffDay !== undefined ? appData.defaultOffDay : 1} onChange={(e) => handleDefaultOffDayChange(e.target.value)} className="bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-yellow-400 font-bold rounded-xl">
+                      {DAYS_NAME.map((name, idx) => (<option key={name} value={idx}>매주 {name}요일</option>))}
                     </select>
                   </div>
-
-                  {activeType === 'corporate' && (
-                    <>
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
-                        <span className="text-slate-400">1일 기준 사납금</span>
-                        <div className="w-32">
-                          <SmartMoneyInput
-                            value={appData.corporate?.dailyDeposit}
-                            onChange={(val) => handleCorporateConfigChange('dailyDeposit', val)}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
-                        <span className="text-slate-400">고정 수당 항목 ({appData.corporate?.fixedAllowanceItems?.length || 0}개)</span>
-                        <button
-                          onClick={() => setShowFixedAllowanceModal(true)}
-                          className="px-2.5 py-1 bg-slate-800 text-blue-300 font-bold rounded-xl border border-blue-500/30 text-xs"
-                        >
-                          {formatMoney(totalFixedAllowances)} ⚙️
-                        </button>
-                      </div>
-
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
-                        <span className="text-slate-400">회사 고정비 공제 ({appData.corporate?.fixedExpenseItems?.length || 0}개)</span>
-                        <button
-                          onClick={() => setShowFixedExpenseModal(true)}
-                          className="px-2.5 py-1 bg-slate-800 text-orange-300 font-bold rounded-xl border border-orange-500/30 text-xs"
-                        >
-                          {formatMoney(totalFixedExpenses)} ⚙️
-                        </button>
-                      </div>
-
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
-                        <span className="text-slate-400">세금 및 4대보험 공제율</span>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={appData.corporate?.deductionRate !== undefined ? appData.corporate.deductionRate : 9.0}
-                            onChange={(e) => handleCorporateConfigChange('deductionRate', e.target.value)}
-                            className="bg-slate-950 border border-slate-700 px-2 py-1 text-xs rounded-xl text-right w-16 text-white font-bold"
-                          />
-                          <span className="text-slate-400">%</span>
-                        </div>
-                      </div>
-                    </>
-                  )}
                 </div>
 
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
@@ -1294,45 +1073,28 @@
                     <span className="text-[10px] text-slate-500">{APP_VERSION}</span>
                   </div>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `K-TAXI_BACKUP_${todayKey}.json`;
-                        a.click();
-                      }}
-                      className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700"
-                    >
-                      백업 파일 저장 (.json)
-                    </button>
-                    <label className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 text-center cursor-pointer">
+                    <button onClick={() => {
+                      const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `K-TAXI_BACKUP_${todayKey}.json`;
+                      a.click();
+                    }} className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700">백업 파일 저장 (.json)</button>
+                    <label className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 text-center cursor-pointer">
                       백업 파일 복원
-                      <input
-                        type="file"
-                        accept=".json"
-                        onChange={(e) => {
-                          const file = e.target.files[0];
-                          if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = (evt) => {
-                            try {
-                              const parsed = JSON.parse(evt.target.result);
-                              if (parsed.corporate && parsed.private) {
-                                setAppData(parsed);
-                                alert('데이터 복원이 완료되었습니다.');
-                              } else {
-                                alert('올바른 백업 파일 형식이 아닙니다.');
-                              }
-                            } catch (err) {
-                              alert('파일을 읽는 중 오류가 발생했습니다.');
-                            }
-                          };
-                          reader.readAsText(file);
-                        }}
-                        className="hidden"
-                      />
+                      <input type="file" accept=".json" onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (evt) => {
+                          try {
+                            const parsed = JSON.parse(evt.target.result);
+                            if (parsed.corporate && parsed.private) { setAppData(parsed); alert('데이터 복원이 완료되었습니다.'); }
+                          } catch (err) { alert('파일 읽기 오류'); }
+                        };
+                        reader.readAsText(file);
+                      }} className="hidden" />
                     </label>
                   </div>
                 </div>
@@ -1341,36 +1103,21 @@
           </main>
 
           <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
-            <button
-              onClick={() => setCurrentTab('today')}
-              className={`flex flex-col items-center py-2.5 ${currentTab === 'today' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}
-            >
-              <span className="text-lg">🏠</span>
-              <span className="text-[10px] mt-0.5">오늘&건강</span>
+            <button onClick={() => setCurrentTab('today')} className={`flex flex-col items-center py-2.5 ${currentTab === 'today' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+              <span className="text-lg">🏠</span><span className="text-[10px] mt-0.5">오늘&건강</span>
             </button>
-            <button
-              onClick={() => setCurrentTab('calendar')}
-              className={`flex flex-col items-center py-2.5 ${currentTab === 'calendar' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}
-            >
-              <span className="text-lg">📅</span>
-              <span className="text-[10px] mt-0.5">운행일지</span>
+            <button onClick={() => setCurrentTab('calendar')} className={`flex flex-col items-center py-2.5 ${currentTab === 'calendar' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+              <span className="text-lg">📅</span><span className="text-[10px] mt-0.5">운행일지</span>
             </button>
-            <button
-              onClick={() => setCurrentTab('hud')}
-              className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}
-            >
-              <span className="text-lg">🏎️</span>
-              <span className="text-[10px] mt-0.5">안전HUD</span>
+            <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+              <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">안전HUD</span>
             </button>
-            <button
-              onClick={() => setCurrentTab('settings')}
-              className={`flex flex-col items-center py-2.5 ${currentTab === 'settings' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}
-            >
-              <span className="text-lg">⚙️</span>
-              <span className="text-[10px] mt-0.5">정산/설정</span>
+            <button onClick={() => setCurrentTab('settings')} className={`flex flex-col items-center py-2.5 ${currentTab === 'settings' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+              <span className="text-lg">⚙️</span><span className="text-[10px] mt-0.5">정산/설정</span>
             </button>
           </nav>
 
+          {/* 일별 기록 모달 */}
           {showDailyModal && (
             <DailyRecordModal
               activeType={activeType}
@@ -1385,30 +1132,21 @@
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h3 className="text-xs font-bold text-blue-400">고정 수당 목록 관리</h3>
+                  <h3 className="text-xs font-bold text-blue-400">고정 수당 관리</h3>
                   <button onClick={() => setShowFixedAllowanceModal(false)} className="text-slate-400 text-base font-bold">✕</button>
                 </div>
                 <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
                   {(appData.corporate?.fixedAllowanceItems || []).map((item) => (
                     <div key={item.id} className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={item.name}
-                        onChange={(e) => {
-                          const updated = (appData.corporate?.fixedAllowanceItems || []).map(it => it.id === item.id ? { ...it, name: e.target.value } : it);
-                          setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedAllowanceItems: updated } }));
-                        }}
-                        className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold"
-                      />
+                      <input type="text" value={item.name} onChange={(e) => {
+                        const updated = (appData.corporate?.fixedAllowanceItems || []).map(it => it.id === item.id ? { ...it, name: e.target.value } : it);
+                        setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedAllowanceItems: updated } }));
+                      }} className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold" />
                       <div className="flex-1">
-                        <SmartMoneyInput
-                          value={item.amount}
-                          onChange={(val) => {
-                            const updated = (appData.corporate?.fixedAllowanceItems || []).map(it => it.id === item.id ? { ...it, amount: Number(val) } : it);
-                            setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedAllowanceItems: updated } }));
-                          }}
-                          colorClass="text-blue-300"
-                        />
+                        <SmartMoneyInput value={item.amount} onChange={(val) => {
+                          const updated = (appData.corporate?.fixedAllowanceItems || []).map(it => it.id === item.id ? { ...it, amount: Number(val) } : it);
+                          setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedAllowanceItems: updated } }));
+                        }} colorClass="text-blue-300" />
                       </div>
                     </div>
                   ))}
@@ -1428,24 +1166,15 @@
                 <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
                   {(appData.corporate?.fixedExpenseItems || []).map((item) => (
                     <div key={item.id} className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={item.name}
-                        onChange={(e) => {
-                          const updated = (appData.corporate?.fixedExpenseItems || []).map(it => it.id === item.id ? { ...it, name: e.target.value } : it);
-                          setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedExpenseItems: updated } }));
-                        }}
-                        className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold"
-                      />
+                      <input type="text" value={item.name} onChange={(e) => {
+                        const updated = (appData.corporate?.fixedExpenseItems || []).map(it => it.id === item.id ? { ...it, name: e.target.value } : it);
+                        setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedExpenseItems: updated } }));
+                      }} className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold" />
                       <div className="flex-1">
-                        <SmartMoneyInput
-                          value={item.amount}
-                          onChange={(val) => {
-                            const updated = (appData.corporate?.fixedExpenseItems || []).map(it => it.id === item.id ? { ...it, amount: Number(val) } : it);
-                            setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedExpenseItems: updated } }));
-                          }}
-                          colorClass="text-orange-400"
-                        />
+                        <SmartMoneyInput value={item.amount} onChange={(val) => {
+                          const updated = (appData.corporate?.fixedExpenseItems || []).map(it => it.id === item.id ? { ...it, amount: Number(val) } : it);
+                          setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedExpenseItems: updated } }));
+                        }} colorClass="text-orange-400" />
                       </div>
                     </div>
                   ))}
@@ -1462,20 +1191,11 @@
                   <h3 className="text-xs font-bold text-yellow-400">세무서 제출 양식</h3>
                   <button onClick={() => setShowTaxModal(false)} className="text-slate-400 text-base font-bold">✕</button>
                 </div>
-                <textarea
-                  readOnly
-                  value={`[세무서 제출용 간편 소득 요약서]\n귀속기간: ${currentYearMonth}\n차량번호: ${appData.private?.carNumber || '미등록'}\n매출합계: ${formatMoney(currentMonthStats.totalRevenue)}\n경비합계: ${formatMoney(currentMonthStats.totalExpense)}\n과세소득: ${formatMoney(currentMonthStats.netIncome)}`}
-                  className="w-full h-44 bg-slate-950 text-slate-200 text-xs font-mono p-2.5 rounded-xl border border-slate-800 resize-none focus:outline-none"
-                />
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(`[세무서 제출용 간편 소득 요약서]\n귀속기간: ${currentYearMonth}\n차량번호: ${appData.private?.carNumber || '미등록'}\n매출합계: ${formatMoney(currentMonthStats.totalRevenue)}\n경비합계: ${formatMoney(currentMonthStats.totalExpense)}\n과세소득: ${formatMoney(currentMonthStats.netIncome)}`);
-                    alert('복사되었습니다.');
-                  }}
-                  className="w-full py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs"
-                >
-                  내용 전체 복사
-                </button>
+                <textarea readOnly value={`[세무서 제출용 소득 요약서]\n귀속기간: ${currentYearMonth}\n차량번호: ${appData.private?.carNumber || '미등록'}\n매출합계: ${formatMoney(currentMonthStats.totalRevenue)}\n경비합계: ${formatMoney(currentMonthStats.totalExpense)}\n과세소득: ${formatMoney(currentMonthStats.netIncome)}`} className="w-full h-44 bg-slate-950 text-slate-200 text-xs font-mono p-2.5 rounded-xl border border-slate-800 resize-none" />
+                <button onClick={() => {
+                  navigator.clipboard.writeText(`[세무서 제출용 소득 요약서]\n귀속기간: ${currentYearMonth}\n차량번호: ${appData.private?.carNumber || '미등록'}\n매출합계: ${formatMoney(currentMonthStats.totalRevenue)}\n경비합계: ${formatMoney(currentMonthStats.totalExpense)}\n과세소득: ${formatMoney(currentMonthStats.netIncome)}`);
+                  alert('복사되었습니다.');
+                }} className="w-full py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs">내용 전체 복사</button>
               </div>
             </div>
           )}
@@ -1488,11 +1208,9 @@
       const [memo, setMemo] = useState(existingData?.memo || '');
       const [startTime, setStartTime] = useState(existingData?.startTime || '');
       const [endTime, setEndTime] = useState(existingData?.endTime || '');
-
       const [revenue, setRevenue] = useState(existingData?.revenue || 0);
       const [gas, setGas] = useState(existingData?.gas || 0);
       const [driverExpense, setDriverExpense] = useState(existingData?.driverExpense || 0);
-
       const [cardRev, setCardRev] = useState(existingData?.cardRev || 0);
       const [cashRev, setCashRev] = useState(existingData?.cashRev || 0);
       const [privGas, setPrivGas] = useState(existingData?.gas || 0);
@@ -1505,22 +1223,9 @@
       const handleSave = () => {
         const base = { isHoliday, memo, startTime, endTime, workMinutes: calculatedMins };
         if (activeType === 'corporate') {
-          onSave({
-            ...base,
-            revenue: Number(revenue) || 0,
-            gas: Number(gas) || 0,
-            driverExpense: Number(driverExpense) || 0
-          });
+          onSave({ ...base, revenue: Number(revenue) || 0, gas: Number(gas) || 0, driverExpense: Number(driverExpense) || 0 });
         } else {
-          onSave({
-            ...base,
-            cardRev: Number(cardRev) || 0,
-            cashRev: Number(cashRev) || 0,
-            gas: Number(privGas) || 0,
-            toll: Number(toll) || 0,
-            maint: Number(maint) || 0,
-            other: Number(other) || 0
-          });
+          onSave({ ...base, cardRev: Number(cardRev) || 0, cashRev: Number(cashRev) || 0, gas: Number(privGas) || 0, toll: Number(toll) || 0, maint: Number(maint) || 0, other: Number(other) || 0 });
         }
       };
 
@@ -1531,108 +1236,55 @@
               <h3 className="text-xs font-bold text-yellow-400">{dateKey} 운행 기록</h3>
               <button onClick={onClose} className="text-slate-400 font-bold text-base">✕</button>
             </div>
-
             <label className="flex items-center gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isHoliday}
-                onChange={(e) => setIsHoliday(e.target.checked)}
-                className="w-4 h-4 rounded text-yellow-500 focus:ring-0"
-              />
+              <input type="checkbox" checked={isHoliday} onChange={(e) => setIsHoliday(e.target.checked)} className="w-4 h-4 rounded text-yellow-500" />
               <span className="text-xs font-bold text-slate-300">이 날은 휴무했습니다 (미운행)</span>
             </label>
-
             {!isHoliday && (
               <div className="space-y-2.5">
                 <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
                   <div className="flex justify-between items-center">
                     <span className="text-[11px] font-bold text-slate-300">근무 시간 (출·퇴근)</span>
-                    {calculatedMins > 0 && (
-                      <span className="text-[11px] font-bold text-blue-400">{formatMinutesToHours(calculatedMins)}</span>
-                    )}
+                    {calculatedMins > 0 && <span className="text-[11px] font-bold text-blue-400">{formatMinutesToHours(calculatedMins)}</span>}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-[10px] text-slate-400 block mb-0.5">출근 시간</label>
-                      <input
-                        type="time"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs text-white text-center font-bold focus:outline-none"
-                      />
+                      <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs text-white text-center font-bold" />
                     </div>
                     <div>
                       <label className="text-[10px] text-slate-400 block mb-0.5">퇴근 시간</label>
-                      <input
-                        type="time"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs text-white text-center font-bold focus:outline-none"
-                      />
+                      <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs text-white text-center font-bold" />
                     </div>
                   </div>
                 </div>
-
                 {activeType === 'corporate' ? (
                   <>
-                    <div>
-                      <label className="text-[11px] text-slate-400 block mb-1">당일 운행 총매출액</label>
-                      <SmartMoneyInput value={revenue} onChange={setRevenue} colorClass="text-yellow-400" />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-blue-400 block mb-1">가스 충전비 (회사부담 참고)</label>
-                      <SmartMoneyInput value={gas} onChange={setGas} colorClass="text-blue-300" />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-orange-400 block mb-1">기타 기사경비 (식대/세차 등)</label>
-                      <SmartMoneyInput value={driverExpense} onChange={setDriverExpense} colorClass="text-orange-300" />
-                    </div>
+                    <div><label className="text-[11px] text-slate-400 block mb-1">당일 총매출</label><SmartMoneyInput value={revenue} onChange={setRevenue} colorClass="text-yellow-400" /></div>
+                    <div><label className="text-[11px] text-blue-400 block mb-1">가스비</label><SmartMoneyInput value={gas} onChange={setGas} colorClass="text-blue-300" /></div>
+                    <div><label className="text-[11px] text-orange-400 block mb-1">기타 기사경비</label><SmartMoneyInput value={driverExpense} onChange={setDriverExpense} colorClass="text-orange-300" /></div>
                   </>
                 ) : (
                   <>
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-slate-400 block mb-1">카드/앱 매출</label>
-                        <SmartMoneyInput value={cardRev} onChange={setCardRev} />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-slate-400 block mb-1">현금 수입</label>
-                        <SmartMoneyInput value={cashRev} onChange={setCashRev} />
-                      </div>
+                      <div><label className="text-[10px] text-slate-400 block mb-1">카드 수입</label><SmartMoneyInput value={cardRev} onChange={setCardRev} /></div>
+                      <div><label className="text-[10px] text-slate-400 block mb-1">현금 수입</label><SmartMoneyInput value={cashRev} onChange={setCashRev} /></div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-slate-400 block mb-1">가스비</label>
-                        <SmartMoneyInput value={privGas} onChange={setPrivGas} />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-slate-400 block mb-1">통행료</label>
-                        <SmartMoneyInput value={toll} onChange={setToll} />
-                      </div>
+                      <div><label className="text-[10px] text-slate-400 block mb-1">가스비</label><SmartMoneyInput value={privGas} onChange={setPrivGas} /></div>
+                      <div><label className="text-[10px] text-slate-400 block mb-1">통행료</label><SmartMoneyInput value={toll} onChange={setToll} /></div>
                     </div>
                   </>
                 )}
-
                 <div>
                   <label className="text-[11px] text-slate-400 block mb-1">운행 메모</label>
-                  <input
-                    type="text"
-                    placeholder="특이사항 메모"
-                    value={memo}
-                    onChange={(e) => setMemo(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 p-2 text-xs rounded-xl text-white focus:outline-none"
-                  />
+                  <input type="text" placeholder="특이사항 메모" value={memo} onChange={(e) => setMemo(e.target.value)} className="w-full bg-slate-950 border border-slate-700 p-2 text-xs rounded-xl text-white" />
                 </div>
               </div>
             )}
-
             <div className="flex gap-2 pt-2">
-              <button onClick={handleSave} className="flex-1 py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs">
-                저장 완료
-              </button>
-              <button onClick={onClose} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">
-                취소
-              </button>
+              <button onClick={handleSave} className="flex-1 py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs">저장 완료</button>
+              <button onClick={onClose} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
             </div>
           </div>
         </div>
@@ -1655,21 +1307,12 @@
           return (
             <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
               <div className="bg-slate-900 border border-red-500/40 p-6 rounded-3xl max-w-sm w-full space-y-4 shadow-2xl">
-                <div className="w-12 h-12 rounded-2xl bg-red-950/80 border border-red-500/40 flex items-center justify-center mx-auto text-2xl">
-                  🛡️
-                </div>
+                <div className="w-12 h-12 rounded-2xl bg-red-950/80 border border-red-500/40 flex items-center justify-center mx-auto text-2xl">🛡️</div>
                 <div>
                   <h2 className="text-base font-bold text-red-400">데이터 안전 보호 모드</h2>
-                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                    시스템이 안전하게 업데이트되었습니다. 기존 운행 기록은 보존되어 있습니다.
-                  </p>
+                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">시스템이 정상 복구되었습니다.</p>
                 </div>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="w-full py-2.5 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow"
-                >
-                  화면 새로고침
-                </button>
+                <button onClick={() => window.location.reload()} className="w-full py-2.5 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow">화면 새로고침</button>
               </div>
             </div>
           );
