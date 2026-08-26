@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>K-TAXI 스마트 가디언 풀스크린 지도 & HUD</title>
+  <title>K-TAXI 스마트 가디언 HUD & 단속 방어 레이더</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Leaflet 지도 라이브러리 -->
@@ -31,14 +31,14 @@
     .hud-rot90-flip { transform: rotate(-90deg) scaleY(-1); }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1.25rem); }
 
-    /* 교대 펌핑 애니메이션 */
+    /* 5:5 교대 펌핑 애니메이션 */
     @keyframes pulse-top-grow {
-      0%, 100% { transform: scale(1.12); filter: drop-shadow(0 0 20px rgba(239, 68, 68, 0.9)); }
-      50% { transform: scale(0.90); filter: drop-shadow(0 0 6px rgba(234, 179, 8, 0.4)); }
+      0%, 100% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.95)); }
+      50% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
     }
     @keyframes pulse-bottom-grow {
-      0%, 100% { transform: scale(0.90); filter: drop-shadow(0 0 6px rgba(234, 179, 8, 0.4)); }
-      50% { transform: scale(1.12); filter: drop-shadow(0 0 20px rgba(34, 197, 94, 0.9)); }
+      0%, 100% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
+      50% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(34, 197, 94, 0.95)); }
     }
     .animate-top-pump { animation: pulse-top-grow 0.85s infinite ease-in-out; }
     .animate-bottom-pump { animation: pulse-bottom-grow 0.85s infinite ease-in-out; }
@@ -55,7 +55,7 @@
 
     /* 리플릿 풀스크린 지도 컨테이너 */
     .leaflet-container {
-      background-color: #1e293b !important;
+      background-color: #090d16 !important;
       font-family: inherit;
       width: 100% !important;
       height: 100% !important;
@@ -74,7 +74,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v2.4.0';
+    const APP_VERSION = 'v2.6.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -103,7 +103,7 @@
       return Math.round(R * c);
     };
 
-    // 2-Way 사운드 신시사이저 (모바일 AudioContext 잠금 해제 보강)
+    // 2-Way 사운드 신시사이저
     const playGuardianAudio = (type = 'dog', isPassenger = false) => {
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -114,7 +114,6 @@
         }
 
         if (isPassenger) {
-          // 탑승 모드: 조종석 비프음
           if (type === 'dog' || type === 'speed') {
             [0, 0.14].forEach((delay, idx) => {
               const osc = ctx.createOscillator();
@@ -152,9 +151,7 @@
             osc.stop(ctx.currentTime + 0.6);
           }
         } else {
-          // 빈차 모드: 각성 극대화 동물 울음소리
           if (type === 'dog') {
-            // [개 짖는 소리: 멍! 멍!]
             [0, 0.16].forEach((delay) => {
               const osc = ctx.createOscillator();
               const gain = ctx.createGain();
@@ -169,7 +166,6 @@
               osc.stop(ctx.currentTime + delay + 0.12);
             });
           } else if (type === 'cat') {
-            // [고양이 울음소리: 야옹~]
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.type = 'sine';
@@ -183,7 +179,6 @@
             osc.start(ctx.currentTime);
             osc.stop(ctx.currentTime + 0.55);
           } else if (type === 'tiger') {
-            // [호랑이 포효: 어흥~]
             const osc = ctx.createOscillator();
             const mod = ctx.createOscillator();
             const modGain = ctx.createGain();
@@ -316,25 +311,20 @@
     // --- 전신 옆모습(측면 뷰) 단독 캐릭터 마커 생성기 ---
     const createDynamicUserIcon = (cameraType) => {
       if (!cameraType) {
-        // [1. 평상시: 택시 측면(옆모습) 전신]
+        // [1. 평상시: 택시 측면 전신]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
             <div class="relative flex items-center justify-center" style="width:64px; height:44px;">
               <div class="absolute w-8 h-8 rounded-full bg-yellow-400/30 animate-ping"></div>
               <svg viewBox="0 0 80 48" class="w-16 h-10 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)]" style="filter: drop-shadow(0 0 10px rgba(250,204,21,0.95));">
-                <!-- 택시 갓등 -->
                 <polygon points="34,8 46,8 49,14 31,14" fill="#ef4444" stroke="#ffffff" stroke-width="1.2"/>
                 <text x="40" y="13" font-size="4.5" font-weight="900" fill="#ffffff" text-anchor="middle">TAXI</text>
-                <!-- 차체 측면 -->
                 <path d="M 6 34 L 14 20 L 28 14 L 56 14 L 68 22 L 76 26 L 76 36 L 6 36 Z" fill="#facc15" stroke="#0f172a" stroke-width="2.5"/>
-                <!-- 유리창 -->
                 <polygon points="30,16 43,16 43,24 25,24" fill="#0f172a"/>
                 <polygon points="46,16 56,16 64,24 46,24" fill="#0f172a"/>
-                <!-- 헤드라이트 & 테일램프 -->
                 <polygon points="73,27 76,27 75,31 72,31" fill="#ffffff"/>
                 <polygon points="6,29 8,29 8,33 6,33" fill="#ef4444"/>
-                <!-- 바퀴 2개 -->
                 <circle cx="20" cy="36" r="7" fill="#0f172a" stroke="#ffffff" stroke-width="1.5"/>
                 <circle cx="20" cy="36" r="3" fill="#94a3b8"/>
                 <circle cx="62" cy="36" r="7" fill="#0f172a" stroke="#ffffff" stroke-width="1.5"/>
@@ -346,29 +336,22 @@
           iconAnchor: [32, 22]
         });
       } else if (cameraType === 'dog') {
-        // [2. 과속·신호 단속: 강아지 측면(옆모습) 전신 - 붉은 네온]
+        // [2. 과속·신호 단속: 강아지 측면 전신]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
             <div class="relative flex items-center justify-center animate-bounce" style="width:68px; height:52px;">
               <div class="absolute w-10 h-10 rounded-full bg-red-600/50 animate-ping"></div>
               <svg viewBox="0 0 80 56" class="w-16 h-12" style="filter: drop-shadow(0 0 14px rgba(239,68,68,1)) drop-shadow(0 4px 6px rgba(0,0,0,0.9));">
-                <!-- 꼬리 -->
                 <path d="M 14 26 Q 6 14 12 8" stroke="#b91c1c" stroke-width="5" stroke-linecap="round" fill="none"/>
-                <!-- 뒷다리 2개 -->
                 <path d="M 18 32 L 14 48 L 22 48" stroke="#7f1d1d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                <!-- 몸통 -->
                 <ellipse cx="38" cy="30" rx="22" ry="14" fill="#dc2626"/>
-                <!-- 앞다리 2개 -->
                 <path d="M 50 32 L 54 48 L 62 48" stroke="#7f1d1d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                <!-- 머리 & 주둥이 -->
                 <circle cx="60" cy="20" r="12" fill="#ef4444"/>
                 <ellipse cx="69" cy="23" rx="7" ry="5" fill="#fef2f2"/>
                 <circle cx="73" cy="21" r="2.5" fill="#000000"/>
-                <!-- 눈 -->
                 <circle cx="62" cy="17" r="2.5" fill="#ffffff"/>
                 <circle cx="63" cy="17" r="1.2" fill="#000000"/>
-                <!-- 펄럭이는 귀 -->
                 <path d="M 54 12 Q 48 20 52 26" stroke="#991b1b" stroke-width="4.5" stroke-linecap="round" fill="none"/>
               </svg>
             </div>
@@ -377,26 +360,20 @@
           iconAnchor: [34, 26]
         });
       } else if (cameraType === 'cat') {
-        // [3. 주정차 단속: 고양이 측면(옆모습) 전신 - 황색 네온]
+        // [3. 주정차 단속: 고양이 측면 전신]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
             <div class="relative flex items-center justify-center animate-pulse" style="width:64px; height:52px;">
               <div class="absolute w-10 h-10 rounded-full bg-amber-500/50 animate-ping"></div>
               <svg viewBox="0 0 80 56" class="w-16 h-12" style="filter: drop-shadow(0 0 14px rgba(245,158,11,1)) drop-shadow(0 4px 6px rgba(0,0,0,0.9));">
-                <!-- 말린 S자 꼬리 -->
                 <path d="M 16 34 Q 4 28 8 12 Q 14 6 18 16" stroke="#d97706" stroke-width="4" stroke-linecap="round" fill="none"/>
-                <!-- 뒷다리 -->
                 <path d="M 20 34 L 16 48 L 24 48" stroke="#b45309" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                <!-- 날렵한 등/몸체 -->
                 <ellipse cx="38" cy="32" rx="18" ry="12" fill="#f59e0b"/>
-                <!-- 앞다리 -->
                 <path d="M 48 34 L 52 48 L 58 48" stroke="#b45309" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                <!-- 머리 & 귀 -->
                 <circle cx="58" cy="22" r="11" fill="#fbbf24"/>
                 <polygon points="54,14 58,4 64,13" fill="#d97706"/>
                 <polygon points="62,14 68,6 71,15" fill="#d97706"/>
-                <!-- 눈 & 코 & 수염 -->
                 <ellipse cx="64" cy="20" rx="2" ry="3.5" fill="#047857"/>
                 <polygon points="70,23 68,21 72,21" fill="#ec4899"/>
                 <line x1="68" y1="24" x2="78" y2="22" stroke="#ffffff" stroke-width="1.2"/>
@@ -408,27 +385,20 @@
           iconAnchor: [32, 26]
         });
       } else if (cameraType === 'tiger') {
-        // [4. 구간 단속: 호랑이 측면(옆모습) 전신 - 파이어 오렌지]
+        // [4. 구간 단속: 호랑이 측면 전신]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
             <div class="relative flex items-center justify-center animate-top-pump" style="width:72px; height:54px;">
               <div class="absolute w-12 h-12 rounded-full bg-orange-600/50 animate-ping"></div>
               <svg viewBox="0 0 88 56" class="w-18 h-12" style="filter: drop-shadow(0 0 16px rgba(249,115,22,1)) drop-shadow(0 4px 8px rgba(0,0,0,0.9));">
-                <!-- 포효하는 꼬리 -->
                 <path d="M 14 30 Q 4 18 10 8 Q 18 4 14 16" stroke="#ea580c" stroke-width="4.5" stroke-linecap="round" fill="none"/>
-                <!-- 뒷다리 -->
                 <path d="M 22 34 L 16 49 L 26 49" stroke="#c2410c" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                <!-- 근육질 몸통 -->
                 <ellipse cx="42" cy="30" rx="24" ry="15" fill="#f97316"/>
-                <!-- 호랑이 줄무늬 -->
                 <path d="M 30 20 L 32 30 M 40 18 L 38 32 M 48 20 L 50 30" stroke="#000000" stroke-width="2.5" stroke-linecap="round"/>
-                <!-- 앞다리 -->
                 <path d="M 54 34 L 58 49 L 68 49" stroke="#c2410c" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                <!-- 머리 & 귀 -->
                 <circle cx="66" cy="20" r="13" fill="#fb923c"/>
                 <circle cx="60" cy="10" r="4.5" fill="#ea580c"/>
-                <!-- 눈 & 송곳니 주둥이 -->
                 <circle cx="70" cy="17" r="2.2" fill="#000000"/>
                 <polygon points="76,21 82,24 76,27" fill="#ffffff"/>
                 <polygon points="77,22 79,25 78,22" fill="#000000"/>
@@ -547,15 +517,15 @@
           {!isAutoTracking && (
             <button
               onClick={handleRecenter}
-              className="absolute bottom-24 right-4 z-[450] px-4 py-2.5 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition"
+              className="absolute bottom-28 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition"
             >
-              <span className="text-base">📍</span> 내 위치로 (17배율)
+              <span className="text-base">📍</span> 내 위치로
             </button>
           )}
 
-          <div className="absolute bottom-20 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-3 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow">
+          <div className="absolute bottom-28 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow">
             <span className={`w-2 h-2 rounded-full ${isAutoTracking ? 'bg-emerald-400 animate-pulse' : 'bg-orange-400'}`}></span>
-            {isAutoTracking ? '실시간 주행 추적 중' : '자유 탐색 모드'}
+            {isAutoTracking ? '주행 추적 중' : '자유 탐색'}
           </div>
         </div>
       );
@@ -610,8 +580,9 @@
       const [showTaxModal, setShowTaxModal] = useState(false);
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
+      const [showDefenseListModal, setShowDefenseListModal] = useState(false);
 
-      // GPS & HUD & 순환 시뮬레이션 상태
+      // GPS & HUD & 과태료 방어/적발 이력 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [currentCoords, setCurrentCoords] = useState(null);
       const [hudViewMode, setHudViewMode] = useState('map');
@@ -619,10 +590,13 @@
       const [isAutoTracking, setIsAutoTracking] = useState(true);
       const [nearbyCamera, setNearbyCamera] = useState(null);
       const [isPassengerMode, setIsPassengerMode] = useState(false);
-      const [savedFineTotal, setSavedFineTotal] = useState(0);
-      const [showDefenseToast, setShowDefenseToast] = useState(false);
       
-      // 순환 테스트 스텝 (0: 정상택시, 1: 강아지, 2: 고양이, 3: 호랑이)
+      // 누적 단속 기록 (방어 성공 + 적발 건 동시 저장)
+      const [defenseHistory, setDefenseHistory] = useState([
+        { id: 1, time: '18:42', name: '불당대로 (시청 앞)', type: 'dog', limit: 50, speed: 48, status: 'pass', amount: 40000 },
+        { id: 2, time: '19:15', name: '충무로 (쌍용고사거리)', type: 'dog', limit: 50, speed: 64, status: 'fail', amount: -40000 }
+      ]);
+
       const [simStep, setSimStep] = useState(0);
 
       const activeCameraTracking = useRef(null);
@@ -652,9 +626,7 @@
           }
         };
 
-        if (currentTab === 'hud') {
-          requestWakeLock();
-        }
+        if (currentTab === 'hud') requestWakeLock();
 
         const handleVisibilityChange = () => {
           if (document.visibilityState === 'visible' && currentTab === 'hud') {
@@ -669,7 +641,7 @@
         };
       }, [currentTab]);
 
-      // 실시간 GPS 감시
+      // 실시간 GPS 감시 및 방어/적발 판정 엔진
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -696,10 +668,17 @@
               if (closest && closest.dist <= 350) {
                 setNearbyCamera(closest);
                 if (!activeCameraTracking.current) {
-                  activeCameraTracking.current = { id: closest.id, limit: closest.limit, overspeed: false };
-                }
-                if (speedKmh > closest.limit) {
-                  activeCameraTracking.current.overspeed = true;
+                  activeCameraTracking.current = {
+                    id: closest.id,
+                    name: closest.name,
+                    limit: closest.limit,
+                    type: closest.type,
+                    maxSpeed: speedKmh
+                  };
+                } else {
+                  if (speedKmh > activeCameraTracking.current.maxSpeed) {
+                    activeCameraTracking.current.maxSpeed = speedKmh;
+                  }
                 }
 
                 const now = Date.now();
@@ -708,12 +687,29 @@
                   lastSoundTime.current = now;
                 }
               } else {
+                // 단속 구역 통과 완료 시 방어 vs 적발 판정
                 if (activeCameraTracking.current && minDistance > 400) {
-                  if (!activeCameraTracking.current.overspeed) {
-                    setSavedFineTotal(prev => prev + 40000);
-                    setShowDefenseToast(true);
-                    setTimeout(() => setShowDefenseToast(false), 3500);
+                  const { name, limit, type, maxSpeed } = activeCameraTracking.current;
+                  const isOverspeed = maxSpeed > limit;
+                  let penaltyAmount = 40000;
+                  if (isOverspeed) {
+                    const diff = maxSpeed - limit;
+                    if (diff > 40) penaltyAmount = 100000;
+                    else if (diff > 20) penaltyAmount = 70000;
+                    else penaltyAmount = 40000;
                   }
+
+                  const newEntry = {
+                    id: Date.now(),
+                    time: getCurrentTimeStr(),
+                    name,
+                    type,
+                    limit,
+                    speed: maxSpeed,
+                    status: isOverspeed ? 'fail' : 'pass',
+                    amount: isOverspeed ? -penaltyAmount : 40000
+                  };
+                  setDefenseHistory(prev => [newEntry, ...prev]);
                   activeCameraTracking.current = null;
                 }
                 setNearbyCamera(null);
@@ -727,31 +723,36 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, [simStep, isPassengerMode]);
 
-      // 원터치 4단계 순환 테스트 (택시 ➔ 강아지 ➔ 고양이 ➔ 호랑이)
+      // 원터치 4단계 순환 테스트
       const handleCycleSimulation = (e) => {
         e.stopPropagation();
         const nextStep = (simStep + 1) % 4;
         setSimStep(nextStep);
 
         if (nextStep === 0) {
-          // [0. 일반 모드 복귀]
+          // 테스트 완료 복귀 시 시뮬레이션 방어/적발 추가
+          const simEntry = {
+            id: Date.now(),
+            time: getCurrentTimeStr(),
+            name: '불당대로 (시뮬레이션 방어)',
+            type: nearbyCamera?.type || 'dog',
+            limit: 50,
+            speed: 48,
+            status: 'pass',
+            amount: 40000
+          };
+          setDefenseHistory(prev => [simEntry, ...prev]);
           setNearbyCamera(null);
           setGpsSpeed(0);
-          setSavedFineTotal(prev => prev + 40000);
-          setShowDefenseToast(true);
-          setTimeout(() => setShowDefenseToast(false), 3500);
         } else if (nextStep === 1) {
-          // [1. 강아지: 신호·과속 단속]
           setGpsSpeed(68);
           setNearbyCamera({ id: 'sim_dog', name: '불당대로 (과속단속)', limit: 50, dist: 220, type: 'dog' });
           playGuardianAudio('dog', isPassengerMode);
         } else if (nextStep === 2) {
-          // [2. 고양이: 주정차 단속]
           setGpsSpeed(32);
           setNearbyCamera({ id: 'sim_cat', name: '천안역 광장 (주정차구역)', limit: 30, dist: 140, type: 'cat' });
           playGuardianAudio('cat', isPassengerMode);
         } else if (nextStep === 3) {
-          // [3. 호랑이: 구간 단속]
           setGpsSpeed(84);
           setNearbyCamera({ id: 'sim_tiger', name: '남부대로 (구간단속)', limit: 70, dist: 380, type: 'tiger' });
           playGuardianAudio('tiger', isPassengerMode);
@@ -759,10 +760,21 @@
       };
 
       const getSimButtonLabel = () => {
-        if (simStep === 0) return '⚡ 캐릭터 테스트';
-        if (simStep === 1) return '🐶 강아지 (신호과속)';
-        if (simStep === 2) return '🐱 고양이 (주정차)';
-        return '🐯 호랑이 (구간단속)';
+        if (simStep === 0) return '⚡ 테스트';
+        if (simStep === 1) return '🐶 강아지';
+        if (simStep === 2) return '🐱 고양이';
+        return '🐯 호랑이';
+      };
+
+      // 방어 성공 / 적발 통계 집계
+      const passCount = defenseHistory.filter(h => h.status === 'pass').length;
+      const failCount = defenseHistory.filter(h => h.status === 'fail').length;
+      const totalSaved = defenseHistory.filter(h => h.status === 'pass').reduce((s, h) => s + h.amount, 0);
+      const totalFines = defenseHistory.filter(h => h.status === 'fail').reduce((s, h) => s + Math.abs(h.amount), 0);
+      const netSaved = totalSaved - totalFines;
+
+      const handleDeleteDefenseItem = (id) => {
+        setDefenseHistory(prev => prev.filter(item => item.id !== id));
       };
 
       useEffect(() => {
@@ -1012,7 +1024,9 @@
 
           <main className={`flex-1 flex flex-col ${currentTab === 'hud' ? 'p-0 overflow-hidden relative' : 'p-3 pb-24 overflow-y-auto'}`}>
             
-            {/* 탭 1: 🏎️ 스마트 가디언 풀스크린 지도 & 측면 전신 마커 HUD */}
+            {/* ======================================================== */}
+            {/* 탭 1: 🏎️ 5:5 가디언 HUD & 누적 과태료 방어/적발 레이더 */}
+            {/* ======================================================== */}
             {currentTab === 'hud' && (
               <div
                 className={`flex-1 flex flex-col justify-between select-none relative w-full h-full overflow-hidden ${
@@ -1021,9 +1035,9 @@
                     : 'bg-slate-950'
                 }`}
               >
-                {/* 상단 통합 플로팅 제어 알약 바 */}
+                {/* 상단 컨트롤 바 */}
                 <div className="absolute top-3 left-3 right-3 z-[450] flex justify-between items-center pointer-events-auto">
-                  <div className="flex gap-1.5 bg-slate-950/85 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
+                  <div className="flex gap-1.5 bg-slate-950/80 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
                     <button
                       onClick={() => {
                         setIsPassengerMode(!isPassengerMode);
@@ -1046,87 +1060,105 @@
                     </button>
                   </div>
 
-                  {/* 4단계 원터치 순환 테스트 버튼 */}
                   <button
                     onClick={handleCycleSimulation}
                     className={`px-3 py-1.5 rounded-2xl text-[10px] font-black border shadow-2xl transition active:scale-95 ${
                       simStep > 0
                         ? 'bg-red-600 text-white border-white animate-pulse'
-                        : 'bg-slate-950/85 backdrop-blur-md text-yellow-400 border-yellow-500/50'
+                        : 'bg-slate-950/80 backdrop-blur-md text-yellow-400 border-yellow-500/50'
                     }`}
                   >
                     {getSimButtonLabel()}
                   </button>
                 </div>
 
-                {/* 과태료 방어 성공 알림 토스트 */}
-                {showDefenseToast && (
-                  <div className="absolute top-16 left-4 right-4 z-[500] bg-gradient-to-r from-emerald-600 to-green-500 text-white p-2.5 rounded-2xl shadow-2xl flex items-center justify-between animate-bounce">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">🛡️</span>
-                      <div>
-                        <div className="text-xs font-black">+40,000원 과태료 방어 성공!</div>
-                        <div className="text-[10px] text-green-100">오늘 누적: {formatMoney(savedFineTotal)}</div>
-                      </div>
-                    </div>
-                    <span className="text-xs font-black bg-emerald-950/60 px-2 py-1 rounded-lg">PASS</span>
-                  </div>
-                )}
-
-                {/* 메인 뷰 */}
+                {/* 메인 5:5 가디언 HUD 화면 */}
                 {hudViewMode === 'map' ? (
                   <div className="relative w-full h-full flex-1 flex flex-col">
                     
-                    {/* 풀스크린 실시간 지도 & 측면 전신 마커 */}
-                    <FullscreenLiveMapView
-                      currentCoords={currentCoords}
-                      nearbyCamera={nearbyCamera}
-                      isAutoTracking={isAutoTracking}
-                      setIsAutoTracking={setIsAutoTracking}
-                    />
+                    {/* 1. 배경: 풀스크린 실시간 지도 */}
+                    <div className="absolute inset-0 z-0 opacity-40">
+                      <FullscreenLiveMapView
+                        currentCoords={currentCoords}
+                        nearbyCamera={nearbyCamera}
+                        isAutoTracking={isAutoTracking}
+                        setIsAutoTracking={setIsAutoTracking}
+                      />
+                    </div>
 
-                    {/* 상단 좌측 플로팅 HUD */}
-                    <div className="absolute top-16 left-3.5 z-[400] pointer-events-none">
-                      <div className="flex items-center gap-2">
-                        <div className={`flex items-center justify-center w-20 h-20 rounded-full border-[6px] bg-white text-black shadow-2xl transition-all duration-300 ${
-                          isNearCamera ? 'border-red-600 animate-top-pump' : 'border-red-600'
+                    {/* 2. 전면: 5:5 대형 가디언 오버레이 */}
+                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-16">
+                      
+                      {/* 상단 1/2: 속도제한 표지판 (투명 글씨 ➔ 단속 시 붉은 네온 점등) */}
+                      <div className="flex-1 flex flex-col items-center justify-center p-2">
+                        <div className={`flex items-center justify-center w-48 h-48 rounded-full border-[10px] transition-all duration-300 ${
+                          isNearCamera
+                            ? 'border-red-600 bg-white text-black animate-top-pump shadow-[0_0_30px_rgba(239,68,68,0.95)]'
+                            : 'border-white/30 bg-slate-950/60 backdrop-blur-md text-white/50 shadow-2xl'
                         }`}>
                           <div className="flex flex-col items-center justify-center leading-none">
-                            <span className="text-3xl font-black tracking-tight">{effectiveSpeedLimit}</span>
-                            <span className="text-[7px] font-black text-red-600 tracking-wider mt-0.5">LIMIT</span>
+                            <span className="text-7xl font-black tracking-tight">{effectiveSpeedLimit}</span>
+                            <span className={`text-[11px] font-black tracking-widest mt-1 ${isNearCamera ? 'text-red-600' : 'text-slate-400'}`}>LIMIT</span>
                           </div>
                         </div>
 
-                        {nearbyCamera && (
-                          <div className="px-3 py-1.5 rounded-2xl bg-slate-950/95 border border-red-500 text-red-300 font-black text-[11px] shadow-2xl animate-bounce">
-                            <div>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'}</div>
-                            <div className="text-yellow-400 font-bold">{nearbyCamera.dist}m 전방</div>
+                        {/* 단속 카메라 정보 배지 */}
+                        {nearbyCamera ? (
+                          <div className="mt-2.5 px-4 py-1.5 rounded-2xl bg-red-950/95 border border-red-500 text-red-300 font-black text-xs shadow-2xl animate-bounce">
+                            <span>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'}</span>
+                            <span className="ml-1 text-yellow-400 font-bold">{nearbyCamera.dist}m 전방</span>
                           </div>
+                        ) : (
+                          <span className="text-[11px] font-bold text-slate-400/70 mt-2">정상 주행 구간</span>
                         )}
+                      </div>
+
+                      {/* 하단 1/2: 초대형 디지털 속도계 (투명 글씨 ➔ 과속 시 붉은색) */}
+                      <div className="flex-1 flex flex-col items-center justify-center p-2">
+                        <div className={`transition-all duration-300 flex flex-col items-center justify-center ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
+                          <div className="flex items-baseline justify-center">
+                            <span className={`text-9xl font-black tracking-tighter font-mono transition-colors drop-shadow-2xl ${
+                              isOverSpeed
+                                ? 'text-red-500 animate-pulse'
+                                : isNearCamera
+                                ? 'text-green-400'
+                                : 'text-white/60'
+                            }`}>
+                              {gpsSpeed}
+                            </span>
+                            <span className="text-3xl font-bold ml-2 text-slate-400/80">km/h</span>
+                          </div>
+
+                          {isOverSpeed && (
+                            <span className="text-xs font-black text-red-300 bg-red-950/90 px-3 py-1 rounded-full border border-red-500 mt-2 animate-bounce">
+                              ⚠️ 즉시 감속 (+{gpsSpeed - effectiveSpeedLimit} km/h 초과)
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    {/* 하단 중앙 플로팅 속도계 */}
-                    <div className="absolute bottom-16 left-0 right-0 z-[400] flex justify-center pointer-events-none">
-                      <div className={`px-7 py-2.5 rounded-3xl backdrop-blur-md border shadow-2xl flex flex-col items-center transition-all duration-300 ${
-                        isOverSpeed
-                          ? 'bg-red-950/90 border-red-500 animate-pulse'
-                          : 'bg-slate-950/85 border-slate-700/80'
-                      }`}>
-                        <div className="flex items-baseline justify-center">
-                          <span className={`text-6xl font-black tracking-tighter font-mono ${
-                            isOverSpeed ? 'text-red-500' : 'text-green-400'
-                          }`}>
-                            {gpsSpeed}
-                          </span>
-                          <span className="text-lg font-bold ml-1.5 text-slate-300">km/h</span>
+                    {/* 3. 하단 고정: 누적 과태료 방어/적발 전광판 배너 (터치 시 상세 팝업) */}
+                    <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto">
+                      <div
+                        onClick={() => setShowDefenseListModal(true)}
+                        className="bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-slate-950/95 border-2 border-emerald-500/60 p-2.5 rounded-2xl shadow-2xl flex items-center justify-between cursor-pointer active:scale-95 transition"
+                      >
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <span className="text-xl">🛡️</span>
+                          <div className="text-xs truncate">
+                            <div className="font-black text-white">
+                              방어 <span className="text-emerald-400">{passCount}회</span> (+{formatMoney(totalSaved)}) | 
+                              적발 <span className="text-red-400">{failCount}회</span> (-{formatMoney(totalFines)})
+                            </div>
+                            <div className="text-[10px] text-yellow-400 font-bold">
+                              총 순방어액: {netSaved >= 0 ? `+${formatMoney(netSaved)}원` : `-${formatMoney(Math.abs(netSaved))}원`} (터치하여 상세)
+                            </div>
+                          </div>
                         </div>
-
-                        {isOverSpeed && (
-                          <span className="text-[10px] font-black text-red-300 bg-red-900/80 px-2.5 py-0.5 rounded-full border border-red-400 mt-0.5">
-                            ⚠️ 감속 필요 (+{gpsSpeed - effectiveSpeedLimit}km/h 초과)
-                          </span>
-                        )}
+                        <span className="px-2 py-1 bg-emerald-900/80 text-emerald-200 border border-emerald-400/60 rounded-xl text-[10px] font-black flex-shrink-0">
+                          내역보기 ▶
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1139,7 +1171,7 @@
                       <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
                         <div className="flex flex-col items-center justify-center">
                           <div className={`flex items-center justify-center w-36 h-36 rounded-full border-[10px] transition-all duration-300 ${
-                            isNearCamera ? 'border-red-600 bg-white text-black animate-top-pump' : 'border-red-600 bg-white text-black shadow-2xl'
+                            isNearCamera ? 'border-red-600 bg-white text-black animate-top-pump shadow-2xl' : 'border-red-600 bg-white text-black shadow-2xl'
                           }`}>
                             <div className="flex flex-col items-center justify-center leading-none">
                               <span className="text-5xl font-black tracking-tight">{effectiveSpeedLimit}</span>
@@ -1507,7 +1539,7 @@
 
           <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
             <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언지도</span>
+              <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언HUD</span>
             </button>
             <button onClick={() => setCurrentTab('today')} className={`flex flex-col items-center py-2.5 ${currentTab === 'today' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">🏠</span><span className="text-[10px] mt-0.5">오늘&건강</span>
@@ -1519,6 +1551,79 @@
               <span className="text-lg">⚙️</span><span className="text-[10px] mt-0.5">정산/설정</span>
             </button>
           </nav>
+
+          {/* ======================================================== */}
+          {/* 단속 방어 / 적발 상세 내역 팝업 모달 */}
+          {/* ======================================================== */}
+          {showDefenseListModal && (
+            <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xl">🛡️</span>
+                    <h3 className="text-sm font-black text-emerald-400">단속 방어 & 적발 상세 내역</h3>
+                  </div>
+                  <button onClick={() => setShowDefenseListModal(false)} className="text-slate-400 font-bold text-base hover:text-white">✕</button>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 grid grid-cols-3 gap-1 text-center">
+                  <div>
+                    <span className="text-[9px] text-slate-400 block font-semibold">방어 성공</span>
+                    <span className="text-sm font-black text-emerald-400">{passCount}회 (+{formatShortMoney(totalSaved)})</span>
+                  </div>
+                  <div className="border-x border-slate-800">
+                    <span className="text-[9px] text-slate-400 block font-semibold">적발 의심</span>
+                    <span className="text-sm font-black text-red-400">{failCount}회 (-{formatShortMoney(totalFines)})</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 block font-semibold">순방어액</span>
+                    <span className={`text-sm font-black ${netSaved >= 0 ? 'text-yellow-400' : 'text-red-400'}`}>
+                      {formatShortMoney(netSaved)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                  {defenseHistory.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-slate-500">기록된 단속 내역이 없습니다.</div>
+                  ) : (
+                    defenseHistory.map((item) => (
+                      <div key={item.id} className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+                        item.status === 'pass' ? 'bg-slate-950 border-emerald-900/50' : 'bg-red-950/40 border-red-800/60'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{item.type === 'dog' ? '🐶' : item.type === 'cat' ? '🐱' : '🐯'}</span>
+                          <div>
+                            <div className="font-bold text-slate-200">{item.name}</div>
+                            <div className="text-[10px] text-slate-400 font-medium">
+                              {item.time} 통과 (제한 {item.limit} | 주행 {item.speed}km/h)
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-xs font-black px-2 py-1 rounded-lg border ${
+                            item.status === 'pass'
+                              ? 'text-emerald-400 bg-emerald-950 border-emerald-500/40'
+                              : 'text-red-400 bg-red-950 border-red-500/40'
+                          }`}>
+                            {item.amount > 0 ? `+${formatMoney(item.amount)}` : `${formatMoney(item.amount)}`}원
+                          </span>
+                          <button onClick={() => handleDeleteDefenseItem(item.id)} className="text-slate-500 hover:text-red-400 px-1 font-bold text-xs">✕</button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <button
+                  onClick={() => setShowDefenseListModal(false)}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs shadow-lg transition active:scale-98"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 일별 기록 모달 */}
           {showDailyModal && (
