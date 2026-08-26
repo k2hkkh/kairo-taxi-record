@@ -74,7 +74,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v2.3.0';
+    const APP_VERSION = 'v2.4.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -103,21 +103,25 @@
       return Math.round(R * c);
     };
 
-    // 2-Way 사운드 신시사이저
+    // 2-Way 사운드 신시사이저 (모바일 AudioContext 잠금 해제 보강)
     const playGuardianAudio = (type = 'dog', isPassenger = false) => {
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
         const ctx = new AudioContext();
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
 
         if (isPassenger) {
+          // 탑승 모드: 조종석 비프음
           if (type === 'dog' || type === 'speed') {
             [0, 0.14].forEach((delay, idx) => {
               const osc = ctx.createOscillator();
               const gain = ctx.createGain();
               osc.type = 'sine';
               osc.frequency.setValueAtTime(idx === 0 ? 880 : 1174, ctx.currentTime + delay);
-              gain.gain.setValueAtTime(0.3, ctx.currentTime + delay);
+              gain.gain.setValueAtTime(0.4, ctx.currentTime + delay);
               gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.12);
               osc.connect(gain);
               gain.connect(ctx.destination);
@@ -129,7 +133,7 @@
             const gain = ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(659.25, ctx.currentTime);
-            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.setValueAtTime(0.3, ctx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
             osc.connect(gain);
             gain.connect(ctx.destination);
@@ -140,7 +144,7 @@
             const gain = ctx.createGain();
             osc.type = 'triangle';
             osc.frequency.setValueAtTime(440, ctx.currentTime);
-            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.setValueAtTime(0.3, ctx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.6);
             osc.connect(gain);
             gain.connect(ctx.destination);
@@ -148,57 +152,61 @@
             osc.stop(ctx.currentTime + 0.6);
           }
         } else {
+          // 빈차 모드: 각성 극대화 동물 울음소리
           if (type === 'dog') {
+            // [개 짖는 소리: 멍! 멍!]
             [0, 0.16].forEach((delay) => {
               const osc = ctx.createOscillator();
               const gain = ctx.createGain();
               osc.type = 'sawtooth';
-              osc.frequency.setValueAtTime(620, ctx.currentTime + delay);
-              osc.frequency.exponentialRampToValueAtTime(130, ctx.currentTime + delay + 0.11);
-              gain.gain.setValueAtTime(0.55, ctx.currentTime + delay);
-              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.11);
+              osc.frequency.setValueAtTime(650, ctx.currentTime + delay);
+              osc.frequency.exponentialRampToValueAtTime(130, ctx.currentTime + delay + 0.12);
+              gain.gain.setValueAtTime(0.7, ctx.currentTime + delay);
+              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.12);
               osc.connect(gain);
               gain.connect(ctx.destination);
               osc.start(ctx.currentTime + delay);
-              osc.stop(ctx.currentTime + delay + 0.11);
+              osc.stop(ctx.currentTime + delay + 0.12);
             });
           } else if (type === 'cat') {
+            // [고양이 울음소리: 야옹~]
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(390, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.22);
-            osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.5);
-            gain.gain.setValueAtTime(0.4, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+            osc.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.25);
+            osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.55);
+            gain.gain.setValueAtTime(0.5, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.55);
             osc.connect(gain);
             gain.connect(ctx.destination);
             osc.start(ctx.currentTime);
-            osc.stop(ctx.currentTime + 0.5);
+            osc.stop(ctx.currentTime + 0.55);
           } else if (type === 'tiger') {
+            // [호랑이 포효: 어흥~]
             const osc = ctx.createOscillator();
             const mod = ctx.createOscillator();
             const modGain = ctx.createGain();
             const gain = ctx.createGain();
             osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(90, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(48, ctx.currentTime + 0.75);
+            osc.frequency.setValueAtTime(95, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(45, ctx.currentTime + 0.85);
             mod.type = 'square';
-            mod.frequency.setValueAtTime(22, ctx.currentTime);
-            modGain.gain.setValueAtTime(38, ctx.currentTime);
+            mod.frequency.setValueAtTime(24, ctx.currentTime);
+            modGain.gain.setValueAtTime(45, ctx.currentTime);
             mod.connect(osc.frequency);
-            gain.gain.setValueAtTime(0.55, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.75);
+            gain.gain.setValueAtTime(0.7, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.85);
             osc.connect(gain);
             gain.connect(ctx.destination);
             mod.start(ctx.currentTime);
             osc.start(ctx.currentTime);
-            mod.stop(ctx.currentTime + 0.75);
-            osc.stop(ctx.currentTime + 0.75);
+            mod.stop(ctx.currentTime + 0.85);
+            osc.stop(ctx.currentTime + 0.85);
           }
         }
       } catch (e) {
-        console.warn('Audio Synthesizer Warning', e);
+        console.warn('Audio Synthesizer Error', e);
       }
     };
 
@@ -305,134 +313,130 @@
       return DEFAULT_STORAGE;
     };
 
-    // --- 동그라미 없는 전신(몸 전체) 단독 캐릭터 마커 생성기 ---
+    // --- 전신 옆모습(측면 뷰) 단독 캐릭터 마커 생성기 ---
     const createDynamicUserIcon = (cameraType) => {
       if (!cameraType) {
-        // [1. 평상시: 전신 네온 옐로우 택시]
+        // [1. 평상시: 택시 측면(옆모습) 전신]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
-            <div class="relative flex items-center justify-center" style="width:52px; height:52px;">
-              <!-- 지면 펄스 그림자 -->
+            <div class="relative flex items-center justify-center" style="width:64px; height:44px;">
               <div class="absolute w-8 h-8 rounded-full bg-yellow-400/30 animate-ping"></div>
-              <!-- 자동차 전신 SVG -->
-              <svg viewBox="0 0 64 64" class="w-12 h-12 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)]" style="filter: drop-shadow(0 0 10px rgba(250,204,21,0.9));">
-                <rect x="14" y="8" width="36" height="48" rx="10" fill="#facc15" stroke="#1e293b" stroke-width="2.5"/>
-                <rect x="18" y="16" width="28" height="12" rx="4" fill="#0f172a"/>
-                <rect x="18" y="34" width="28" height="10" rx="3" fill="#0f172a"/>
+              <svg viewBox="0 0 80 48" class="w-16 h-10 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)]" style="filter: drop-shadow(0 0 10px rgba(250,204,21,0.95));">
                 <!-- 택시 갓등 -->
-                <rect x="23" y="26" width="18" height="6" rx="2" fill="#ef4444" stroke="#ffffff" stroke-width="1"/>
-                <text x="32" y="31" font-size="4" font-weight="900" fill="#ffffff" text-anchor="middle">TAXI</text>
-                <!-- 헤드라이트 -->
-                <circle cx="18" cy="11" r="2.5" fill="#ffffff"/>
-                <circle cx="46" cy="11" r="2.5" fill="#ffffff"/>
+                <polygon points="34,8 46,8 49,14 31,14" fill="#ef4444" stroke="#ffffff" stroke-width="1.2"/>
+                <text x="40" y="13" font-size="4.5" font-weight="900" fill="#ffffff" text-anchor="middle">TAXI</text>
+                <!-- 차체 측면 -->
+                <path d="M 6 34 L 14 20 L 28 14 L 56 14 L 68 22 L 76 26 L 76 36 L 6 36 Z" fill="#facc15" stroke="#0f172a" stroke-width="2.5"/>
+                <!-- 유리창 -->
+                <polygon points="30,16 43,16 43,24 25,24" fill="#0f172a"/>
+                <polygon points="46,16 56,16 64,24 46,24" fill="#0f172a"/>
+                <!-- 헤드라이트 & 테일램프 -->
+                <polygon points="73,27 76,27 75,31 72,31" fill="#ffffff"/>
+                <polygon points="6,29 8,29 8,33 6,33" fill="#ef4444"/>
+                <!-- 바퀴 2개 -->
+                <circle cx="20" cy="36" r="7" fill="#0f172a" stroke="#ffffff" stroke-width="1.5"/>
+                <circle cx="20" cy="36" r="3" fill="#94a3b8"/>
+                <circle cx="62" cy="36" r="7" fill="#0f172a" stroke="#ffffff" stroke-width="1.5"/>
+                <circle cx="62" cy="36" r="3" fill="#94a3b8"/>
               </svg>
             </div>
           `,
-          iconSize: [52, 52],
-          iconAnchor: [26, 26]
+          iconSize: [64, 44],
+          iconAnchor: [32, 22]
         });
       } else if (cameraType === 'dog') {
-        // [2. 과속·신호 단속: 전신 불독/강아지 (붉은 네온 오라)]
+        // [2. 과속·신호 단속: 강아지 측면(옆모습) 전신 - 붉은 네온]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
-            <div class="relative flex items-center justify-center animate-bounce" style="width:58px; height:58px;">
+            <div class="relative flex items-center justify-center animate-bounce" style="width:68px; height:52px;">
               <div class="absolute w-10 h-10 rounded-full bg-red-600/50 animate-ping"></div>
-              <svg viewBox="0 0 64 64" class="w-14 h-14" style="filter: drop-shadow(0 0 12px rgba(239,68,68,1)) drop-shadow(0 4px 6px rgba(0,0,0,0.9));">
-                <!-- 귀 -->
-                <polygon points="12,18 20,4 28,16" fill="#7f1d1d"/>
-                <polygon points="52,18 44,4 36,16" fill="#7f1d1d"/>
-                <!-- 몸체 및 다리 -->
-                <ellipse cx="32" cy="38" rx="20" ry="16" fill="#991b1b"/>
-                <rect x="18" y="44" width="7" height="12" rx="3" fill="#7f1d1d"/>
-                <rect x="39" y="44" width="7" height="12" rx="3" fill="#7f1d1d"/>
-                <!-- 얼굴 -->
-                <circle cx="32" cy="24" r="15" fill="#b91c1c"/>
-                <circle cx="26" cy="22" r="3" fill="#ffffff"/>
-                <circle cx="26" cy="22" r="1.5" fill="#000000"/>
-                <circle cx="38" cy="22" r="3" fill="#ffffff"/>
-                <circle cx="38" cy="22" r="1.5" fill="#000000"/>
-                <!-- 주둥이 및 코 -->
-                <ellipse cx="32" cy="29" rx="7" ry="5" fill="#fef2f2"/>
-                <polygon points="32,27 29,24 35,24" fill="#000000"/>
+              <svg viewBox="0 0 80 56" class="w-16 h-12" style="filter: drop-shadow(0 0 14px rgba(239,68,68,1)) drop-shadow(0 4px 6px rgba(0,0,0,0.9));">
                 <!-- 꼬리 -->
-                <path d="M 48 38 Q 58 30 54 22" stroke="#7f1d1d" stroke-width="4" stroke-linecap="round" fill="none"/>
+                <path d="M 14 26 Q 6 14 12 8" stroke="#b91c1c" stroke-width="5" stroke-linecap="round" fill="none"/>
+                <!-- 뒷다리 2개 -->
+                <path d="M 18 32 L 14 48 L 22 48" stroke="#7f1d1d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                <!-- 몸통 -->
+                <ellipse cx="38" cy="30" rx="22" ry="14" fill="#dc2626"/>
+                <!-- 앞다리 2개 -->
+                <path d="M 50 32 L 54 48 L 62 48" stroke="#7f1d1d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                <!-- 머리 & 주둥이 -->
+                <circle cx="60" cy="20" r="12" fill="#ef4444"/>
+                <ellipse cx="69" cy="23" rx="7" ry="5" fill="#fef2f2"/>
+                <circle cx="73" cy="21" r="2.5" fill="#000000"/>
+                <!-- 눈 -->
+                <circle cx="62" cy="17" r="2.5" fill="#ffffff"/>
+                <circle cx="63" cy="17" r="1.2" fill="#000000"/>
+                <!-- 펄럭이는 귀 -->
+                <path d="M 54 12 Q 48 20 52 26" stroke="#991b1b" stroke-width="4.5" stroke-linecap="round" fill="none"/>
               </svg>
             </div>
           `,
-          iconSize: [58, 58],
-          iconAnchor: [29, 29]
+          iconSize: [68, 52],
+          iconAnchor: [34, 26]
         });
       } else if (cameraType === 'cat') {
-        // [3. 주정차 단속: 전신 고양이 (옐로우/앰버 오라)]
+        // [3. 주정차 단속: 고양이 측면(옆모습) 전신 - 황색 네온]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
-            <div class="relative flex items-center justify-center animate-pulse" style="width:56px; height:56px;">
+            <div class="relative flex items-center justify-center animate-pulse" style="width:64px; height:52px;">
               <div class="absolute w-10 h-10 rounded-full bg-amber-500/50 animate-ping"></div>
-              <svg viewBox="0 0 64 64" class="w-14 h-14" style="filter: drop-shadow(0 0 12px rgba(245,158,11,1)) drop-shadow(0 4px 6px rgba(0,0,0,0.9));">
-                <!-- 뾰족한 귀 -->
-                <polygon points="16,22 22,6 30,18" fill="#d97706"/>
-                <polygon points="48,22 42,6 34,18" fill="#d97706"/>
-                <!-- 날렵한 몸체 & 다리 -->
-                <ellipse cx="32" cy="40" rx="16" ry="14" fill="#f59e0b"/>
-                <rect x="22" y="44" width="5" height="12" rx="2.5" fill="#d97706"/>
-                <rect x="37" y="44" width="5" height="12" rx="2.5" fill="#d97706"/>
-                <!-- 얼굴 -->
-                <circle cx="32" cy="24" r="13" fill="#fbbf24"/>
-                <ellipse cx="27" cy="22" rx="2.5" ry="4" fill="#065f46"/>
-                <ellipse cx="37" cy="22" rx="2.5" ry="4" fill="#065f46"/>
-                <polygon points="32,27 30,25 34,25" fill="#ec4899"/>
-                <!-- 수염 -->
-                <line x1="18" y1="26" x2="26" y2="28" stroke="#ffffff" stroke-width="1.5"/>
-                <line x1="18" y1="30" x2="26" y2="30" stroke="#ffffff" stroke-width="1.5"/>
-                <line x1="46" y1="26" x2="38" y2="28" stroke="#ffffff" stroke-width="1.5"/>
-                <line x1="46" y1="30" x2="38" y2="30" stroke="#ffffff" stroke-width="1.5"/>
-                <!-- 말린 꼬리 -->
-                <path d="M 44 44 Q 58 40 54 24" stroke="#d97706" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+              <svg viewBox="0 0 80 56" class="w-16 h-12" style="filter: drop-shadow(0 0 14px rgba(245,158,11,1)) drop-shadow(0 4px 6px rgba(0,0,0,0.9));">
+                <!-- 말린 S자 꼬리 -->
+                <path d="M 16 34 Q 4 28 8 12 Q 14 6 18 16" stroke="#d97706" stroke-width="4" stroke-linecap="round" fill="none"/>
+                <!-- 뒷다리 -->
+                <path d="M 20 34 L 16 48 L 24 48" stroke="#b45309" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                <!-- 날렵한 등/몸체 -->
+                <ellipse cx="38" cy="32" rx="18" ry="12" fill="#f59e0b"/>
+                <!-- 앞다리 -->
+                <path d="M 48 34 L 52 48 L 58 48" stroke="#b45309" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                <!-- 머리 & 귀 -->
+                <circle cx="58" cy="22" r="11" fill="#fbbf24"/>
+                <polygon points="54,14 58,4 64,13" fill="#d97706"/>
+                <polygon points="62,14 68,6 71,15" fill="#d97706"/>
+                <!-- 눈 & 코 & 수염 -->
+                <ellipse cx="64" cy="20" rx="2" ry="3.5" fill="#047857"/>
+                <polygon points="70,23 68,21 72,21" fill="#ec4899"/>
+                <line x1="68" y1="24" x2="78" y2="22" stroke="#ffffff" stroke-width="1.2"/>
+                <line x1="68" y1="26" x2="77" y2="28" stroke="#ffffff" stroke-width="1.2"/>
               </svg>
             </div>
           `,
-          iconSize: [56, 56],
-          iconAnchor: [28, 28]
+          iconSize: [64, 52],
+          iconAnchor: [32, 26]
         });
       } else if (cameraType === 'tiger') {
-        // [4. 구간 단속: 전신 호랑이 (파이어 오렌지 오라)]
+        // [4. 구간 단속: 호랑이 측면(옆모습) 전신 - 파이어 오렌지]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
-            <div class="relative flex items-center justify-center animate-top-pump" style="width:60px; height:60px;">
+            <div class="relative flex items-center justify-center animate-top-pump" style="width:72px; height:54px;">
               <div class="absolute w-12 h-12 rounded-full bg-orange-600/50 animate-ping"></div>
-              <svg viewBox="0 0 64 64" class="w-14 h-14" style="filter: drop-shadow(0 0 14px rgba(249,115,22,1)) drop-shadow(0 4px 8px rgba(0,0,0,0.9));">
-                <!-- 귀 -->
-                <circle cx="18" cy="14" r="6" fill="#ea580c"/>
-                <circle cx="46" cy="14" r="6" fill="#ea580c"/>
-                <!-- 근육질 몸체 & 앞발 -->
-                <ellipse cx="32" cy="40" rx="19" ry="15" fill="#f97316"/>
-                <path d="M 24 32 L 20 40 L 26 42" stroke="#000000" stroke-width="2" fill="none"/>
-                <path d="M 40 32 L 44 40 L 38 42" stroke="#000000" stroke-width="2" fill="none"/>
-                <rect x="20" y="44" width="7" height="12" rx="3" fill="#ea580c"/>
-                <rect x="37" y="44" width="7" height="12" rx="3" fill="#ea580c"/>
-                <!-- 얼굴 및 호랑이 줄무늬 -->
-                <circle cx="32" cy="24" r="15" fill="#fb923c"/>
-                <path d="M 32 10 L 32 16 M 28 12 L 32 14 L 36 12" stroke="#000000" stroke-width="2" stroke-linecap="round"/>
-                <circle cx="26" cy="22" r="3" fill="#ffffff"/>
-                <circle cx="26" cy="22" r="1.5" fill="#000000"/>
-                <circle cx="38" cy="22" r="3" fill="#ffffff"/>
-                <circle cx="38" cy="22" r="1.5" fill="#000000"/>
-                <!-- 주둥이와 송곳니 -->
-                <ellipse cx="32" cy="29" rx="7" ry="5" fill="#ffffff"/>
-                <polygon points="32,27 29,24 35,24" fill="#000000"/>
-                <polygon points="28,31 29,34 30,31" fill="#ffffff"/>
-                <polygon points="34,31 35,34 36,31" fill="#ffffff"/>
+              <svg viewBox="0 0 88 56" class="w-18 h-12" style="filter: drop-shadow(0 0 16px rgba(249,115,22,1)) drop-shadow(0 4px 8px rgba(0,0,0,0.9));">
                 <!-- 포효하는 꼬리 -->
-                <path d="M 46 40 Q 60 34 54 16" stroke="#ea580c" stroke-width="4" stroke-linecap="round" fill="none"/>
+                <path d="M 14 30 Q 4 18 10 8 Q 18 4 14 16" stroke="#ea580c" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+                <!-- 뒷다리 -->
+                <path d="M 22 34 L 16 49 L 26 49" stroke="#c2410c" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                <!-- 근육질 몸통 -->
+                <ellipse cx="42" cy="30" rx="24" ry="15" fill="#f97316"/>
+                <!-- 호랑이 줄무늬 -->
+                <path d="M 30 20 L 32 30 M 40 18 L 38 32 M 48 20 L 50 30" stroke="#000000" stroke-width="2.5" stroke-linecap="round"/>
+                <!-- 앞다리 -->
+                <path d="M 54 34 L 58 49 L 68 49" stroke="#c2410c" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                <!-- 머리 & 귀 -->
+                <circle cx="66" cy="20" r="13" fill="#fb923c"/>
+                <circle cx="60" cy="10" r="4.5" fill="#ea580c"/>
+                <!-- 눈 & 송곳니 주둥이 -->
+                <circle cx="70" cy="17" r="2.2" fill="#000000"/>
+                <polygon points="76,21 82,24 76,27" fill="#ffffff"/>
+                <polygon points="77,22 79,25 78,22" fill="#000000"/>
               </svg>
             </div>
           `,
-          iconSize: [60, 60],
-          iconAnchor: [30, 30]
+          iconSize: [72, 54],
+          iconAnchor: [36, 27]
         });
       }
     };
@@ -487,7 +491,6 @@
               .bindPopup(`<b>${cam.name}</b><br>제한속도: ${cam.limit}km/h`);
           });
 
-          // 초기 전신 마커 등록
           userMarkerRef.current = L.marker([defaultLat, defaultLon], {
             icon: createDynamicUserIcon(null)
           }).addTo(map);
@@ -507,7 +510,6 @@
         };
       }, []);
 
-      // 단속 상태 변화 시 전신 캐릭터 모핑
       useEffect(() => {
         if (userMarkerRef.current) {
           const activeType = nearbyCamera ? nearbyCamera.type : null;
@@ -515,7 +517,6 @@
         }
       }, [nearbyCamera]);
 
-      // GPS 갱신
       useEffect(() => {
         if (mapInstanceRef.current && currentCoords) {
           const { lat, lon } = currentCoords;
@@ -610,7 +611,7 @@
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
 
-      // GPS & HUD & 지도 상태
+      // GPS & HUD & 순환 시뮬레이션 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [currentCoords, setCurrentCoords] = useState(null);
       const [hudViewMode, setHudViewMode] = useState('map');
@@ -620,7 +621,9 @@
       const [isPassengerMode, setIsPassengerMode] = useState(false);
       const [savedFineTotal, setSavedFineTotal] = useState(0);
       const [showDefenseToast, setShowDefenseToast] = useState(false);
-      const [isSimulationActive, setIsSimulationActive] = useState(false);
+      
+      // 순환 테스트 스텝 (0: 정상택시, 1: 강아지, 2: 고양이, 3: 호랑이)
+      const [simStep, setSimStep] = useState(0);
 
       const activeCameraTracking = useRef(null);
       const lastSoundTime = useRef(0);
@@ -636,17 +639,16 @@
         }
       }, [appData]);
 
-      // --- 화면 꺼짐 방지 (Screen Wake Lock API) 엔진 ---
+      // 화면 상시 켜짐 방지
       useEffect(() => {
         let wakeLockSentinel = null;
-
         const requestWakeLock = async () => {
           try {
             if ('wakeLock' in navigator) {
               wakeLockSentinel = await navigator.wakeLock.request('screen');
             }
           } catch (err) {
-            console.warn('Wake Lock request error:', err);
+            console.warn('Wake Lock Error:', err);
           }
         };
 
@@ -661,16 +663,13 @@
         };
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
-
         return () => {
           document.removeEventListener('visibilitychange', handleVisibilityChange);
-          if (wakeLockSentinel) {
-            wakeLockSentinel.release().catch(() => {});
-          }
+          if (wakeLockSentinel) wakeLockSentinel.release().catch(() => {});
         };
       }, [currentTab]);
 
-      // GPS 감시 및 단속 감지 엔진
+      // 실시간 GPS 감시
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -682,7 +681,7 @@
             setGpsSpeed(speedKmh);
             setCurrentCoords({ lat, lon });
 
-            if (!isSimulationActive) {
+            if (simStep === 0) {
               let closest = null;
               let minDistance = 99999;
 
@@ -726,29 +725,44 @@
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
-      }, [isSimulationActive, isPassengerMode]);
+      }, [simStep, isPassengerMode]);
 
-      const toggleSimulation = (e) => {
+      // 원터치 4단계 순환 테스트 (택시 ➔ 강아지 ➔ 고양이 ➔ 호랑이)
+      const handleCycleSimulation = (e) => {
         e.stopPropagation();
-        if (isSimulationActive) {
-          setIsSimulationActive(false);
+        const nextStep = (simStep + 1) % 4;
+        setSimStep(nextStep);
+
+        if (nextStep === 0) {
+          // [0. 일반 모드 복귀]
           setNearbyCamera(null);
           setGpsSpeed(0);
           setSavedFineTotal(prev => prev + 40000);
           setShowDefenseToast(true);
           setTimeout(() => setShowDefenseToast(false), 3500);
-        } else {
-          setIsSimulationActive(true);
+        } else if (nextStep === 1) {
+          // [1. 강아지: 신호·과속 단속]
           setGpsSpeed(68);
-          setNearbyCamera({
-            id: 'sim_1',
-            name: '불당대로 (시뮬레이션)',
-            limit: 50,
-            dist: 240,
-            type: 'dog'
-          });
+          setNearbyCamera({ id: 'sim_dog', name: '불당대로 (과속단속)', limit: 50, dist: 220, type: 'dog' });
           playGuardianAudio('dog', isPassengerMode);
+        } else if (nextStep === 2) {
+          // [2. 고양이: 주정차 단속]
+          setGpsSpeed(32);
+          setNearbyCamera({ id: 'sim_cat', name: '천안역 광장 (주정차구역)', limit: 30, dist: 140, type: 'cat' });
+          playGuardianAudio('cat', isPassengerMode);
+        } else if (nextStep === 3) {
+          // [3. 호랑이: 구간 단속]
+          setGpsSpeed(84);
+          setNearbyCamera({ id: 'sim_tiger', name: '남부대로 (구간단속)', limit: 70, dist: 380, type: 'tiger' });
+          playGuardianAudio('tiger', isPassengerMode);
         }
+      };
+
+      const getSimButtonLabel = () => {
+        if (simStep === 0) return '⚡ 캐릭터 테스트';
+        if (simStep === 1) return '🐶 강아지 (신호과속)';
+        if (simStep === 2) return '🐱 고양이 (주정차)';
+        return '🐯 호랑이 (구간단속)';
       };
 
       useEffect(() => {
@@ -998,7 +1012,7 @@
 
           <main className={`flex-1 flex flex-col ${currentTab === 'hud' ? 'p-0 overflow-hidden relative' : 'p-3 pb-24 overflow-y-auto'}`}>
             
-            {/* 탭 1: 🏎️ 스마트 가디언 풀스크린 지도 & 전신 마커 HUD */}
+            {/* 탭 1: 🏎️ 스마트 가디언 풀스크린 지도 & 측면 전신 마커 HUD */}
             {currentTab === 'hud' && (
               <div
                 className={`flex-1 flex flex-col justify-between select-none relative w-full h-full overflow-hidden ${
@@ -1009,7 +1023,7 @@
               >
                 {/* 상단 통합 플로팅 제어 알약 바 */}
                 <div className="absolute top-3 left-3 right-3 z-[450] flex justify-between items-center pointer-events-auto">
-                  <div className="flex gap-1.5 bg-slate-950/80 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
+                  <div className="flex gap-1.5 bg-slate-950/85 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
                     <button
                       onClick={() => {
                         setIsPassengerMode(!isPassengerMode);
@@ -1032,15 +1046,16 @@
                     </button>
                   </div>
 
+                  {/* 4단계 원터치 순환 테스트 버튼 */}
                   <button
-                    onClick={toggleSimulation}
+                    onClick={handleCycleSimulation}
                     className={`px-3 py-1.5 rounded-2xl text-[10px] font-black border shadow-2xl transition active:scale-95 ${
-                      isSimulationActive
+                      simStep > 0
                         ? 'bg-red-600 text-white border-white animate-pulse'
-                        : 'bg-slate-950/80 backdrop-blur-md text-yellow-400 border-yellow-500/50'
+                        : 'bg-slate-950/85 backdrop-blur-md text-yellow-400 border-yellow-500/50'
                     }`}
                   >
-                    {isSimulationActive ? '⚡ 테스트 중지' : '⚡ 단속 테스트'}
+                    {getSimButtonLabel()}
                   </button>
                 </div>
 
@@ -1062,7 +1077,7 @@
                 {hudViewMode === 'map' ? (
                   <div className="relative w-full h-full flex-1 flex flex-col">
                     
-                    {/* 풀스크린 실시간 지도 & 동적 전신 마커 */}
+                    {/* 풀스크린 실시간 지도 & 측면 전신 마커 */}
                     <FullscreenLiveMapView
                       currentCoords={currentCoords}
                       nearbyCamera={nearbyCamera}
