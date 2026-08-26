@@ -55,7 +55,7 @@
 
     /* 리플릿 풀스크린 지도 컨테이너 */
     .leaflet-container {
-      background-color: #090d16 !important;
+      background-color: #1e293b !important;
       font-family: inherit;
       width: 100% !important;
       height: 100% !important;
@@ -74,7 +74,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v2.6.0';
+    const APP_VERSION = 'v2.7.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -308,15 +308,14 @@
       return DEFAULT_STORAGE;
     };
 
-    // --- 전신 옆모습(측면 뷰) 단독 캐릭터 마커 생성기 ---
+    // 전신 옆모습(측면 뷰) 단독 캐릭터 마커 생성기
     const createDynamicUserIcon = (cameraType) => {
       if (!cameraType) {
-        // [1. 평상시: 택시 측면 전신]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
             <div class="relative flex items-center justify-center" style="width:64px; height:44px;">
-              <div class="absolute w-8 h-8 rounded-full bg-yellow-400/30 animate-ping"></div>
+              <div class="absolute w-8 h-8 rounded-full bg-yellow-400/40 animate-ping"></div>
               <svg viewBox="0 0 80 48" class="w-16 h-10 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)]" style="filter: drop-shadow(0 0 10px rgba(250,204,21,0.95));">
                 <polygon points="34,8 46,8 49,14 31,14" fill="#ef4444" stroke="#ffffff" stroke-width="1.2"/>
                 <text x="40" y="13" font-size="4.5" font-weight="900" fill="#ffffff" text-anchor="middle">TAXI</text>
@@ -336,7 +335,6 @@
           iconAnchor: [32, 22]
         });
       } else if (cameraType === 'dog') {
-        // [2. 과속·신호 단속: 강아지 측면 전신]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
@@ -360,7 +358,6 @@
           iconAnchor: [34, 26]
         });
       } else if (cameraType === 'cat') {
-        // [3. 주정차 단속: 고양이 측면 전신]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
@@ -385,7 +382,6 @@
           iconAnchor: [32, 26]
         });
       } else if (cameraType === 'tiger') {
-        // [4. 구간 단속: 호랑이 측면 전신]
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
@@ -582,7 +578,7 @@
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
       const [showDefenseListModal, setShowDefenseListModal] = useState(false);
 
-      // GPS & HUD & 과태료 방어/적발 이력 상태
+      // GPS & HUD & 과태료 방어/적발 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [currentCoords, setCurrentCoords] = useState(null);
       const [hudViewMode, setHudViewMode] = useState('map');
@@ -590,11 +586,21 @@
       const [isAutoTracking, setIsAutoTracking] = useState(true);
       const [nearbyCamera, setNearbyCamera] = useState(null);
       const [isPassengerMode, setIsPassengerMode] = useState(false);
-      
+
+      // 주정차 5분 타이머 상태 (초 단위)
+      const [parkingCountdown, setParkingCountdown] = useState(300);
+      const [isParkingStopped, setIsParkingStopped] = useState(false);
+
+      // 구간단속 실시간 평균속도 연산 상태
+      const [sectionAvgSpeed, setSectionAvgSpeed] = useState(0);
+      const sectionStartTime = useRef(null);
+      const sectionTotalSpeed = useRef(0);
+      const sectionSpeedSamples = useRef(0);
+
       // 누적 단속 기록 (방어 성공 + 적발 건 동시 저장)
       const [defenseHistory, setDefenseHistory] = useState([
         { id: 1, time: '18:42', name: '불당대로 (시청 앞)', type: 'dog', limit: 50, speed: 48, status: 'pass', amount: 40000 },
-        { id: 2, time: '19:15', name: '충무로 (쌍용고사거리)', type: 'dog', limit: 50, speed: 64, status: 'fail', amount: -40000 }
+        { id: 2, time: '19:15', name: '천안역 광장 (주정차)', type: 'cat', limit: 30, speed: 0, status: 'pass', amount: 40000 }
       ]);
 
       const [simStep, setSimStep] = useState(0);
@@ -641,7 +647,32 @@
         };
       }, [currentTab]);
 
-      // 실시간 GPS 감시 및 방어/적발 판정 엔진
+      // 주정차 5분 타이머 엔진
+      useEffect(() => {
+        let timer = null;
+        if (isParkingStopped && parkingCountdown > 0) {
+          timer = setInterval(() => setParkingCountdown(prev => prev - 1), 1000);
+        } else if (isParkingStopped && parkingCountdown === 0) {
+          // 5분 초과 적발 처리
+          playGuardianAudio('cat', false);
+          const failEntry = {
+            id: Date.now(),
+            time: getCurrentTimeStr(),
+            name: nearbyCamera?.name || '주정차 단속 구역',
+            type: 'cat',
+            limit: 30,
+            speed: 0,
+            status: 'fail',
+            amount: -40000
+          };
+          setDefenseHistory(prev => [failEntry, ...prev]);
+          setIsParkingStopped(false);
+          alert('🚨 주정차 5분 유예시간이 초과되었습니다! 즉시 이동하세요.');
+        }
+        return () => clearInterval(timer);
+      }, [isParkingStopped, parkingCountdown]);
+
+      // 실시간 GPS 감시 및 방어/적발/구간평균/주정차 판정 엔진
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -667,6 +698,43 @@
 
               if (closest && closest.dist <= 350) {
                 setNearbyCamera(closest);
+
+                // 1. 주정차 구역(cat) 정차 감지
+                if (closest.type === 'cat') {
+                  if (speedKmh === 0 && !isParkingStopped) {
+                    setIsParkingStopped(true);
+                    setParkingCountdown(300);
+                  } else if (speedKmh > 5 && isParkingStopped) {
+                    // 5분 이내 이동 성공
+                    const passEntry = {
+                      id: Date.now(),
+                      time: getCurrentTimeStr(),
+                      name: closest.name,
+                      type: 'cat',
+                      limit: closest.limit,
+                      speed: 0,
+                      status: 'pass',
+                      amount: 40000
+                    };
+                    setDefenseHistory(prev => [passEntry, ...prev]);
+                    setIsParkingStopped(false);
+                    setParkingCountdown(300);
+                  }
+                }
+
+                // 2. 구간단속(tiger) 평균속도 누적 계산
+                if (closest.type === 'tiger') {
+                  if (!sectionStartTime.current) {
+                    sectionStartTime.current = Date.now();
+                    sectionTotalSpeed.current = speedKmh;
+                    sectionSpeedSamples.current = 1;
+                  } else {
+                    sectionTotalSpeed.current += speedKmh;
+                    sectionSpeedSamples.current += 1;
+                    setSectionAvgSpeed(Math.round(sectionTotalSpeed.current / sectionSpeedSamples.current));
+                  }
+                }
+
                 if (!activeCameraTracking.current) {
                   activeCameraTracking.current = {
                     id: closest.id,
@@ -687,32 +755,46 @@
                   lastSoundTime.current = now;
                 }
               } else {
-                // 단속 구역 통과 완료 시 방어 vs 적발 판정
+                // 단속 구역 통과 완료 시 판정
                 if (activeCameraTracking.current && minDistance > 400) {
                   const { name, limit, type, maxSpeed } = activeCameraTracking.current;
-                  const isOverspeed = maxSpeed > limit;
+                  let isOverspeed = maxSpeed > limit;
+                  let checkSpeed = maxSpeed;
+
+                  if (type === 'tiger' && sectionSpeedSamples.current > 0) {
+                    checkSpeed = sectionAvgSpeed;
+                    isOverspeed = sectionAvgSpeed > limit;
+                    sectionStartTime.current = null;
+                    sectionTotalSpeed.current = 0;
+                    sectionSpeedSamples.current = 0;
+                    setSectionAvgSpeed(0);
+                  }
+
                   let penaltyAmount = 40000;
                   if (isOverspeed) {
-                    const diff = maxSpeed - limit;
+                    const diff = checkSpeed - limit;
                     if (diff > 40) penaltyAmount = 100000;
                     else if (diff > 20) penaltyAmount = 70000;
                     else penaltyAmount = 40000;
                   }
 
-                  const newEntry = {
-                    id: Date.now(),
-                    time: getCurrentTimeStr(),
-                    name,
-                    type,
-                    limit,
-                    speed: maxSpeed,
-                    status: isOverspeed ? 'fail' : 'pass',
-                    amount: isOverspeed ? -penaltyAmount : 40000
-                  };
-                  setDefenseHistory(prev => [newEntry, ...prev]);
+                  if (type !== 'cat') {
+                    const newEntry = {
+                      id: Date.now(),
+                      time: getCurrentTimeStr(),
+                      name,
+                      type,
+                      limit,
+                      speed: checkSpeed,
+                      status: isOverspeed ? 'fail' : 'pass',
+                      amount: isOverspeed ? -penaltyAmount : 40000
+                    };
+                    setDefenseHistory(prev => [newEntry, ...prev]);
+                  }
                   activeCameraTracking.current = null;
                 }
                 setNearbyCamera(null);
+                setIsParkingStopped(false);
               }
             }
           },
@@ -721,7 +803,7 @@
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
-      }, [simStep, isPassengerMode]);
+      }, [simStep, isPassengerMode, isParkingStopped, parkingCountdown, sectionAvgSpeed]);
 
       // 원터치 4단계 순환 테스트
       const handleCycleSimulation = (e) => {
@@ -730,7 +812,6 @@
         setSimStep(nextStep);
 
         if (nextStep === 0) {
-          // 테스트 완료 복귀 시 시뮬레이션 방어/적발 추가
           const simEntry = {
             id: Date.now(),
             time: getCurrentTimeStr(),
@@ -744,17 +825,24 @@
           setDefenseHistory(prev => [simEntry, ...prev]);
           setNearbyCamera(null);
           setGpsSpeed(0);
+          setIsParkingStopped(false);
+          setSectionAvgSpeed(0);
         } else if (nextStep === 1) {
           setGpsSpeed(68);
-          setNearbyCamera({ id: 'sim_dog', name: '불당대로 (과속단속)', limit: 50, dist: 220, type: 'dog' });
+          setNearbyCamera({ id: 'sim_dog', name: '불당대로 (신호·과속)', limit: 50, dist: 220, type: 'dog' });
           playGuardianAudio('dog', isPassengerMode);
+          setIsParkingStopped(false);
         } else if (nextStep === 2) {
-          setGpsSpeed(32);
+          setGpsSpeed(0);
           setNearbyCamera({ id: 'sim_cat', name: '천안역 광장 (주정차구역)', limit: 30, dist: 140, type: 'cat' });
+          setIsParkingStopped(true);
+          setParkingCountdown(295);
           playGuardianAudio('cat', isPassengerMode);
         } else if (nextStep === 3) {
           setGpsSpeed(84);
+          setSectionAvgSpeed(78);
           setNearbyCamera({ id: 'sim_tiger', name: '남부대로 (구간단속)', limit: 70, dist: 380, type: 'tiger' });
+          setIsParkingStopped(false);
           playGuardianAudio('tiger', isPassengerMode);
         }
       };
@@ -766,7 +854,6 @@
         return '🐯 호랑이';
       };
 
-      // 방어 성공 / 적발 통계 집계
       const passCount = defenseHistory.filter(h => h.status === 'pass').length;
       const failCount = defenseHistory.filter(h => h.status === 'fail').length;
       const totalSaved = defenseHistory.filter(h => h.status === 'pass').reduce((s, h) => s + h.amount, 0);
@@ -1037,7 +1124,7 @@
               >
                 {/* 상단 컨트롤 바 */}
                 <div className="absolute top-3 left-3 right-3 z-[450] flex justify-between items-center pointer-events-auto">
-                  <div className="flex gap-1.5 bg-slate-950/80 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
+                  <div className="flex gap-1.5 bg-slate-950/85 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
                     <button
                       onClick={() => {
                         setIsPassengerMode(!isPassengerMode);
@@ -1065,7 +1152,7 @@
                     className={`px-3 py-1.5 rounded-2xl text-[10px] font-black border shadow-2xl transition active:scale-95 ${
                       simStep > 0
                         ? 'bg-red-600 text-white border-white animate-pulse'
-                        : 'bg-slate-950/80 backdrop-blur-md text-yellow-400 border-yellow-500/50'
+                        : 'bg-slate-950/85 backdrop-blur-md text-yellow-400 border-yellow-500/50'
                     }`}
                   >
                     {getSimButtonLabel()}
@@ -1076,8 +1163,8 @@
                 {hudViewMode === 'map' ? (
                   <div className="relative w-full h-full flex-1 flex flex-col">
                     
-                    {/* 1. 배경: 풀스크린 실시간 지도 */}
-                    <div className="absolute inset-0 z-0 opacity-40">
+                    {/* 1. 배경: 선명한 실시간 지도 (터치 100% 작동) */}
+                    <div className="absolute inset-0 z-0">
                       <FullscreenLiveMapView
                         currentCoords={currentCoords}
                         nearbyCamera={nearbyCamera}
@@ -1086,51 +1173,65 @@
                       />
                     </div>
 
-                    {/* 2. 전면: 5:5 대형 가디언 오버레이 */}
-                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-16">
+                    {/* 2. 전면: 5:5 투명 글래스 가디언 HUD 오버레이 (터치 관통) */}
+                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-14 pb-16 pointer-events-none">
                       
-                      {/* 상단 1/2: 속도제한 표지판 (투명 글씨 ➔ 단속 시 붉은 네온 점등) */}
+                      {/* 상단 1/2: 속도제한 표지판 (투명 글래스 ➔ 단속 시 붉은 네온 점등) */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
-                        <div className={`flex items-center justify-center w-48 h-48 rounded-full border-[10px] transition-all duration-300 ${
+                        <div className={`flex items-center justify-center w-48 h-48 rounded-full border-[8px] transition-all duration-300 ${
                           isNearCamera
-                            ? 'border-red-600 bg-white text-black animate-top-pump shadow-[0_0_30px_rgba(239,68,68,0.95)]'
-                            : 'border-white/30 bg-slate-950/60 backdrop-blur-md text-white/50 shadow-2xl'
+                            ? 'border-red-600 bg-white/95 text-black animate-top-pump shadow-[0_0_35px_rgba(239,68,68,1)]'
+                            : 'border-red-500/40 bg-slate-950/30 backdrop-blur-[2px] text-white/80 shadow-2xl'
                         }`}>
                           <div className="flex flex-col items-center justify-center leading-none">
-                            <span className="text-7xl font-black tracking-tight">{effectiveSpeedLimit}</span>
-                            <span className={`text-[11px] font-black tracking-widest mt-1 ${isNearCamera ? 'text-red-600' : 'text-slate-400'}`}>LIMIT</span>
+                            <span className="text-7xl font-black tracking-tight drop-shadow-md">{effectiveSpeedLimit}</span>
+                            <span className={`text-[11px] font-black tracking-widest mt-1 ${isNearCamera ? 'text-red-600' : 'text-red-400/90'}`}>LIMIT</span>
                           </div>
                         </div>
 
-                        {/* 단속 카메라 정보 배지 */}
+                        {/* 단속 카메라 정보 & 주정차/구간단속 라이브 배지 */}
                         {nearbyCamera ? (
-                          <div className="mt-2.5 px-4 py-1.5 rounded-2xl bg-red-950/95 border border-red-500 text-red-300 font-black text-xs shadow-2xl animate-bounce">
+                          <div className="mt-2.5 px-4 py-1.5 rounded-2xl bg-red-950/95 border border-red-500 text-red-300 font-black text-xs shadow-2xl animate-bounce pointer-events-auto">
                             <span>{nearbyCamera.type === 'dog' ? '🐶 신호·과속' : nearbyCamera.type === 'cat' ? '🐱 주정차' : '🐯 구간단속'}</span>
                             <span className="ml-1 text-yellow-400 font-bold">{nearbyCamera.dist}m 전방</span>
                           </div>
                         ) : (
-                          <span className="text-[11px] font-bold text-slate-400/70 mt-2">정상 주행 구간</span>
+                          <span className="text-[11px] font-bold text-slate-300/80 mt-2 drop-shadow">정상 주행 구간</span>
+                        )}
+
+                        {/* 주정차 5분 타이머 라이브 표시 */}
+                        {isParkingStopped && (
+                          <div className="mt-1.5 px-3 py-1 rounded-xl bg-amber-950/95 border border-yellow-400 text-yellow-300 font-black text-xs shadow-2xl animate-pulse">
+                            ⏱️ 주정차 유예 시간: {Math.floor(parkingCountdown / 60)}분 {String(parkingCountdown % 60).padStart(2, '0')}초 남음
+                          </div>
+                        )}
+
+                        {/* 구간단속 실시간 평균속도 라이브 표시 */}
+                        {nearbyCamera?.type === 'tiger' && sectionAvgSpeed > 0 && (
+                          <div className="mt-1.5 px-3 py-1 rounded-xl bg-orange-950/95 border border-orange-500 text-orange-200 font-black text-xs shadow-2xl">
+                            🐯 구간 실시간 평균: <span className={sectionAvgSpeed > effectiveSpeedLimit ? 'text-red-400 font-black' : 'text-green-400 font-black'}>{sectionAvgSpeed} km/h</span>
+                          </div>
                         )}
                       </div>
 
-                      {/* 하단 1/2: 초대형 디지털 속도계 (투명 글씨 ➔ 과속 시 붉은색) */}
+                      {/* 하단 1/2: 초대형(Giant) 디지털 속도계 (투명 글씨 ➔ 과속 시 붉은색) */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
                         <div className={`transition-all duration-300 flex flex-col items-center justify-center ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
                           <div className="flex items-baseline justify-center">
-                            <span className={`text-9xl font-black tracking-tighter font-mono transition-colors drop-shadow-2xl ${
+                            <span className={`text-[10rem] font-black tracking-tighter font-mono leading-none transition-colors drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)] ${
                               isOverSpeed
-                                ? 'text-red-500 animate-pulse'
+                                ? 'text-red-500 animate-pulse drop-shadow-[0_0_30px_rgba(239,68,68,1)]'
                                 : isNearCamera
-                                ? 'text-green-400'
-                                : 'text-white/60'
+                                ? 'text-green-400 drop-shadow-[0_0_20px_rgba(34,197,94,0.9)]'
+                                : 'text-white/80'
                             }`}>
                               {gpsSpeed}
                             </span>
-                            <span className="text-3xl font-bold ml-2 text-slate-400/80">km/h</span>
+                            <span className="text-3xl font-bold ml-2 text-slate-300/80 drop-shadow-md">km/h</span>
                           </div>
 
                           {isOverSpeed && (
-                            <span className="text-xs font-black text-red-300 bg-red-950/90 px-3 py-1 rounded-full border border-red-500 mt-2 animate-bounce">
+                            <span className="text-xs font-black text-red-300 bg-red-950/90 px-3.5 py-1 rounded-full border border-red-500 mt-2 animate-bounce">
                               ⚠️ 즉시 감속 (+{gpsSpeed - effectiveSpeedLimit} km/h 초과)
                             </span>
                           )}
@@ -1552,9 +1653,7 @@
             </button>
           </nav>
 
-          {/* ======================================================== */}
           {/* 단속 방어 / 적발 상세 내역 팝업 모달 */}
-          {/* ======================================================== */}
           {showDefenseListModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl">
@@ -1596,7 +1695,7 @@
                           <div>
                             <div className="font-bold text-slate-200">{item.name}</div>
                             <div className="text-[10px] text-slate-400 font-medium">
-                              {item.time} 통과 (제한 {item.limit} | 주행 {item.speed}km/h)
+                              {item.time} 통과 ({item.type === 'cat' ? '주정차 정차' : `제한 ${item.limit} | 주행 ${item.speed}km/h`})
                             </div>
                           </div>
                         </div>
