@@ -31,7 +31,7 @@
     .hud-rot90-flip { transform: rotate(-90deg) scaleY(-1); }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1.25rem); }
 
-    /* 5:5 교대 펌핑 애니메이션 */
+    /* 교대 펌핑 애니메이션 */
     @keyframes pulse-top-grow {
       0%, 100% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.95)); }
       50% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
@@ -53,21 +53,21 @@
     }
     .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
 
-    /* 속도계 폰트 스타일 */
+    /* 속도계 고대비 폰트 스타일 */
     .font-speed-hollow {
       color: rgba(255, 255, 255, 0.15);
       -webkit-text-stroke: 2.5px rgba(255, 255, 255, 0.65);
-      text-shadow: 0 4px 12px rgba(0, 0, 0, 0.9);
+      text-shadow: 0 4px 14px rgba(0, 0, 0, 0.95);
     }
     .font-speed-cyan {
       color: #00f5ff;
-      -webkit-text-stroke: 2px #ffffff;
-      text-shadow: 0 0 25px rgba(0, 245, 255, 1), 0 4px 12px rgba(0, 0, 0, 0.9);
+      -webkit-text-stroke: 2.5px #ffffff;
+      text-shadow: 0 0 28px rgba(0, 245, 255, 1), 0 4px 14px rgba(0, 0, 0, 0.95);
     }
     .font-speed-red {
       color: #ff1e44;
       -webkit-text-stroke: 2.5px #ffffff;
-      text-shadow: 0 0 30px rgba(255, 30, 68, 1), 0 4px 12px rgba(0, 0, 0, 0.9);
+      text-shadow: 0 0 32px rgba(255, 30, 68, 1), 0 4px 14px rgba(0, 0, 0, 0.95);
     }
 
     /* 리플릿 풀스크린 지도 컨테이너 */
@@ -84,14 +84,14 @@
 <body class="select-none antialiased min-h-screen bg-slate-950">
   <div id="root">
     <div class="min-h-screen flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
-      K-TAXI 리얼 가디언 시스템 로딩 중...
+      K-TAXI 가디언 시스템 로딩 중...
     </div>
   </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v3.2.0';
+    const APP_VERSION = 'v3.3.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -120,9 +120,9 @@
     };
 
     // =========================================================================
-    // 100% 무조건 재생되는 리얼 사운드 생성 및 재생 엔진 (WAV PCM 빌더)
+    // 모바일 스피커 최적화 위상 누적 오디오 합성 엔진 (Phase Accumulator)
     // =========================================================================
-    let currentActiveSources = [];
+    let activeAudioSources = [];
 
     const getAudioContext = () => {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -136,18 +136,18 @@
       return window._kTaxiAudioCtx;
     };
 
-    // 사운드 즉시 강제 소멸 함수
+    // 모든 소리 즉시 강제 종료
     const stopAllAudio = () => {
-      currentActiveSources.forEach((src) => {
+      activeAudioSources.forEach((src) => {
         try {
           if (src.stop) src.stop();
           if (src.disconnect) src.disconnect();
         } catch (e) {}
       });
-      currentActiveSources = [];
+      activeAudioSources = [];
     };
 
-    // 첫 터치 시 모바일 브라우저 오디오 잠금 즉시 해제
+    // 첫 터치 시 모바일 오디오 잠금 해제
     const unlockMobileAudio = () => {
       const ctx = getAudioContext();
       if (ctx && ctx.state === 'suspended') {
@@ -182,7 +182,7 @@
             gain.connect(ctx.destination);
             osc.start(now + delay);
             osc.stop(now + delay + 0.35);
-            currentActiveSources.push(osc);
+            activeAudioSources.push(osc);
           });
         } else {
           if (type === 'dog') {
@@ -191,27 +191,33 @@
             const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
             const data = buffer.getChannelData(0);
 
+            let phase1 = 0, phase2 = 0;
+
             for (let i = 0; i < data.length; i++) {
               const t = i / sampleRate;
               let sample = 0;
-              // 1차 짖음 (0~0.22초)
+
+              // 1차 짖음 (0 ~ 0.22초)
               if (t >= 0 && t < 0.22) {
-                const env = Math.exp(-t * 22) * Math.sin(t * Math.PI / 0.22);
-                const freq = 460 * Math.exp(-t * 12);
-                const body = Math.sin(2 * Math.PI * freq * t) + 0.5 * Math.sin(4 * Math.PI * freq * t);
+                const freq = 520 * Math.exp(-t * 14) + 160;
+                phase1 += 2 * Math.PI * freq / sampleRate;
+                const env = Math.sin(t * Math.PI / 0.22) * Math.exp(-t * 8);
+                const harmonic = Math.sin(phase1) + 0.6 * Math.sin(2 * phase1) + 0.3 * Math.sin(3 * phase1);
                 const noise = (Math.random() * 2 - 1) * 0.45;
-                sample = (body * 0.6 + noise) * env;
+                sample = (harmonic * 0.65 + noise) * env;
               }
-              // 2차 짖음 (0.26~0.52초)
-              else if (t >= 0.26 && t < 0.52) {
+              // 2차 짖음 (0.26 ~ 0.50초)
+              else if (t >= 0.26 && t < 0.50) {
                 const t2 = t - 0.26;
-                const env = Math.exp(-t2 * 20) * Math.sin(t2 * Math.PI / 0.26);
-                const freq = 420 * Math.exp(-t2 * 12);
-                const body = Math.sin(2 * Math.PI * freq * t2) + 0.5 * Math.sin(4 * Math.PI * freq * t2);
+                const freq = 480 * Math.exp(-t2 * 14) + 150;
+                phase2 += 2 * Math.PI * freq / sampleRate;
+                const env = Math.sin(t2 * Math.PI / 0.24) * Math.exp(-t2 * 8);
+                const harmonic = Math.sin(phase2) + 0.6 * Math.sin(2 * phase2) + 0.3 * Math.sin(3 * phase2);
                 const noise = (Math.random() * 2 - 1) * 0.45;
-                sample = (body * 0.6 + noise) * env;
+                sample = (harmonic * 0.65 + noise) * env;
               }
-              data[i] = sample * 0.9;
+
+              data[i] = sample * 0.95;
             }
 
             const source = ctx.createBufferSource();
@@ -219,24 +225,32 @@
             source.connect(ctx.destination);
             source.start(now);
             source.stop(now + duration);
-            currentActiveSources.push(source);
+            activeAudioSources.push(source);
 
           } else if (type === 'cat') {
-            // [고양이: 실제 고양이 울음소리 ("야-옹~")]
+            // [고양이: 위상 누적 리얼 고양이 울음 ("야아옹~")]
             const duration = 0.75;
             const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
             const data = buffer.getChannelData(0);
 
+            let phase = 0;
+
             for (let i = 0; i < data.length; i++) {
               const t = i / sampleRate;
-              // 고양이 특유의 비음 피치 굴림 (360Hz ➔ 780Hz ➔ 420Hz)
-              const pitch = 360 + 420 * Math.sin(Math.min(t / 0.65, 1) * Math.PI);
-              const env = Math.sin(Math.min(t / 0.75, 1) * Math.PI) * (1 - 0.3 * t);
-              // 풍부한 고조파 배음
-              const tone = Math.sin(2 * Math.PI * pitch * t)
-                         + 0.55 * Math.sin(4 * Math.PI * pitch * t)
-                         + 0.25 * Math.sin(6 * Math.PI * pitch * t);
-              data[i] = tone * env * 0.65;
+              // 야아옹 곡선 (420Hz ➔ 880Hz ➔ 460Hz)
+              const freq = 420 + 460 * Math.sin(Math.min(t / 0.68, 1) * Math.PI);
+              phase += 2 * Math.PI * freq / sampleRate;
+
+              const env = Math.sin(Math.min(t / 0.75, 1) * Math.PI);
+              // 고양이 비음 배음 & 성대 떨림
+              const vocal = Math.sin(phase)
+                          + 0.55 * Math.sin(2 * phase)
+                          + 0.35 * Math.sin(3 * phase)
+                          + 0.15 * Math.sin(4 * phase);
+
+              // 25Hz 성대 바이브레이션
+              const vibrato = 1 + 0.15 * Math.sin(2 * Math.PI * 25 * t);
+              data[i] = vocal * env * vibrato * 0.85;
             }
 
             const source = ctx.createBufferSource();
@@ -244,7 +258,7 @@
             source.connect(ctx.destination);
             source.start(now);
             source.stop(now + duration);
-            currentActiveSources.push(source);
+            activeAudioSources.push(source);
 
           } else if (type === 'tiger') {
             // [호랑이: 실제 맹수 묵직한 포효 ("크아아앙-!")]
@@ -252,14 +266,18 @@
             const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
             const data = buffer.getChannelData(0);
 
+            let phase = 0;
+
             for (let i = 0; i < data.length; i++) {
               const t = i / sampleRate;
               const env = Math.sin(Math.min(t / 0.95, 1) * Math.PI);
-              // 초저음 성대 진동 + 맹수 그르렁 마찰
-              const freq = 120 * Math.exp(-t * 1.5) + 20 * Math.sin(2 * Math.PI * 35 * t);
-              const roarTone = Math.sin(2 * Math.PI * freq * t) + 0.6 * Math.sin(4 * Math.PI * freq * t);
+              // 중저음 진동 주파수
+              const freq = 140 * Math.exp(-t * 1.3) + 30 * Math.sin(2 * Math.PI * 35 * t) + 50;
+              phase += 2 * Math.PI * freq / sampleRate;
+
+              const roarTone = Math.sin(phase) + 0.6 * Math.sin(2 * phase) + 0.4 * Math.sin(3 * phase);
               const roarNoise = (Math.random() * 2 - 1) * 0.65;
-              data[i] = (roarTone * 0.5 + roarNoise) * env * 0.85;
+              data[i] = (roarTone * 0.45 + roarNoise * 0.55) * env * 0.95;
             }
 
             const source = ctx.createBufferSource();
@@ -267,7 +285,7 @@
             source.connect(ctx.destination);
             source.start(now);
             source.stop(now + duration);
-            currentActiveSources.push(source);
+            activeAudioSources.push(source);
           }
         }
       } catch (e) {
@@ -581,13 +599,13 @@
           {!isAutoTracking && (
             <button
               onClick={handleRecenter}
-              className="absolute bottom-28 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition"
+              className="absolute bottom-32 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition pointer-events-auto"
             >
               <span className="text-base">📍</span> 내 위치로
             </button>
           )}
 
-          <div className="absolute bottom-28 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow">
+          <div className="absolute bottom-32 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow pointer-events-none">
             <span className={`w-2 h-2 rounded-full ${isAutoTracking ? 'bg-emerald-400 animate-pulse' : 'bg-orange-400'}`}></span>
             {isAutoTracking ? '주행 추적 중' : '자유 탐색'}
           </div>
@@ -727,7 +745,7 @@
             playGuardianAudio(nearbyCamera.type, isPassengerMode);
           }, 2500);
         } else {
-          stopAllAudio(); // 감속 즉시 모든 사운드 강제 소멸
+          stopAllAudio(); // 감속 즉시 사운드 올킬
         }
 
         return () => {
@@ -892,7 +910,7 @@
       // 원터치 4단계 순환 테스트 (소리 즉시 전환 & 정지)
       const handleCycleSimulation = (e) => {
         e.stopPropagation();
-        stopAllAudio(); // 이전 소리 즉시 올킬
+        stopAllAudio();
 
         const nextStep = (simStep + 1) % 4;
         setSimStep(nextStep);
@@ -1258,7 +1276,7 @@
                     </div>
 
                     {/* 2. 전면: 5:5 초투명 가디언 HUD 오버레이 */}
-                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-16 pointer-events-none">
+                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-24 pointer-events-none">
                       
                       {/* 상단 1/2: 속도제한 표지판 (초투명 글래스) */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
@@ -1326,25 +1344,25 @@
                       </div>
                     </div>
 
-                    {/* 3. 하단 고정: 누적 과태료 방어/적발 전광판 배너 */}
-                    <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto">
+                    {/* 3. 하단 고정: 누적 과태료 방어/적발 전광판 배너 (탭 바 바로 위 bottom-20 배치) */}
+                    <div className="absolute bottom-20 left-3 right-3 z-[420] pointer-events-auto">
                       <div
                         onClick={() => setShowDefenseListModal(true)}
-                        className="bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-slate-950/95 border-2 border-emerald-500/60 p-2.5 rounded-2xl shadow-2xl flex items-center justify-between cursor-pointer active:scale-95 transition"
+                        className="bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-slate-950/95 border-2 border-emerald-500/80 p-2.5 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.8)] flex items-center justify-between cursor-pointer active:scale-95 transition"
                       >
                         <div className="flex items-center gap-2 overflow-hidden">
                           <span className="text-xl">🛡️</span>
                           <div className="text-xs truncate">
                             <div className="font-black text-white">
-                              방어 <span className="text-emerald-400">{passCount}회</span> (+{formatMoney(totalSaved)}) | 
-                              적발 <span className="text-red-400">{failCount}회</span> (-{formatMoney(totalFines)})
+                              방어 <span className="text-emerald-400 font-black">{passCount}회</span> (+{formatMoney(totalSaved)}) | 
+                              적발 <span className="text-red-400 font-black">{failCount}회</span> (-{formatMoney(totalFines)})
                             </div>
                             <div className="text-[10px] text-yellow-400 font-bold">
                               총 순방어액: {netSaved >= 0 ? `+${formatMoney(netSaved)}원` : `-${formatMoney(Math.abs(netSaved))}원`} (터치하여 상세)
                             </div>
                           </div>
                         </div>
-                        <span className="px-2 py-1 bg-emerald-900/80 text-emerald-200 border border-emerald-400/60 rounded-xl text-[10px] font-black flex-shrink-0">
+                        <span className="px-2 py-1 bg-emerald-900/90 text-emerald-200 border border-emerald-400/80 rounded-xl text-[10px] font-black flex-shrink-0">
                           내역보기 ▶
                         </span>
                       </div>
