@@ -91,7 +91,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v3.3.0';
+    const APP_VERSION = 'v3.4.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -119,8 +119,21 @@
       return Math.round(R * c);
     };
 
+    // 두 좌표 간 이동 방위각(Bearing) 계산
+    const calculateBearing = (startLat, startLng, destLat, destLng) => {
+      const startLatRad = startLat * Math.PI / 180;
+      const startLngRad = startLng * Math.PI / 180;
+      const destLatRad = destLat * Math.PI / 180;
+      const destLngRad = destLng * Math.PI / 180;
+      const y = Math.sin(destLngRad - startLngRad) * Math.cos(destLatRad);
+      const x = Math.cos(startLatRad) * Math.sin(destLatRad) -
+                Math.sin(startLatRad) * Math.cos(destLatRad) * Math.cos(destLngRad - startLngRad);
+      const brng = Math.atan2(y, x) * 180 / Math.PI;
+      return (brng + 360) % 360;
+    };
+
     // =========================================================================
-    // 모바일 스피커 최적화 위상 누적 오디오 합성 엔진 (Phase Accumulator)
+    // 스피커 최적화 고출력 오디오 엔진 (플립5 / S26 전 기종 100% 음량 보장)
     // =========================================================================
     let activeAudioSources = [];
 
@@ -136,7 +149,6 @@
       return window._kTaxiAudioCtx;
     };
 
-    // 모든 소리 즉시 강제 종료
     const stopAllAudio = () => {
       activeAudioSources.forEach((src) => {
         try {
@@ -147,7 +159,6 @@
       activeAudioSources = [];
     };
 
-    // 첫 터치 시 모바일 오디오 잠금 해제
     const unlockMobileAudio = () => {
       const ctx = getAudioContext();
       if (ctx && ctx.state === 'suspended') {
@@ -159,7 +170,6 @@
     document.addEventListener('touchstart', unlockMobileAudio, { passive: true });
     document.addEventListener('click', unlockMobileAudio, { passive: true });
 
-    // 실제 동물 소리 재생 함수
     const playGuardianAudio = (type = 'dog', isPassenger = false) => {
       try {
         stopAllAudio();
@@ -169,120 +179,116 @@
         const sampleRate = ctx.sampleRate;
         const now = ctx.currentTime;
 
+        // 마스터 컴프레서 (소리 왜곡 방지 및 고출력 유지)
+        const compressor = ctx.createDynamicsCompressor();
+        compressor.threshold.setValueAtTime(-15, now);
+        compressor.knee.setValueAtTime(40, now);
+        compressor.ratio.setValueAtTime(12, now);
+        compressor.attack.setValueAtTime(0.003, now);
+        compressor.release.setValueAtTime(0.25, now);
+
+        const masterGain = ctx.createGain();
+        masterGain.gain.setValueAtTime(1.8, now);
+
+        compressor.connect(masterGain);
+        masterGain.connect(ctx.destination);
+
         if (isPassenger) {
-          // [탑승 모드: 조종석 맑은 차임 (Ding-Dong)]
+          // [에티켓 모드: 맑은 투톤 차임 (Ding-Dong)]
           [0, 0.16].forEach((delay, idx) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(idx === 0 ? 880 : 1174, now + delay);
-            gain.gain.setValueAtTime(0.35, now + delay);
+            gain.gain.setValueAtTime(0.4, now + delay);
             gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.35);
             osc.connect(gain);
-            gain.connect(ctx.destination);
+            gain.connect(compressor);
             osc.start(now + delay);
             osc.stop(now + delay + 0.35);
             activeAudioSources.push(osc);
           });
         } else {
           if (type === 'dog') {
-            // [강아지: 실제 맹견 2연타 짖는 소리 ("컹! 컹!")]
+            // [강아지: 우렁찬 맹견 2연타 짖는 소리 ("컹! 컹!")]
             const duration = 0.55;
             const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
             const data = buffer.getChannelData(0);
-
             let phase1 = 0, phase2 = 0;
 
             for (let i = 0; i < data.length; i++) {
               const t = i / sampleRate;
               let sample = 0;
-
-              // 1차 짖음 (0 ~ 0.22초)
               if (t >= 0 && t < 0.22) {
-                const freq = 520 * Math.exp(-t * 14) + 160;
+                const freq = 540 * Math.exp(-t * 14) + 160;
                 phase1 += 2 * Math.PI * freq / sampleRate;
-                const env = Math.sin(t * Math.PI / 0.22) * Math.exp(-t * 8);
-                const harmonic = Math.sin(phase1) + 0.6 * Math.sin(2 * phase1) + 0.3 * Math.sin(3 * phase1);
-                const noise = (Math.random() * 2 - 1) * 0.45;
-                sample = (harmonic * 0.65 + noise) * env;
-              }
-              // 2차 짖음 (0.26 ~ 0.50초)
-              else if (t >= 0.26 && t < 0.50) {
+                const env = Math.sin(t * Math.PI / 0.22) * Math.exp(-t * 6);
+                const harmonic = Math.sin(phase1) + 0.7 * Math.sin(2 * phase1) + 0.4 * Math.sin(3 * phase1);
+                const noise = (Math.random() * 2 - 1) * 0.4;
+                sample = (harmonic * 0.7 + noise) * env;
+              } else if (t >= 0.26 && t < 0.50) {
                 const t2 = t - 0.26;
-                const freq = 480 * Math.exp(-t2 * 14) + 150;
+                const freq = 500 * Math.exp(-t2 * 14) + 150;
                 phase2 += 2 * Math.PI * freq / sampleRate;
-                const env = Math.sin(t2 * Math.PI / 0.24) * Math.exp(-t2 * 8);
-                const harmonic = Math.sin(phase2) + 0.6 * Math.sin(2 * phase2) + 0.3 * Math.sin(3 * phase2);
-                const noise = (Math.random() * 2 - 1) * 0.45;
-                sample = (harmonic * 0.65 + noise) * env;
+                const env = Math.sin(t2 * Math.PI / 0.24) * Math.exp(-t2 * 6);
+                const harmonic = Math.sin(phase2) + 0.7 * Math.sin(2 * phase2) + 0.4 * Math.sin(3 * phase2);
+                const noise = (Math.random() * 2 - 1) * 0.4;
+                sample = (harmonic * 0.7 + noise) * env;
               }
-
-              data[i] = sample * 0.95;
+              data[i] = sample * 1.2;
             }
 
             const source = ctx.createBufferSource();
             source.buffer = buffer;
-            source.connect(ctx.destination);
+            source.connect(compressor);
             source.start(now);
             source.stop(now + duration);
             activeAudioSources.push(source);
 
           } else if (type === 'cat') {
-            // [고양이: 위상 누적 리얼 고양이 울음 ("야아옹~")]
+            // [고양이: 선명한 비음 울음 ("야아옹~")]
             const duration = 0.75;
             const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
             const data = buffer.getChannelData(0);
-
             let phase = 0;
 
             for (let i = 0; i < data.length; i++) {
               const t = i / sampleRate;
-              // 야아옹 곡선 (420Hz ➔ 880Hz ➔ 460Hz)
-              const freq = 420 + 460 * Math.sin(Math.min(t / 0.68, 1) * Math.PI);
+              const freq = 450 + 520 * Math.sin(Math.min(t / 0.65, 1) * Math.PI);
               phase += 2 * Math.PI * freq / sampleRate;
-
               const env = Math.sin(Math.min(t / 0.75, 1) * Math.PI);
-              // 고양이 비음 배음 & 성대 떨림
-              const vocal = Math.sin(phase)
-                          + 0.55 * Math.sin(2 * phase)
-                          + 0.35 * Math.sin(3 * phase)
-                          + 0.15 * Math.sin(4 * phase);
-
-              // 25Hz 성대 바이브레이션
-              const vibrato = 1 + 0.15 * Math.sin(2 * Math.PI * 25 * t);
-              data[i] = vocal * env * vibrato * 0.85;
+              const vocal = Math.sin(phase) + 0.65 * Math.sin(2 * phase) + 0.4 * Math.sin(3 * phase);
+              const vibrato = 1 + 0.2 * Math.sin(2 * Math.PI * 22 * t);
+              data[i] = vocal * env * vibrato * 1.3;
             }
 
             const source = ctx.createBufferSource();
             source.buffer = buffer;
-            source.connect(ctx.destination);
+            source.connect(compressor);
             source.start(now);
             source.stop(now + duration);
             activeAudioSources.push(source);
 
           } else if (type === 'tiger') {
-            // [호랑이: 실제 맹수 묵직한 포효 ("크아아앙-!")]
+            // [호랑이: 묵직한 맹수 포효 ("크아아앙-!")]
             const duration = 0.95;
             const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
             const data = buffer.getChannelData(0);
-
             let phase = 0;
 
             for (let i = 0; i < data.length; i++) {
               const t = i / sampleRate;
               const env = Math.sin(Math.min(t / 0.95, 1) * Math.PI);
-              // 중저음 진동 주파수
-              const freq = 140 * Math.exp(-t * 1.3) + 30 * Math.sin(2 * Math.PI * 35 * t) + 50;
+              const freq = 140 * Math.exp(-t * 1.3) + 30 * Math.sin(2 * Math.PI * 35 * t) + 60;
               phase += 2 * Math.PI * freq / sampleRate;
-
               const roarTone = Math.sin(phase) + 0.6 * Math.sin(2 * phase) + 0.4 * Math.sin(3 * phase);
-              const roarNoise = (Math.random() * 2 - 1) * 0.65;
-              data[i] = (roarTone * 0.45 + roarNoise * 0.55) * env * 0.95;
+              const roarNoise = (Math.random() * 2 - 1) * 0.6;
+              data[i] = (roarTone * 0.5 + roarNoise * 0.5) * env * 1.2;
             }
 
             const source = ctx.createBufferSource();
             source.buffer = buffer;
-            source.connect(ctx.destination);
+            source.connect(compressor);
             source.start(now);
             source.stop(now + duration);
             activeAudioSources.push(source);
@@ -396,12 +402,15 @@
       return DEFAULT_STORAGE;
     };
 
-    const createDynamicUserIcon = (cameraType) => {
+    // 주행방향(heading)에 따라 360도 회전하는 전신 마커
+    const createDynamicUserIcon = (cameraType, heading = 0) => {
+      const rotStyle = `transform: rotate(${heading}deg); transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);`;
+
       if (!cameraType) {
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
-            <div class="relative flex items-center justify-center" style="width:64px; height:44px;">
+            <div class="relative flex items-center justify-center" style="width:64px; height:44px; ${rotStyle}">
               <div class="absolute w-8 h-8 rounded-full bg-yellow-400/40 animate-ping"></div>
               <svg viewBox="0 0 80 48" class="w-16 h-10 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)]" style="filter: drop-shadow(0 0 10px rgba(250,204,21,0.95));">
                 <polygon points="34,8 46,8 49,14 31,14" fill="#ef4444" stroke="#ffffff" stroke-width="1.2"/>
@@ -425,7 +434,7 @@
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
-            <div class="relative flex items-center justify-center animate-bounce" style="width:68px; height:52px;">
+            <div class="relative flex items-center justify-center animate-bounce" style="width:68px; height:52px; ${rotStyle}">
               <div class="absolute w-10 h-10 rounded-full bg-red-600/50 animate-ping"></div>
               <svg viewBox="0 0 80 56" class="w-16 h-12" style="filter: drop-shadow(0 0 14px rgba(239,68,68,1)) drop-shadow(0 4px 6px rgba(0,0,0,0.9));">
                 <path d="M 14 26 Q 6 14 12 8" stroke="#b91c1c" stroke-width="5" stroke-linecap="round" fill="none"/>
@@ -448,7 +457,7 @@
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
-            <div class="relative flex items-center justify-center animate-pulse" style="width:64px; height:52px;">
+            <div class="relative flex items-center justify-center animate-pulse" style="width:64px; height:52px; ${rotStyle}">
               <div class="absolute w-10 h-10 rounded-full bg-amber-500/50 animate-ping"></div>
               <svg viewBox="0 0 80 56" class="w-16 h-12" style="filter: drop-shadow(0 0 14px rgba(245,158,11,1)) drop-shadow(0 4px 6px rgba(0,0,0,0.9));">
                 <path d="M 16 34 Q 4 28 8 12 Q 14 6 18 16" stroke="#d97706" stroke-width="4" stroke-linecap="round" fill="none"/>
@@ -472,7 +481,7 @@
         return L.divIcon({
           className: 'custom-user-morph-marker',
           html: `
-            <div class="relative flex items-center justify-center animate-top-pump" style="width:72px; height:54px;">
+            <div class="relative flex items-center justify-center animate-top-pump" style="width:72px; height:54px; ${rotStyle}">
               <div class="absolute w-12 h-12 rounded-full bg-orange-600/50 animate-ping"></div>
               <svg viewBox="0 0 88 56" class="w-18 h-12" style="filter: drop-shadow(0 0 16px rgba(249,115,22,1)) drop-shadow(0 4px 8px rgba(0,0,0,0.9));">
                 <path d="M 14 30 Q 4 18 10 8 Q 18 4 14 16" stroke="#ea580c" stroke-width="4.5" stroke-linecap="round" fill="none"/>
@@ -494,7 +503,7 @@
       }
     };
 
-    function FullscreenLiveMapView({ currentCoords, nearbyCamera, isAutoTracking, setIsAutoTracking }) {
+    function FullscreenLiveMapView({ currentCoords, nearbyCamera, isAutoTracking, setIsAutoTracking, userHeading }) {
       const mapContainerRef = useRef(null);
       const mapInstanceRef = useRef(null);
       const userMarkerRef = useRef(null);
@@ -544,7 +553,7 @@
           });
 
           userMarkerRef.current = L.marker([defaultLat, defaultLon], {
-            icon: createDynamicUserIcon(null)
+            icon: createDynamicUserIcon(null, userHeading)
           }).addTo(map);
 
           mapInstanceRef.current = map;
@@ -562,13 +571,15 @@
         };
       }, []);
 
+      // 마커 모양 및 회전 각도 갱신
       useEffect(() => {
         if (userMarkerRef.current) {
           const activeType = nearbyCamera ? nearbyCamera.type : null;
-          userMarkerRef.current.setIcon(createDynamicUserIcon(activeType));
+          userMarkerRef.current.setIcon(createDynamicUserIcon(activeType, userHeading));
         }
-      }, [nearbyCamera]);
+      }, [nearbyCamera, userHeading]);
 
+      // 좌표 이동
       useEffect(() => {
         if (mapInstanceRef.current && currentCoords) {
           const { lat, lon } = currentCoords;
@@ -599,13 +610,13 @@
           {!isAutoTracking && (
             <button
               onClick={handleRecenter}
-              className="absolute bottom-32 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition pointer-events-auto"
+              className="absolute bottom-36 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition pointer-events-auto"
             >
               <span className="text-base">📍</span> 내 위치로
             </button>
           )}
 
-          <div className="absolute bottom-32 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow pointer-events-none">
+          <div className="absolute bottom-36 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow pointer-events-none">
             <span className={`w-2 h-2 rounded-full ${isAutoTracking ? 'bg-emerald-400 animate-pulse' : 'bg-orange-400'}`}></span>
             {isAutoTracking ? '주행 추적 중' : '자유 탐색'}
           </div>
@@ -655,6 +666,7 @@
       });
 
       const [navQuery, setNavQuery] = useState('');
+      const [isListening, setIsListening] = useState(false); // 음성 인식 상태
       const [newRoutineText, setNewRoutineText] = useState('');
       const [showAddRoutineInput, setShowAddRoutineInput] = useState(false);
 
@@ -664,9 +676,12 @@
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
       const [showDefenseListModal, setShowDefenseListModal] = useState(false);
 
-      // GPS & HUD 상태
+      // GPS & HUD & 방위각 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [currentCoords, setCurrentCoords] = useState(null);
+      const [userHeading, setUserHeading] = useState(0);
+      const prevCoordsRef = useRef(null);
+
       const [hudViewMode, setHudViewMode] = useState('map');
       const [hudMirrorMode, setHudMirrorMode] = useState('rot90');
       const [isAutoTracking, setIsAutoTracking] = useState(true);
@@ -731,7 +746,39 @@
         };
       }, [currentTab]);
 
-      // --- 과속 지속 시 2.5초 간격 연속 경보 엔진 (감속 시 0.01초 즉각 소멸) ---
+      // 음성 인식 STT 함수
+      const handleVoiceInput = () => {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          alert('이 브라우저는 음성 인식을 지원하지 않습니다. 크롬 또는 삼성인터넷을 이용해 주세요.');
+          return;
+        }
+
+        try {
+          const recognition = new SpeechRecognition();
+          recognition.lang = 'ko-KR';
+          recognition.interimResults = false;
+          recognition.maxAlternatives = 1;
+
+          recognition.onstart = () => setIsListening(true);
+          recognition.onend = () => setIsListening(false);
+          recognition.onerror = () => setIsListening(false);
+
+          recognition.onresult = (e) => {
+            const transcript = e.results[0][0].transcript;
+            if (transcript) {
+              setNavQuery(transcript.replace(/\.$/, ''));
+            }
+          };
+
+          recognition.start();
+        } catch (err) {
+          setIsListening(false);
+          console.warn('Voice STT Error:', err);
+        }
+      };
+
+      // 과속 지속 시 2.5초 간격 연속 경보 엔진 (감속 시 즉각 소멸)
       const effectiveLimit = nearbyCamera ? nearbyCamera.limit : (appData.hudSpeedLimit || 50);
       const isCurrentlyOverspeed = (gpsSpeed > effectiveLimit) && Boolean(nearbyCamera);
 
@@ -745,7 +792,7 @@
             playGuardianAudio(nearbyCamera.type, isPassengerMode);
           }, 2500);
         } else {
-          stopAllAudio(); // 감속 즉시 사운드 올킬
+          stopAllAudio();
         }
 
         return () => {
@@ -778,10 +825,25 @@
         return () => clearInterval(timer);
       }, [isParkingStopped, parkingCountdown]);
 
-      // 실시간 GPS 감시
+      // 견고한 GPS 위치 및 방위각 연산 엔진 (Z플립5 / S26 락인 해제)
       useEffect(() => {
         if (!navigator.geolocation) return;
 
+        // 1차 즉시 좌표 획득
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            const speedKmh = pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0;
+            setCurrentCoords({ lat, lon });
+            setGpsSpeed(speedKmh);
+            prevCoordsRef.current = { lat, lon, time: Date.now() };
+          },
+          (err) => console.warn('Initial GPS Lock Warn:', err.message),
+          { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+        );
+
+        // 상시 연속 감시
         const watchId = navigator.geolocation.watchPosition(
           (pos) => {
             const speedKmh = pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0;
@@ -789,6 +851,20 @@
             const lon = pos.coords.longitude;
             setGpsSpeed(speedKmh);
             setCurrentCoords({ lat, lon });
+
+            // 방위각 연산 (Heading)
+            if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
+              setUserHeading(Math.round(pos.coords.heading));
+            } else if (prevCoordsRef.current) {
+              const dist = calculateDistanceMeters(prevCoordsRef.current.lat, prevCoordsRef.current.lon, lat, lon);
+              if (dist >= 2) {
+                const calculatedBrng = calculateBearing(prevCoordsRef.current.lat, prevCoordsRef.current.lon, lat, lon);
+                setUserHeading(Math.round(calculatedBrng));
+                prevCoordsRef.current = { lat, lon, time: Date.now() };
+              }
+            } else {
+              prevCoordsRef.current = { lat, lon, time: Date.now() };
+            }
 
             if (simStep === 0) {
               let closest = null;
@@ -900,14 +976,14 @@
               }
             }
           },
-          (err) => console.warn('GPS Info:', err.message),
-          { enableHighAccuracy: true, maximumAge: 1000, timeout: 4000 }
+          (err) => console.warn('GPS Engine Error:', err.message),
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
       }, [simStep, isPassengerMode, isParkingStopped, parkingCountdown, sectionAvgSpeed, nearbyCamera]);
 
-      // 원터치 4단계 순환 테스트 (소리 즉시 전환 & 정지)
+      // 원터치 4단계 순환 테스트
       const handleCycleSimulation = (e) => {
         e.stopPropagation();
         stopAllAudio();
@@ -932,19 +1008,23 @@
           setGpsSpeed(0);
           setIsParkingStopped(false);
           setSectionAvgSpeed(0);
+          setUserHeading(0);
         } else if (nextStep === 1) {
           setGpsSpeed(68);
+          setUserHeading(45);
           setNearbyCamera({ id: 'sim_dog', name: '불당대로 (신호·과속)', limit: 50, dist: 220, type: 'dog' });
           setIsParkingStopped(false);
           playGuardianAudio('dog', isPassengerMode);
         } else if (nextStep === 2) {
           setGpsSpeed(0);
+          setUserHeading(90);
           setNearbyCamera({ id: 'sim_cat', name: '천안역 광장 (주정차구역)', limit: 30, dist: 140, type: 'cat' });
           setIsParkingStopped(true);
           setParkingCountdown(295);
           playGuardianAudio('cat', isPassengerMode);
         } else if (nextStep === 3) {
           setGpsSpeed(84);
+          setUserHeading(180);
           setSectionAvgSpeed(78);
           setNearbyCamera({ id: 'sim_tiger', name: '남부대로 (구간단속)', limit: 70, dist: 380, type: 'tiger' });
           setIsParkingStopped(false);
@@ -964,6 +1044,14 @@
       const totalSaved = defenseHistory.filter(h => h.status === 'pass').reduce((s, h) => s + h.amount, 0);
       const totalFines = defenseHistory.filter(h => h.status === 'fail').reduce((s, h) => s + Math.abs(h.amount), 0);
       const netSaved = totalSaved - totalFines;
+
+      // 단속 내역 초기화 함수
+      const handleResetDefenseHistory = (e) => {
+        if (e) e.stopPropagation();
+        if (confirm('오늘 기록된 단속 방어 및 적발 내역을 모두 초기화하시겠습니까?')) {
+          setDefenseHistory([]);
+        }
+      };
 
       const handleDeleteDefenseItem = (id) => {
         setDefenseHistory(prev => prev.filter(item => item.id !== id));
@@ -1272,11 +1360,12 @@
                         nearbyCamera={nearbyCamera}
                         isAutoTracking={isAutoTracking}
                         setIsAutoTracking={setIsAutoTracking}
+                        userHeading={userHeading}
                       />
                     </div>
 
                     {/* 2. 전면: 5:5 초투명 가디언 HUD 오버레이 */}
-                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-24 pointer-events-none">
+                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-28 pointer-events-none">
                       
                       {/* 상단 1/2: 속도제한 표지판 (초투명 글래스) */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
@@ -1344,11 +1433,11 @@
                       </div>
                     </div>
 
-                    {/* 3. 하단 고정: 누적 과태료 방어/적발 전광판 배너 (탭 바 바로 위 bottom-20 배치) */}
+                    {/* 3. 하단 고정: 누적 과태료 방어/적발 전광판 배너 (탭 바 바로 위 bottom-20 정위치) */}
                     <div className="absolute bottom-20 left-3 right-3 z-[420] pointer-events-auto">
                       <div
                         onClick={() => setShowDefenseListModal(true)}
-                        className="bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-slate-950/95 border-2 border-emerald-500/80 p-2.5 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.8)] flex items-center justify-between cursor-pointer active:scale-95 transition"
+                        className="bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-slate-950/95 border-2 border-emerald-500/80 p-2.5 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.9)] flex items-center justify-between cursor-pointer active:scale-95 transition"
                       >
                         <div className="flex items-center gap-2 overflow-hidden">
                           <span className="text-xl">🛡️</span>
@@ -1362,9 +1451,18 @@
                             </div>
                           </div>
                         </div>
-                        <span className="px-2 py-1 bg-emerald-900/90 text-emerald-200 border border-emerald-400/80 rounded-xl text-[10px] font-black flex-shrink-0">
-                          내역보기 ▶
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={handleResetDefenseHistory}
+                            className="px-2 py-1 bg-slate-800 hover:bg-red-900 text-slate-300 hover:text-red-200 border border-slate-600 rounded-xl text-[10px] font-bold active:scale-90"
+                            title="내역 초기화"
+                          >
+                            🔄 리셋
+                          </button>
+                          <span className="px-2 py-1 bg-emerald-900/90 text-emerald-200 border border-emerald-400/80 rounded-xl text-[10px] font-black">
+                            내역 ▶
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1477,6 +1575,7 @@
                   </div>
                 </div>
 
+                {/* 원터치 외부 내비 연동 & 마이크 음성인식 STT 탑재 */}
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-bold text-slate-300">🧭 원터치 외부 내비 연동</span>
@@ -1488,9 +1587,31 @@
                       placeholder="목적지 입력 (미입력 시 '가스충전소')"
                       value={navQuery}
                       onChange={(e) => setNavQuery(e.target.value)}
-                      className="flex-1 bg-slate-950 border border-slate-700 px-3 py-2 text-xs rounded-xl text-white focus:outline-none"
+                      className="flex-1 bg-slate-950 border border-slate-700 px-3 py-2 text-xs rounded-xl text-white focus:outline-none focus:border-yellow-500"
                     />
-                    {navQuery && <button onClick={() => setNavQuery('')} className="px-2.5 bg-slate-800 text-slate-400 rounded-xl text-xs">✕</button>}
+                    
+                    {/* 🎤 음성 인식 버튼 */}
+                    <button
+                      type="button"
+                      onClick={handleVoiceInput}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
+                        isListening
+                          ? 'bg-red-600 text-white animate-pulse'
+                          : 'bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700'
+                      }`}
+                      title="음성으로 목적지 말하기"
+                    >
+                      <span>🎤</span> {isListening ? '듣는 중...' : '음성'}
+                    </button>
+
+                    {navQuery && (
+                      <button
+                        onClick={() => setNavQuery('')}
+                        className="px-2.5 bg-slate-800 text-slate-400 rounded-xl text-xs hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <button onClick={() => openNavApp('tmap')} className="py-2.5 bg-red-950/80 border border-red-500/40 text-red-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🔴</span> 티맵</button>
@@ -1819,12 +1940,20 @@
                   )}
                 </div>
 
-                <button
-                  onClick={() => setShowDefenseListModal(false)}
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs shadow-lg transition active:scale-98"
-                >
-                  닫기
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleResetDefenseHistory}
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-300 font-bold rounded-xl text-xs border border-slate-700 transition active:scale-95"
+                  >
+                    🔄 전체 내역 초기화
+                  </button>
+                  <button
+                    onClick={() => setShowDefenseListModal(false)}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs shadow-lg transition active:scale-95"
+                  >
+                    닫기
+                  </button>
+                </div>
               </div>
             </div>
           )}
