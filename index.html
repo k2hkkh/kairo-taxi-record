@@ -2,10 +2,17 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
+  
+  <!-- 전체화면 PWA 웹앱 지원 메타 태그 -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#020617" />
+  
   <title>K-TAXI 스마트 가디언 HUD & 단속 방어 레이더</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -18,18 +25,21 @@
   <!-- Babel Standalone -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
   <style>
-    html, body {
+    html, body, #root {
       margin: 0;
       padding: 0;
+      width: 100%;
+      height: 100%;
+      height: 100dvh; /* 브라우저 주소창 변화에 완벽 대응하는 동적 높이 */
       background-color: #020617;
       color: #f8fafc;
       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
       -webkit-tap-highlight-color: transparent;
-      overflow-x: hidden;
+      overflow: hidden;
     }
     .hud-flip-y { transform: scaleY(-1); }
     .hud-rot90-flip { transform: rotate(-90deg) scaleY(-1); }
-    .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1.25rem); }
+    .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0.5rem); }
 
     /* 5:5 교대 펌핑 애니메이션 */
     @keyframes pulse-top-grow {
@@ -81,9 +91,9 @@
     .leaflet-control-attribution { display: none !important; }
   </style>
 </head>
-<body class="select-none antialiased min-h-screen bg-slate-950">
+<body class="select-none antialiased bg-slate-950">
   <div id="root">
-    <div class="min-h-screen flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
+    <div class="h-full flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
       K-TAXI 가디언 시스템 로딩 중...
     </div>
   </div>
@@ -91,7 +101,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v3.4.0';
+    const APP_VERSION = 'v3.5.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -327,19 +337,13 @@
         html: `
           <div class="relative flex items-center justify-center" style="width:52px; height:52px; ${rotStyle}">
             <div class="absolute w-10 h-10 rounded-full bg-blue-500/30 animate-ping"></div>
-            <!-- 정방향 탑뷰(Top-Down) 택시 그래픽 (위쪽=0도 북쪽) -->
             <svg viewBox="0 0 48 48" class="w-12 h-12 drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)]" style="filter: drop-shadow(0 0 8px rgba(250,204,21,0.9));">
-              <!-- 헤드라이트 빔 -->
               <polygon points="16,10 4,-6 44,-6 32,10" fill="rgba(254,240,138,0.35)"/>
-              <!-- 차체 (세단 탑뷰) -->
               <rect x="12" y="8" width="24" height="34" rx="8" fill="#facc15" stroke="#0f172a" stroke-width="2.5"/>
-              <!-- 앞유리 & 뒷유리 -->
               <path d="M 15 17 L 33 17 L 31 23 L 17 23 Z" fill="#0f172a"/>
               <path d="M 17 33 L 31 33 L 32 37 L 16 37 Z" fill="#0f172a"/>
-              <!-- 루프 & 택시 갓등 -->
               <rect x="18" y="24" width="12" height="6" rx="2" fill="#ef4444" stroke="#ffffff" stroke-width="1"/>
               <text x="24" y="28.5" font-size="3.5" font-weight="900" fill="#ffffff" text-anchor="middle">TAXI</text>
-              <!-- 헤드라이트 점등 -->
               <circle cx="15" cy="9" r="2" fill="#ffffff"/>
               <circle cx="33" cy="9" r="2" fill="#ffffff"/>
             </svg>
@@ -456,13 +460,13 @@
           {!isAutoTracking && (
             <button
               onClick={handleRecenter}
-              className="absolute bottom-36 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition pointer-events-auto"
+              className="absolute bottom-24 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition pointer-events-auto"
             >
               <span className="text-base">📍</span> 내 위치로
             </button>
           )}
 
-          <div className="absolute bottom-36 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow pointer-events-none">
+          <div className="absolute bottom-24 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow pointer-events-none">
             <span className={`w-2 h-2 rounded-full ${isAutoTracking ? 'bg-emerald-400 animate-pulse' : 'bg-orange-400'}`}></span>
             {isAutoTracking ? '주행 추적 중' : '자유 탐색'}
           </div>
@@ -594,7 +598,7 @@
         };
       }, [currentTab]);
 
-      // 음성 인식 STT 함수 (오류 시 안전한 피드백 제공)
+      // 음성 인식 STT 함수
       const handleVoiceInput = () => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
@@ -678,7 +682,7 @@
         return () => clearInterval(timer);
       }, [isParkingStopped, parkingCountdown]);
 
-      // 견고한 GPS 위치 및 방위각 연산 엔진 (S26 최적화)
+      // 견고한 GPS 위치 및 방위각 연산 엔진
       useEffect(() => {
         if (!navigator.geolocation || isSimDriveActive) return;
 
@@ -829,9 +833,7 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, [isSimDriveActive, nearbyCamera, isParkingStopped, sectionAvgSpeed]);
 
-      // =========================================================================
-      // 실전 모의 주행 (Mock Drive) 시뮬레이터 (차량 회전 & 단속 회피 풀체험)
-      // =========================================================================
+      // 실전 모의 주행 (Mock Drive)
       const toggleSimDrive = (e) => {
         e.stopPropagation();
         stopAllAudio();
@@ -847,15 +849,14 @@
           setIsSimDriveActive(true);
           let step = 0;
 
-          // 모의 주행 시나리오 (천안 불당동 일대 회전 및 단속 접근)
           const route = [
             { lat: 36.8120, lon: 127.1135, speed: 45, heading: 0, cam: null },
             { lat: 36.8135, lon: 127.1135, speed: 64, heading: 0, cam: { id: 'sim_1', name: '불당대로 (과속단속)', limit: 50, dist: 180, type: 'speed' } },
             { lat: 36.8150, lon: 127.1135, speed: 48, heading: 0, cam: { id: 'sim_1', name: '불당대로 (과속단속)', limit: 50, dist: 40, type: 'speed' } },
-            { lat: 36.8152, lon: 127.1150, speed: 35, heading: 90, cam: null }, // 90도 우회전
+            { lat: 36.8152, lon: 127.1150, speed: 35, heading: 90, cam: null },
             { lat: 36.8152, lon: 127.1180, speed: 50, heading: 90, cam: null },
-            { lat: 36.8130, lon: 127.1180, speed: 40, heading: 180, cam: null }, // 180도 남향 회전
-            { lat: 36.8110, lon: 127.1180, speed: 0, heading: 180, cam: { id: 'sim_p', name: '천안역 서부광장 (주정차)', limit: 30, dist: 50, type: 'parking' } } // 정차
+            { lat: 36.8130, lon: 127.1180, speed: 40, heading: 180, cam: null },
+            { lat: 36.8110, lon: 127.1180, speed: 0, heading: 180, cam: { id: 'sim_p', name: '천안역 서부광장 (주정차)', limit: 30, dist: 50, type: 'parking' } }
           ];
 
           playNavigationChime('chime');
@@ -1092,7 +1093,7 @@
 
       if (!appData.hasSelectedType) {
         return (
-          <div className="max-w-md mx-auto min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center space-y-6">
+          <div className="max-w-md mx-auto h-full bg-slate-950 flex flex-col items-center justify-center p-6 text-center space-y-6">
             <div className="space-y-2">
               <span className="bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full shadow">K-TAXI</span>
               <h1 className="text-2xl font-black text-white tracking-tight mt-2">운행 모드를 선택해 주세요</h1>
@@ -1125,10 +1126,10 @@
       }
 
       return (
-        <div className="max-w-md mx-auto w-full min-h-screen flex flex-col bg-slate-950 border-x border-slate-800 relative">
+        <div className="max-w-md mx-auto w-full h-full flex flex-col bg-slate-950 border-x border-slate-800 relative overflow-hidden">
           
           {currentTab !== 'hud' && (
-            <header className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
+            <header className="flex-shrink-0 p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-30">
               <div className="flex items-center gap-2">
                 <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
                 <span className="text-sm font-bold text-white tracking-tight truncate max-w-[150px]">
@@ -1141,12 +1142,13 @@
             </header>
           )}
 
-          <main className={`flex-1 flex flex-col ${currentTab === 'hud' ? 'p-0 overflow-hidden relative' : 'p-3 pb-24 overflow-y-auto'}`}>
+          {/* 메인 뷰포트 (하단 탭 메뉴와 물리적으로 겹치지 않는 Flex-1 영역) */}
+          <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' ? 'p-0' : 'p-3 overflow-y-auto'}`}>
             
-            {/* 탭 1: 🏎️ 5:5 가디언 HUD & 누적 과태료 방어/적발 레이더 */}
+            {/* 탭 1: 🏎️ 5:5 가디언 HUD & 방어 배너 */}
             {currentTab === 'hud' && (
               <div
-                className={`flex-1 flex flex-col justify-between select-none relative w-full h-full overflow-hidden ${
+                className={`w-full h-full flex flex-col justify-between select-none relative overflow-hidden ${
                   isNearCamera && isOverSpeed
                     ? 'animate-strobe-alert'
                     : 'bg-slate-950'
@@ -1177,7 +1179,6 @@
                     </button>
                   </div>
 
-                  {/* 실전 모의 주행 토글 버튼 */}
                   <button
                     onClick={toggleSimDrive}
                     className={`px-3 py-1.5 rounded-2xl text-[10px] font-black border shadow-2xl transition active:scale-95 ${
@@ -1194,7 +1195,7 @@
                 {hudViewMode === 'map' ? (
                   <div className="relative w-full h-full flex-1 flex flex-col">
                     
-                    {/* 1. 배경: 선명한 실시간 지도 */}
+                    {/* 1. 배경: 실시간 지도 */}
                     <div className="absolute inset-0 z-0">
                       <FullscreenLiveMapView
                         currentCoords={currentCoords}
@@ -1206,7 +1207,7 @@
                     </div>
 
                     {/* 2. 전면: 5:5 초투명 가디언 HUD 오버레이 */}
-                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-28 pointer-events-none">
+                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-20 pointer-events-none">
                       
                       {/* 상단 1/2: 속도제한 표지판 (초투명 글래스) */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
@@ -1274,8 +1275,8 @@
                       </div>
                     </div>
 
-                    {/* 3. 하단 고정: 누적 과태료 방어/적발 배너 (하단 탭 위 bottom-[72px] 정위치) */}
-                    <div className="absolute bottom-[72px] left-3 right-3 z-[420] pointer-events-auto">
+                    {/* 3. 하단 고정: 방어/적발 배너 (Flex 메인 영역 바닥 bottom-2에 위치하여 탭 메뉴와 절대 안 겹침) */}
+                    <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto">
                       <div
                         onClick={() => setShowDefenseListModal(true)}
                         className="bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-slate-950/95 border-2 border-emerald-500/80 p-2.5 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.9)] flex items-center justify-between cursor-pointer active:scale-95 transition"
@@ -1365,7 +1366,7 @@
 
             {/* 탭 2: 🏠 오늘 & 건강 */}
             {currentTab === 'today' && (
-              <div className="space-y-3.5">
+              <div className="space-y-3.5 pb-4">
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 shadow-sm space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
@@ -1431,7 +1432,6 @@
                       className="flex-1 bg-slate-950 border border-slate-700 px-3 py-2 text-xs rounded-xl text-white focus:outline-none focus:border-yellow-500"
                     />
                     
-                    {/* 🎤 음성 인식 버튼 */}
                     <button
                       type="button"
                       onClick={handleVoiceInput}
@@ -1497,7 +1497,7 @@
 
             {/* 탭 3: 📅 운행일지 */}
             {currentTab === 'calendar' && (
-              <div className="space-y-3">
+              <div className="space-y-3 pb-4">
                 <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between">
                   <button onClick={() => {
                     const [y, m] = currentYearMonth.split('-').map(Number);
@@ -1602,7 +1602,7 @@
 
             {/* 탭 4: ⚙️ 정산 & 설정 */}
             {currentTab === 'settings' && (
-              <div className="space-y-3.5">
+              <div className="space-y-3.5 pb-4">
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center pb-1 border-b border-slate-800">
                     <span className="text-xs font-bold text-yellow-400">{currentYearMonth} 급여 정산서</span>
@@ -1705,18 +1705,18 @@
             )}
           </main>
 
-          {/* 하단 탭 내비게이션 */}
-          <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
-            <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2.5 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+          {/* 하단 탭 내비게이션 (Flex-shrink-0 독립 레이아웃) */}
+          <nav className="flex-shrink-0 w-full bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
+            <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언HUD</span>
             </button>
-            <button onClick={() => setCurrentTab('today')} className={`flex flex-col items-center py-2.5 ${currentTab === 'today' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+            <button onClick={() => setCurrentTab('today')} className={`flex flex-col items-center py-2 ${currentTab === 'today' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">🏠</span><span className="text-[10px] mt-0.5">오늘&건강</span>
             </button>
-            <button onClick={() => setCurrentTab('calendar')} className={`flex flex-col items-center py-2.5 ${currentTab === 'calendar' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+            <button onClick={() => setCurrentTab('calendar')} className={`flex flex-col items-center py-2 ${currentTab === 'calendar' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">📅</span><span className="text-[10px] mt-0.5">운행일지</span>
             </button>
-            <button onClick={() => setCurrentTab('settings')} className={`flex flex-col items-center py-2.5 ${currentTab === 'settings' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+            <button onClick={() => setCurrentTab('settings')} className={`flex flex-col items-center py-2 ${currentTab === 'settings' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">⚙️</span><span className="text-[10px] mt-0.5">정산/설정</span>
             </button>
           </nav>
@@ -1991,7 +1991,7 @@
       render() {
         if (this.state.hasError) {
           return (
-            <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
+            <div className="h-full bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
               <div className="bg-slate-900 border border-red-500/40 p-6 rounded-3xl max-w-sm w-full space-y-4 shadow-2xl">
                 <div className="w-12 h-12 rounded-2xl bg-red-950/80 border border-red-500/40 flex items-center justify-center mx-auto text-2xl">🛡️</div>
                 <div>
