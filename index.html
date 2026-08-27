@@ -7,7 +7,6 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   
-  <!-- 전체화면 PWA 웹앱 지원 메타 태그 -->
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -30,7 +29,7 @@
       padding: 0;
       width: 100%;
       height: 100%;
-      height: 100dvh; /* 브라우저 주소창 변화에 완벽 대응하는 동적 높이 */
+      height: 100dvh;
       background-color: #020617;
       color: #f8fafc;
       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
@@ -101,7 +100,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v3.5.0';
+    const APP_VERSION = 'v3.5.1';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -129,7 +128,6 @@
       return Math.round(R * c);
     };
 
-    // 방위각(Bearing) 연산
     const calculateBearing = (startLat, startLng, destLat, destLng) => {
       const startLatRad = startLat * Math.PI / 180;
       const startLngRad = startLng * Math.PI / 180;
@@ -180,7 +178,6 @@
     document.addEventListener('touchstart', unlockMobileAudio, { passive: true });
     document.addEventListener('click', unlockMobileAudio, { passive: true });
 
-    // 표준 내비 전자 알림음
     const playNavigationChime = (type = 'chime') => {
       try {
         stopAllAudio();
@@ -190,7 +187,6 @@
         const now = ctx.currentTime;
 
         if (type === 'chime') {
-          // [단속구역 진입: 맑은 2톤 딩-동 알림]
           [0, 0.16].forEach((delay, idx) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
@@ -205,7 +201,6 @@
             activeAudioSources.push(osc);
           });
         } else if (type === 'warning') {
-          // [과속 위반 중: 긴급 비프 경고음]
           [0, 0.12].forEach((delay) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
@@ -456,7 +451,6 @@
         <div className="w-full h-full relative flex-1 flex flex-col bg-slate-950">
           <div ref={mapContainerRef} className="w-full h-full flex-1" />
 
-          {/* 내 위치로 버튼 */}
           {!isAutoTracking && (
             <button
               onClick={handleRecenter}
@@ -598,15 +592,20 @@
         };
       }, [currentTab]);
 
-      // 음성 인식 STT 함수
-      const handleVoiceInput = () => {
+      // 마이크 권한 해제 후 음성인식 실행
+      const handleVoiceInput = async () => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-          alert('이 브라우저는 음성 인식을 지원하지 않습니다. 구글 크롬 또는 삼성인터넷을 이용해 주세요.');
+          alert('이 브라우저는 음성 인식을 지원하지 않습니다. 크롬 또는 삼성인터넷을 이용해 주세요.');
           return;
         }
 
         try {
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop());
+          }
+
           const recognition = new SpeechRecognition();
           recognition.lang = 'ko-KR';
           recognition.interimResults = false;
@@ -617,7 +616,7 @@
           recognition.onerror = (e) => {
             setIsListening(false);
             if (e.error === 'not-allowed') {
-              alert('마이크 권한이 차단되었습니다.\n\n[해결 방법]\n1. 화면에 떠 있는 다른 앱(카카오톡 버블, 오버레이 앱)을 닫아주세요.\n2. 상단 주소창 왼쪽 [자물쇠] 아이콘을 눌러 마이크 권한을 [허용]해 주세요.');
+              alert('마이크 권한이 차단되어 있습니다.\n\n[해결 방법]\n1. 화면 상단 주소창 왼쪽 [자물쇠 🔒] 아이콘 터치\n2. [권한] -> [마이크]를 [허용]으로 변경\n3. 화면에 뜬 카카오톡 버블이나 플로팅 앱을 닫고 다시 시도해 주세요.');
             }
           };
 
@@ -632,6 +631,9 @@
         } catch (err) {
           setIsListening(false);
           console.warn('Voice STT Error:', err);
+          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            alert('마이크 권한이 차단되어 있습니다.\n주소창 왼쪽 [자물쇠] -> [권한] -> [마이크: 허용]으로 설정해 주세요.');
+          }
         }
       };
 
@@ -1142,7 +1144,6 @@
             </header>
           )}
 
-          {/* 메인 뷰포트 (하단 탭 메뉴와 물리적으로 겹치지 않는 Flex-1 영역) */}
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' ? 'p-0' : 'p-3 overflow-y-auto'}`}>
             
             {/* 탭 1: 🏎️ 5:5 가디언 HUD & 방어 배너 */}
@@ -1209,7 +1210,7 @@
                     {/* 2. 전면: 5:5 초투명 가디언 HUD 오버레이 */}
                     <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-20 pointer-events-none">
                       
-                      {/* 상단 1/2: 속도제한 표지판 (초투명 글래스) */}
+                      {/* 상단 1/2: 속도제한 표지판 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
                         <div className={`flex items-center justify-center w-44 h-44 rounded-full border-[5px] transition-all duration-300 ${
                           isNearCamera
@@ -1247,7 +1248,7 @@
                         )}
                       </div>
 
-                      {/* 하단 1/2: 초대형 디지털 속도계 (정중앙 위치) */}
+                      {/* 하단 1/2: 초대형 디지털 속도계 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2 text-center">
                         <div className={`transition-all duration-300 flex flex-col items-center justify-center w-full ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
                           
@@ -1275,7 +1276,7 @@
                       </div>
                     </div>
 
-                    {/* 3. 하단 고정: 방어/적발 배너 (Flex 메인 영역 바닥 bottom-2에 위치하여 탭 메뉴와 절대 안 겹침) */}
+                    {/* 3. 하단 고정: 방어/적발 배너 */}
                     <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto">
                       <div
                         onClick={() => setShowDefenseListModal(true)}
@@ -1417,7 +1418,7 @@
                   </div>
                 </div>
 
-                {/* 원터치 외부 내비 연동 & 마이크 음성인식 STT */}
+                {/* 원터치 외부 내비 연동 & 마이크 음성인식 STT + 빠른 목적지 칩 */}
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-bold text-slate-300">🧭 원터치 외부 내비 연동</span>
@@ -1454,7 +1455,25 @@
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+
+                  {/* 빠른 목적지 선택 칩 */}
+                  <div className="flex gap-1.5 overflow-x-auto pb-1">
+                    {['가스충전소', '천안역', '아산역', '천안시청', '종합터미널'].map((dest) => (
+                      <button
+                        key={dest}
+                        onClick={() => setNavQuery(dest)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition whitespace-nowrap ${
+                          navQuery === dest
+                            ? 'bg-yellow-500 text-black border-yellow-400'
+                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-600 hover:text-slate-200'
+                        }`}
+                      >
+                        {dest}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 pt-1">
                     <button onClick={() => openNavApp('tmap')} className="py-2.5 bg-red-950/80 border border-red-500/40 text-red-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🔴</span> 티맵</button>
                     <button onClick={() => openNavApp('kakao')} className="py-2.5 bg-yellow-950/80 border border-yellow-500/40 text-yellow-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🟡</span> 카카오맵</button>
                     <button onClick={() => openNavApp('naver')} className="py-2.5 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🟢</span> 네이버지도</button>
@@ -1705,7 +1724,6 @@
             )}
           </main>
 
-          {/* 하단 탭 내비게이션 (Flex-shrink-0 독립 레이아웃) */}
           <nav className="flex-shrink-0 w-full bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
             <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언HUD</span>
