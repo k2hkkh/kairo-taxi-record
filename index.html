@@ -100,8 +100,8 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v4.2.2';
-    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
+    const APP_VERSION = 'v4.2.3';
+    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V15';
     const DEFAULT_MAP_ZOOM = 17;
 
     const WELCOME_MESSAGES = [
@@ -252,7 +252,7 @@
     };
 
     const DEFAULT_STORAGE = {
-      hasSelectedType: false,
+      hasSelectedType: true,
       isShiftActive: false,
       activeType: 'corporate',
       hudSpeedLimit: 50,
@@ -264,7 +264,7 @@
         { id: 4, type: 'nap', time: '01:30', title: '새벽 20분 전략적 파워 쪽잠', done: false }
       ],
       corporate: {
-        carNumber: '',
+        carNumber: '충남31바3238',
         dailyDeposit: 201000,
         deductionRate: 9.0,
         fixedAllowanceItems: [
@@ -280,37 +280,68 @@
         records: {}
       },
       private: {
-        carNumber: '',
+        carNumber: '충남31바3238',
         records: {}
       }
     };
 
+    // 브라우저 내 모든 과거 키 전수 검색 및 자동 복구 로더
     const loadSafeData = () => {
       try {
-        let saved = null;
-        for (let i = 15; i >= 1; i--) {
-          const raw = localStorage.getItem(`K_TAXI_RECORD_DATA_V${i}`);
-          if (raw) { saved = raw; break; }
+        let bestCandidate = null;
+        let mostRecordsCount = -1;
+
+        const keysToScan = [];
+        for (let i = 25; i >= 1; i--) keysToScan.push(`K_TAXI_RECORD_DATA_V${i}`);
+        keysToScan.push('K_TAXI_RECORD_DATA', 'k_taxi_data');
+
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.includes('TAXI') || k.includes('RECORD')) && !keysToScan.includes(k)) {
+            keysToScan.push(k);
+          }
         }
-        if (!saved) saved = localStorage.getItem('K_TAXI_RECORD_DATA');
-        if (saved) {
-          const p = JSON.parse(saved);
+
+        for (const k of keysToScan) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            try {
+              const p = JSON.parse(raw);
+              if (p) {
+                const corpRecs = Object.keys(p.corporate?.records || {}).length;
+                const privRecs = Object.keys(p.private?.records || {}).length;
+                const totalRecs = corpRecs + privRecs;
+
+                if (totalRecs > mostRecordsCount) {
+                  mostRecordsCount = totalRecs;
+                  bestCandidate = p;
+                }
+              }
+            } catch(e) {}
+          }
+        }
+
+        if (bestCandidate) {
+          const p = bestCandidate;
           return {
-            hasSelectedType: p.hasSelectedType !== undefined ? p.hasSelectedType : true,
+            hasSelectedType: true,
             isShiftActive: Boolean(p.isShiftActive),
             activeType: (p.activeType || p.activeTab || 'corporate') === 'private' ? 'private' : 'corporate',
             hudSpeedLimit: Number(p.hudSpeedLimit || 50),
             defaultOffDay: Number(p.defaultOffDay !== undefined ? p.defaultOffDay : 1),
             healthRoutines: Array.isArray(p.healthRoutines) && p.healthRoutines.length > 0 ? p.healthRoutines : DEFAULT_STORAGE.healthRoutines,
             corporate: {
-              carNumber: p.corporate?.carNumber || '',
+              carNumber: p.corporate?.carNumber || '충남31바3238',
               dailyDeposit: Number(p.corporate?.dailyDeposit || p.corporate?.baseDeposit || 201000),
               deductionRate: Number(p.corporate?.deductionRate !== undefined ? p.corporate.deductionRate : 9.0),
               fixedAllowanceItems: Array.isArray(p.corporate?.fixedAllowanceItems) && p.corporate.fixedAllowanceItems.length > 0 ? p.corporate.fixedAllowanceItems : DEFAULT_STORAGE.corporate.fixedAllowanceItems,
               fixedExpenseItems: Array.isArray(p.corporate?.fixedExpenseItems) ? p.corporate.fixedExpenseItems : DEFAULT_STORAGE.corporate.fixedExpenseItems,
               records: p.corporate?.records || {}
             },
-            private: { carNumber: p.private?.carNumber || '', records: p.private?.records || {} }
+            private: {
+              carNumber: p.private?.carNumber || '충남31바3238',
+              records: p.private?.records || {}
+            }
           };
         }
       } catch (e) {
@@ -402,9 +433,10 @@
               .bindPopup(`<b>${cam.name}</b><br>제한속도: ${cam.limit}km/h`);
           });
 
-          userMarkerRef.current = L.marker([defaultLat, defaultLon], {
-            icon: createDynamicUserIcon(null, userHeading)
-          }).addTo(map);
+          const initialIcon = createDynamicUserIcon(null, userHeading);
+          if (initialIcon) {
+            userMarkerRef.current = L.marker([defaultLat, defaultLon], { icon: initialIcon }).addTo(map);
+          }
 
           mapInstanceRef.current = map;
         } catch(err) {
@@ -421,9 +453,7 @@
           clearTimeout(resizeTimer);
           if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
           if (mapInstanceRef.current) {
-            try {
-              mapInstanceRef.current.remove();
-            } catch(e) {}
+            try { mapInstanceRef.current.remove(); } catch(e) {}
             mapInstanceRef.current = null;
           }
         };
@@ -642,7 +672,6 @@
       const todayKey = getTodayKey();
       const todayRecord = appData[activeType]?.records?.[todayKey] || {};
 
-      // HUD 렌더링에 필수적인 과속/단속 상태 변수 정의
       const effectiveLimit = nearbyCamera ? nearbyCamera.limit : (appData.hudSpeedLimit || 50);
       const isCurrentlyOverspeed = (gpsSpeed > effectiveLimit) && Boolean(nearbyCamera);
       const isOverSpeed = isCurrentlyOverspeed;
@@ -683,6 +712,7 @@
         };
       }, [currentTab]);
 
+      // 출근 터치 시 가디언 HUD('hud')로 즉시 전환
       const handleStartShift = () => {
         const nowTime = getCurrentTimeStr();
         const updatedRec = {
@@ -702,7 +732,7 @@
         }));
 
         playNavigationChime('chime');
-        setCurrentTab('today');
+        setCurrentTab('hud'); // 가디언 HUD로 직행
       };
 
       const handleResetShift = () => {
@@ -1187,7 +1217,7 @@
               <div className="flex items-center gap-2">
                 <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
                 <span className="text-sm font-bold text-white tracking-tight truncate max-w-[150px]">
-                  {appData[activeType]?.carNumber || (activeType === 'corporate' ? '법인택시' : '개인택시')}
+                  {appData[activeType]?.carNumber || '충남31바3238'}
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -1203,7 +1233,7 @@
 
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3 overflow-y-auto'}`}>
             
-            {/* 1. 첫 화면: 좌/우 상단 분할 & 꽉 차는 2줄 초대형 멘트 */}
+            {/* 1. 첫 화면: 좌/우 상단 분할 & 2줄 초대형 멘트 */}
             {currentTab === 'welcome' && (
               <div className="h-full flex flex-col justify-between p-6 text-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
                 <div className="w-full flex items-center justify-between pt-2">
@@ -1211,7 +1241,7 @@
                     K-TAXI 스마트 파트너
                   </span>
                   <span className="text-xs font-bold text-slate-300 bg-slate-900/90 border border-slate-700 px-3 py-1 rounded-full">
-                    {appData[activeType]?.carNumber || '차량 미등록'} ({activeType === 'corporate' ? '법인' : '개인'})
+                    {appData[activeType]?.carNumber || '충남31바3238'} ({activeType === 'corporate' ? '법인' : '개인'})
                   </span>
                 </div>
 
@@ -1231,7 +1261,7 @@
                     <span>출근하기 (운행 시작)</span>
                   </button>
                   <p className="text-xs text-slate-500 mt-3 font-semibold">
-                    터치 시 출근 시간이 기록되고 스마트 건강 매니저가 열립니다.
+                    터치 시 출근 시간이 기록되고 가디언 HUD가 즉시 실행됩니다.
                   </p>
                 </div>
               </div>
@@ -1665,7 +1695,7 @@
                     <input
                       type="text"
                       placeholder="충남31바 1234"
-                      value={appData[activeType]?.carNumber || ''}
+                      value={appData[activeType]?.carNumber || '충남31바3238'}
                       onChange={(e) => {
                         const val = e.target.value;
                         setAppData(prev => ({ ...prev, [activeType]: { ...(prev[activeType] || {}), carNumber: val } }));
@@ -1727,7 +1757,7 @@
             </nav>
           )}
 
-          {/* 1. 외부 내비 모달 */}
+          {/* 모달 팝업들 */}
           {showNavModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl text-center">
@@ -1748,7 +1778,6 @@
             </div>
           )}
 
-          {/* 2. 풀스크린 퇴근 마감 화면 */}
           {showClosingModal && (
             <div className="fixed inset-0 bg-slate-950 flex flex-col justify-between p-6 z-50 text-center animate-fade-in">
               <div className="pt-12 space-y-6">
@@ -1782,7 +1811,6 @@
             </div>
           )}
 
-          {/* 3. 출근 시각 수정 모달 */}
           {showEditStartTimeModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl">
@@ -1807,7 +1835,6 @@
             </div>
           )}
 
-          {/* 4. 비주얼 쪽잠 타이머 전용 모달 */}
           {showNapVisualModal && (
             <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-indigo-500/60 rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl text-center">
@@ -1872,7 +1899,6 @@
             </div>
           )}
 
-          {/* 5. 건강 루틴 추가 모달 */}
           {showAddRoutineModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-5 space-y-3.5 shadow-2xl">
@@ -1909,7 +1935,6 @@
             </div>
           )}
 
-          {/* 6. 단속 내역 상세 팝업 */}
           {showDefenseListModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl">
@@ -1983,7 +2008,6 @@
             </div>
           )}
 
-          {/* 7. 일별 장부 입력 모달 */}
           {showDailyModal && (
             <DailyRecordModal
               activeType={activeType}
@@ -1994,7 +2018,6 @@
             />
           )}
 
-          {/* 8. 세무서 양식 모달 */}
           {showTaxModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
@@ -2121,12 +2144,9 @@
                 <div className="w-12 h-12 rounded-2xl bg-red-950/80 border border-red-500/40 flex items-center justify-center mx-auto text-2xl">🛡️</div>
                 <div>
                   <h2 className="text-base font-bold text-red-400">데이터 안전 보호 모드</h2>
-                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">아래 버튼을 눌러 시스템을 복구해 주세요.</p>
+                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">화면을 새로고침하여 시스템을 복구합니다.</p>
                 </div>
-                <div className="space-y-2 pt-1">
-                  <button onClick={() => window.location.reload()} className="w-full py-2.5 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow">화면 새로고침</button>
-                  <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-2 bg-slate-800 text-slate-400 font-bold text-[11px] rounded-xl border border-slate-700">임시 저장소 초기화 후 복구</button>
-                </div>
+                <button onClick={() => window.location.reload()} className="w-full py-2.5 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow">화면 새로고침</button>
               </div>
             </div>
           );
