@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#020617" />
   
-  <title>K-TAXI 스마트 가디언 HUD & 단속 방어 레이더</title>
+  <title>K-TAXI 스마트 가디언 HUD & 운행일지</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Leaflet 지도 라이브러리 -->
@@ -79,7 +79,6 @@
       text-shadow: 0 0 32px rgba(255, 30, 68, 1), 0 4px 14px rgba(0, 0, 0, 0.95);
     }
 
-    /* 리플릿 풀스크린 지도 컨테이너 */
     .leaflet-container {
       background-color: #1e293b !important;
       font-family: inherit;
@@ -93,16 +92,32 @@
 <body class="select-none antialiased bg-slate-950">
   <div id="root">
     <div class="h-full flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
-      K-TAXI 가디언 시스템 로딩 중...
+      K-TAXI 시스템 로딩 중...
     </div>
   </div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef, useMemo, Component } = React;
+    const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v3.5.1';
+    const APP_VERSION = 'v4.0.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
+
+    // 기사 맞춤형 웰컴 & 격려 멘트 풀
+    const WELCOME_MESSAGES = [
+      "오늘도 안전운전 하실 거죠? 안전이 최우선입니다!",
+      "즐거운 마음으로 기분 좋게 달려봐요!",
+      "승객에게 친절한 미소, 기사님에게 행복한 하루!",
+      "천천히 가도 괜찮습니다. 오늘도 무사고 완주!",
+      "오늘도 기분 좋은 손님들과 함께하는 멋진 하루 되세요!"
+    ];
+
+    const CLOSING_MESSAGES = [
+      "오늘 하루도 정말 수고하셨습니다. 편안한 밤 보내세요!",
+      "즐거운 마음으로 내일 다시 만나요! 푹 쉬세요.",
+      "내일을 위하여 오늘은 충분하고 편안한 휴식을 취하세요.",
+      "오늘도 안전하게 무사고 운행을 마쳤습니다. 고생 많으셨습니다!"
+    ];
 
     // 천안·아산 주요 단속 포인트 DB
     const CAMERA_DB = [
@@ -140,9 +155,7 @@
       return (brng + 360) % 360;
     };
 
-    // =========================================================================
-    // 100% 무조건 울리는 고음질 단일 전자 내비 알림음 엔진
-    // =========================================================================
+    // 고음질 전자 내비 차임벨 엔진
     let activeAudioSources = [];
 
     const getAudioContext = () => {
@@ -235,12 +248,6 @@
       const now = new Date();
       return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     };
-    const addMinutesToTime = (timeStr, minsToAdd) => {
-      if (!timeStr) return '--:--';
-      const [h, m] = timeStr.split(':').map(Number);
-      const totalMins = (h * 60 + m + minsToAdd) % (24 * 60);
-      return `${String(Math.floor(totalMins / 60)).padStart(2, '0')}:${String(totalMins % 60).padStart(2, '0')}`;
-    };
     const calculateMinutes = (start, end) => {
       if (!start || !end) return 0;
       const [sh, sm] = start.split(':').map(Number);
@@ -259,14 +266,15 @@
 
     const DEFAULT_STORAGE = {
       hasSelectedType: false,
+      isShiftActive: false, // 출근 상태 플래그
       activeType: 'corporate',
       hudSpeedLimit: 50,
       defaultOffDay: 1,
       healthRoutines: [
-        { id: 1, text: '기름진 야식 대신 속 편한 간편식(감자/계란/샐러드)', done: false },
-        { id: 2, text: '가스 충전 시 3분 맥켄지 허리 신전 스트레칭', done: false },
-        { id: 3, text: '수분 섭취 (따뜻한 물/보리차 1L 이상)', done: false },
-        { id: 4, text: '새벽 1:30경 20분 전략적 쪽잠(Power Nap)', done: false }
+        { id: 1, type: 'med', time: '18:00', title: '식후 혈압/당뇨 약 복용', done: false },
+        { id: 2, type: 'meal', time: '20:30', title: '1차 속 편한 간편식 (감자/계란/샐러드)', done: false },
+        { id: 3, type: 'stretch', time: '23:00', title: '가스 충전 시 3분 허리 신전 스트레칭', done: false },
+        { id: 4, type: 'nap', time: '01:30', title: '새벽 20분 전략적 파워 쪽잠', done: false }
       ],
       corporate: {
         carNumber: '',
@@ -302,6 +310,7 @@
           const p = JSON.parse(saved);
           return {
             hasSelectedType: p.hasSelectedType !== undefined ? p.hasSelectedType : true,
+            isShiftActive: p.isShiftActive || false,
             activeType: (p.activeType || p.activeTab || 'corporate') === 'private' ? 'private' : 'corporate',
             hudSpeedLimit: Number(p.hudSpeedLimit || 50),
             defaultOffDay: Number(p.defaultOffDay !== undefined ? p.defaultOffDay : 1),
@@ -323,7 +332,7 @@
       return DEFAULT_STORAGE;
     };
 
-    // 정방향(0° 북쪽 기준) 탑뷰(Top-Down) 네온 택시 마커
+    // 정방향 탑뷰 네온 택시 마커
     const createDynamicUserIcon = (cameraType, heading = 0) => {
       const rotStyle = `transform: rotate(${heading}deg); transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);`;
 
@@ -502,23 +511,31 @@
 
     function App() {
       const [appData, setAppData] = useState(loadSafeData);
-      const [currentTab, setCurrentTab] = useState('hud');
+      const [currentTab, setCurrentTab] = useState(() => (appData.isShiftActive ? 'hud' : 'welcome'));
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       });
 
-      const [navQuery, setNavQuery] = useState('');
-      const [isListening, setIsListening] = useState(false);
-      const [newRoutineText, setNewRoutineText] = useState('');
-      const [showAddRoutineInput, setShowAddRoutineInput] = useState(false);
+      // 로테이션 멘트 상태
+      const [welcomeMsg] = useState(() => WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]);
+      const [closingMsg, setClosingMsg] = useState('');
+      const [showClosingModal, setShowClosingModal] = useState(false);
 
+      // 모달 상태
+      const [showNavModal, setShowNavModal] = useState(false);
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
       const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
       const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
       const [showDefenseListModal, setShowDefenseListModal] = useState(false);
+      const [showAddRoutineModal, setShowAddRoutineModal] = useState(false);
+
+      // 새 루틴 입력 상태
+      const [newRoutineTitle, setNewRoutineTitle] = useState('');
+      const [newRoutineTime, setNewRoutineTime] = useState('12:00');
+      const [newRoutineType, setNewRoutineType] = useState('med');
 
       // GPS & HUD & 방위각 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
@@ -532,7 +549,7 @@
       const [nearbyCamera, setNearbyCamera] = useState(null);
       const [isPassengerMode, setIsPassengerMode] = useState(false);
 
-      // 모의 주행(Mock Drive) 상태
+      // 모의 주행 상태
       const [isSimDriveActive, setIsSimDriveActive] = useState(false);
       const simDriveTimerRef = useRef(null);
 
@@ -555,6 +572,10 @@
       const activeCameraTracking = useRef(null);
       const [napTimerSeconds, setNapTimerSeconds] = useState(0);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
+
+      const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
+      const todayKey = getTodayKey();
+      const todayRecord = appData[activeType]?.records?.[todayKey] || {};
 
       useEffect(() => {
         try {
@@ -592,52 +613,78 @@
         };
       }, [currentTab]);
 
-      // 마이크 권한 해제 후 음성인식 실행
-      const handleVoiceInput = async () => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-          alert('이 브라우저는 음성 인식을 지원하지 않습니다. 크롬 또는 삼성인터넷을 이용해 주세요.');
-          return;
-        }
+      // 1. 초대형 원터치 출근하기
+      const handleStartShift = () => {
+        const nowTime = getCurrentTimeStr();
+        const updatedRec = {
+          ...todayRecord,
+          startTime: todayRecord.startTime || nowTime,
+          endTime: '',
+          workMinutes: 0
+        };
 
-        try {
-          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            stream.getTracks().forEach(track => track.stop());
+        setAppData(prev => ({
+          ...prev,
+          isShiftActive: true,
+          [activeType]: {
+            ...prev[activeType],
+            records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
           }
+        }));
 
-          const recognition = new SpeechRecognition();
-          recognition.lang = 'ko-KR';
-          recognition.interimResults = false;
-          recognition.maxAlternatives = 1;
-
-          recognition.onstart = () => setIsListening(true);
-          recognition.onend = () => setIsListening(false);
-          recognition.onerror = (e) => {
-            setIsListening(false);
-            if (e.error === 'not-allowed') {
-              alert('마이크 권한이 차단되어 있습니다.\n\n[해결 방법]\n1. 화면 상단 주소창 왼쪽 [자물쇠 🔒] 아이콘 터치\n2. [권한] -> [마이크]를 [허용]으로 변경\n3. 화면에 뜬 카카오톡 버블이나 플로팅 앱을 닫고 다시 시도해 주세요.');
-            }
-          };
-
-          recognition.onresult = (e) => {
-            const transcript = e.results[0][0].transcript;
-            if (transcript) {
-              setNavQuery(transcript.replace(/\.$/, ''));
-            }
-          };
-
-          recognition.start();
-        } catch (err) {
-          setIsListening(false);
-          console.warn('Voice STT Error:', err);
-          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-            alert('마이크 권한이 차단되어 있습니다.\n주소창 왼쪽 [자물쇠] -> [권한] -> [마이크: 허용]으로 설정해 주세요.');
-          }
-        }
+        playNavigationChime('chime');
+        setCurrentTab('today'); // 출근 즉시 오늘&건강 화면으로 이동
       };
 
-      // 과속 지속 시 2.5초 간격 연속 경보 엔진 (감속 시 즉각 소멸)
+      // 2. 초대형 원터치 퇴근하기 & 마감 멘트
+      const handleEndShift = () => {
+        const nowTime = getCurrentTimeStr();
+        const sTime = todayRecord.startTime || nowTime;
+        const workMins = calculateMinutes(sTime, nowTime);
+
+        const updatedRec = {
+          ...todayRecord,
+          startTime: sTime,
+          endTime: nowTime,
+          workMinutes: workMins
+        };
+
+        setAppData(prev => ({
+          ...prev,
+          isShiftActive: false,
+          [activeType]: {
+            ...prev[activeType],
+            records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
+          }
+        }));
+
+        const randomClosing = CLOSING_MESSAGES[Math.floor(Math.random() * CLOSING_MESSAGES.length)];
+        setClosingMsg(randomClosing);
+        setShowClosingModal(true);
+      };
+
+      // 외부 내비 원터치 실행
+      const openExternalNav = (navType) => {
+        const isAndroid = /Android/i.test(navigator.userAgent);
+        const encoded = encodeURIComponent('가스충전소');
+
+        if (navType === 'tmap') {
+          window.location.href = isAndroid
+            ? `intent://search?name=${encoded}#Intent;scheme=tmap;package=com.skt.tmap.ku;end`
+            : `tmap://search?name=${encoded}`;
+        } else if (navType === 'kakao') {
+          window.location.href = isAndroid
+            ? `intent://search?q=${encoded}#Intent;scheme=kakaomap;package=net.daum.android.map;end`
+            : `https://map.kakao.com/link/search/${encoded}`;
+        } else if (navType === 'naver') {
+          window.location.href = isAndroid
+            ? `intent://search?query=${encoded}&appname=k-taxi#Intent;scheme=nmap;package=com.nhn.android.nmap;end`
+            : `https://m.map.naver.com/search2/search.naver?query=${encoded}`;
+        }
+        setShowNavModal(false);
+      };
+
+      // 과속 경보 엔진
       const effectiveLimit = nearbyCamera ? nearbyCamera.limit : (appData.hudSpeedLimit || 50);
       const isCurrentlyOverspeed = (gpsSpeed > effectiveLimit) && Boolean(nearbyCamera);
 
@@ -646,7 +693,6 @@
 
         if (isCurrentlyOverspeed && nearbyCamera) {
           playNavigationChime('warning');
-
           overspeedAlarmInterval = setInterval(() => {
             playNavigationChime('warning');
           }, 2500);
@@ -684,7 +730,7 @@
         return () => clearInterval(timer);
       }, [isParkingStopped, parkingCountdown]);
 
-      // 견고한 GPS 위치 및 방위각 연산 엔진
+      // 견고한 GPS 연산 엔진
       useEffect(() => {
         if (!navigator.geolocation || isSimDriveActive) return;
 
@@ -835,7 +881,7 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, [isSimDriveActive, nearbyCamera, isParkingStopped, sectionAvgSpeed]);
 
-      // 실전 모의 주행 (Mock Drive)
+      // 실전 모의 주행
       const toggleSimDrive = (e) => {
         e.stopPropagation();
         stopAllAudio();
@@ -900,6 +946,40 @@
         setDefenseHistory(prev => prev.filter(item => item.id !== id));
       };
 
+      // 건강 루틴 체크 토글
+      const toggleRoutineDone = (id) => {
+        setAppData(prev => ({
+          ...prev,
+          healthRoutines: (prev.healthRoutines || []).map(r => r.id === id ? { ...r, done: !r.done } : r)
+        }));
+      };
+
+      const handleAddRoutine = () => {
+        if (!newRoutineTitle.trim()) return;
+        const newEntry = {
+          id: Date.now(),
+          type: newRoutineType,
+          time: newRoutineTime,
+          title: newRoutineTitle.trim(),
+          done: false
+        };
+        setAppData(prev => ({
+          ...prev,
+          healthRoutines: [...(prev.healthRoutines || []), newEntry]
+        }));
+        setNewRoutineTitle('');
+        setShowAddRoutineModal(false);
+      };
+
+      const handleDeleteRoutine = (id) => {
+        if (!confirm('항목을 삭제하시겠습니까?')) return;
+        setAppData(prev => ({
+          ...prev,
+          healthRoutines: (prev.healthRoutines || []).filter(r => r.id !== id)
+        }));
+      };
+
+      // 쪽잠 타이머
       useEffect(() => {
         let interval = null;
         if (isNapTimerActive && napTimerSeconds > 0) {
@@ -913,91 +993,15 @@
         return () => clearInterval(interval);
       }, [isNapTimerActive, napTimerSeconds]);
 
-      const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
-
-      const handleInitialSelectType = (type) => setAppData(prev => ({ ...prev, activeType: type, hasSelectedType: true }));
-      const setVehicleType = (type) => setAppData(prev => ({ ...prev, activeType: type }));
-      const handleCarNumberChange = (val) => setAppData(prev => ({ ...prev, [activeType]: { ...(prev[activeType] || {}), carNumber: val } }));
-      const handleCorporateConfigChange = (key, val) => setAppData(prev => ({ ...prev, corporate: { ...(prev.corporate || {}), [key]: Number(val) || 0 } }));
-      const handleDefaultOffDayChange = (dayIndex) => setAppData(prev => ({ ...prev, defaultOffDay: Number(dayIndex) }));
-
-      const openNavApp = (appType) => {
-        const query = navQuery.trim() || '가스충전소';
-        const encoded = encodeURIComponent(query);
-        const isAndroid = /Android/i.test(navigator.userAgent);
-
-        if (appType === 'tmap') {
-          window.location.href = isAndroid
-            ? `intent://search?name=${encoded}#Intent;scheme=tmap;package=com.skt.tmap.ku;end`
-            : `tmap://search?name=${encoded}`;
-        } else if (appType === 'kakao') {
-          window.location.href = isAndroid
-            ? `intent://search?q=${encoded}#Intent;scheme=kakaomap;package=net.daum.android.map;end`
-            : `https://map.kakao.com/link/search/${encoded}`;
-        } else if (appType === 'naver') {
-          window.location.href = isAndroid
-            ? `intent://search?query=${encoded}&appname=k-taxi#Intent;scheme=nmap;package=com.nhn.android.nmap;end`
-            : `https://m.map.naver.com/search2/search.naver?query=${encoded}`;
-        }
-      };
-
-      const toggleRoutineDone = (id) => {
-        setAppData(prev => ({ ...prev, healthRoutines: (prev.healthRoutines || []).map(r => r.id === id ? { ...r, done: !r.done } : r) }));
-      };
-      const handleAddRoutine = () => {
-        if (!newRoutineText.trim()) return;
-        setAppData(prev => ({ ...prev, healthRoutines: [...(prev.healthRoutines || []), { id: Date.now(), text: newRoutineText.trim(), done: false }] }));
-        setNewRoutineText('');
-        setShowAddRoutineInput(false);
-      };
-      const handleDeleteRoutine = (id) => {
-        if (!confirm('삭제하시겠습니까?')) return;
-        setAppData(prev => ({ ...prev, healthRoutines: (prev.healthRoutines || []).filter(r => r.id !== id) }));
-      };
-
-      const todayKey = getTodayKey();
-      const todayRecord = appData[activeType]?.records?.[todayKey] || {};
-
-      const handleQuickClock = (type) => {
-        const nowTime = getCurrentTimeStr();
-        let updatedRec = { ...todayRecord };
-        if (type === 'start') {
-          updatedRec.startTime = nowTime;
-          if (!updatedRec.endTime) updatedRec.endTime = '';
-        } else {
-          updatedRec.endTime = nowTime;
-          if (!updatedRec.startTime) updatedRec.startTime = nowTime;
-        }
-        updatedRec.workMinutes = calculateMinutes(updatedRec.startTime, updatedRec.endTime);
-        setAppData(prev => ({
-          ...prev,
-          [activeType]: { ...prev[activeType], records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec } }
-        }));
-      };
-
-      const handleResetClock = () => {
-        if (!confirm('오늘의 출퇴근 시간을 초기화하시겠습니까?')) return;
-        const updatedRec = { ...todayRecord, startTime: '', endTime: '', workMinutes: 0 };
-        setAppData(prev => ({
-          ...prev,
-          [activeType]: { ...prev[activeType], records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec } }
-        }));
-      };
-
       const handleSaveRecord = (dateKey, recordData) => {
-        const workMins = calculateMinutes(recordData.startTime, recordData.endTime);
         setAppData(prev => ({
           ...prev,
-          [activeType]: { ...prev[activeType], records: { ...(prev[activeType]?.records || {}), [dateKey]: { ...recordData, workMinutes: workMins } } }
+          [activeType]: {
+            ...prev[activeType],
+            records: { ...(prev[activeType]?.records || {}), [dateKey]: recordData }
+          }
         }));
         setShowDailyModal(false);
-      };
-
-      const handleDeleteDailyRecord = (dateKey) => {
-        if (!confirm(`${dateKey} 기록을 삭제하시겠습니까?`)) return;
-        const updatedRecords = { ...(appData[activeType]?.records || {}) };
-        delete updatedRecords[dateKey];
-        setAppData(prev => ({ ...prev, [activeType]: { ...prev[activeType], records: updatedRecords } }));
       };
 
       const totalFixedAllowances = useMemo(() => (appData?.corporate?.fixedAllowanceItems || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [appData?.corporate?.fixedAllowanceItems]);
@@ -1061,15 +1065,6 @@
         return cells;
       }, [currentYearMonth]);
 
-      const shiftSchedule = useMemo(() => {
-        const start = todayRecord.startTime || '16:30';
-        return { start, rest1: addMinutesToTime(start, 240), rest2: '01:30', end: addMinutesToTime(start, 720) };
-      }, [todayRecord.startTime]);
-
-      const openModalForDate = (dateStr) => { setSelectedDate(dateStr); setShowDailyModal(true); };
-      const currentRecords = appData[activeType]?.records || {};
-      const sortedMonthEntries = Object.entries(currentRecords).filter(([date]) => date && String(date).startsWith(currentYearMonth)).sort(([a], [b]) => a.localeCompare(b));
-
       const getHudInnerTransformClass = () => {
         if (hudMirrorMode === 'flipY') return 'hud-flip-y';
         if (hudMirrorMode === 'rot90') return 'hud-rot90-flip';
@@ -1093,44 +1088,11 @@
 
       const DAYS_NAME = ['일', '월', '화', '수', '목', '금', '토'];
 
-      if (!appData.hasSelectedType) {
-        return (
-          <div className="max-w-md mx-auto h-full bg-slate-950 flex flex-col items-center justify-center p-6 text-center space-y-6">
-            <div className="space-y-2">
-              <span className="bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full shadow">K-TAXI</span>
-              <h1 className="text-2xl font-black text-white tracking-tight mt-2">운행 모드를 선택해 주세요</h1>
-              <p className="text-xs text-slate-400">선택하신 모드에 최적화된 장부와 계산식이 적용됩니다.<br/>(설정 탭에서 언제든 변경 가능)</p>
-            </div>
-            <div className="w-full space-y-3">
-              <button
-                onClick={() => handleInitialSelectType('corporate')}
-                className="w-full p-5 bg-slate-900 border-2 border-yellow-500/50 hover:border-yellow-400 rounded-3xl text-left flex items-center justify-between shadow-xl"
-              >
-                <div>
-                  <span className="text-base font-black text-yellow-400 block">법인택시 모드</span>
-                  <span className="text-xs text-slate-400 mt-1 block">사납금, 성과급(70%), 고정수당, 4대보험 공제 정산</span>
-                </div>
-                <span className="text-2xl">🚕</span>
-              </button>
-              <button
-                onClick={() => handleInitialSelectType('private')}
-                className="w-full p-5 bg-slate-900 border-2 border-slate-700 hover:border-slate-500 rounded-3xl text-left flex items-center justify-between shadow-xl"
-              >
-                <div>
-                  <span className="text-base font-black text-emerald-400 block">개인택시 모드</span>
-                  <span className="text-xs text-slate-400 mt-1 block">카드/현금 수입, 가스/통행료 경비, 세무서 양식 추출</span>
-                </div>
-                <span className="text-2xl">🚗</span>
-              </button>
-            </div>
-          </div>
-        );
-      }
-
       return (
         <div className="max-w-md mx-auto w-full h-full flex flex-col bg-slate-950 border-x border-slate-800 relative overflow-hidden">
           
-          {currentTab !== 'hud' && (
+          {/* 상단 콤팩트 헤더 */}
+          {currentTab !== 'hud' && currentTab !== 'welcome' && (
             <header className="flex-shrink-0 p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-30">
               <div className="flex items-center gap-2">
                 <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
@@ -1138,15 +1100,158 @@
                   {appData[activeType]?.carNumber || (activeType === 'corporate' ? '법인택시' : '개인택시')}
                 </span>
               </div>
-              <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold border border-slate-700">
-                {activeType === 'corporate' ? '법인 모드' : '개인 모드'}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${appData.isShiftActive ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/50' : 'bg-slate-800 text-slate-400'}`}>
+                  {appData.isShiftActive ? '● 운행 중' : '○ 대기 중'}
+                </span>
+                <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold border border-slate-700">
+                  {activeType === 'corporate' ? '법인' : '개인'}
+                </span>
+              </div>
             </header>
           )}
 
-          <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' ? 'p-0' : 'p-3 overflow-y-auto'}`}>
+          {/* 메인 뷰포트 영역 */}
+          <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3 overflow-y-auto'}`}>
             
-            {/* 탭 1: 🏎️ 5:5 가디언 HUD & 방어 배너 */}
+            {/* ======================================================== */}
+            {/* 1. 첫 화면: 웰컴 멘트 & 초대형 [출근하기] */}
+            {/* ======================================================== */}
+            {currentTab === 'welcome' && (
+              <div className="h-full flex flex-col justify-between p-6 text-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
+                <div className="pt-8 space-y-3">
+                  <div className="inline-block bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full shadow">
+                    K-TAXI 스마트 파트너
+                  </div>
+                  <h2 className="text-xl font-black text-white leading-relaxed px-2">
+                    {welcomeMsg}
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    {todayKey} | {appData[activeType]?.carNumber || '차량번호 미등록'}
+                  </p>
+                </div>
+
+                {/* 초대형 출근하기 버튼 */}
+                <div className="py-8 flex flex-col items-center justify-center">
+                  <button
+                    onClick={handleStartShift}
+                    className="w-56 h-56 rounded-full bg-gradient-to-tr from-yellow-500 to-amber-300 text-slate-950 font-black text-2xl shadow-[0_0_50px_rgba(250,204,21,0.5)] border-4 border-yellow-200 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform"
+                  >
+                    <span className="text-5xl">🚖</span>
+                    <span>출근하기</span>
+                    <span className="text-xs font-bold text-slate-800">터치 시 운행 시작</span>
+                  </button>
+                </div>
+
+                {/* 하단 바로가기 메뉴 */}
+                <div className="pb-4 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setCurrentTab('calendar')}
+                    className="py-3 bg-slate-900/90 border border-slate-700 text-slate-300 font-bold rounded-2xl text-xs"
+                  >
+                    📅 지난 장부 조회
+                  </button>
+                  <button
+                    onClick={() => setCurrentTab('settings')}
+                    className="py-3 bg-slate-900/90 border border-slate-700 text-slate-300 font-bold rounded-2xl text-xs"
+                  >
+                    ⚙️ 정산 및 설정
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ======================================================== */}
+            {/* 2. 오늘&건강 탭: 스마트 건강 관리 */}
+            {/* ======================================================== */}
+            {currentTab === 'today' && (
+              <div className="space-y-3 pb-6">
+                {/* 출근 상태 카드 */}
+                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
+                  <div>
+                    <span className="text-[11px] text-slate-400 font-bold block">오늘의 출근 시각</span>
+                    <div className="text-base font-black text-yellow-400 mt-0.5">
+                      {todayRecord.startTime ? `${todayRecord.startTime} 출근 완료` : '미출근'}
+                    </div>
+                  </div>
+                  {isNapTimerActive ? (
+                    <button
+                      onClick={() => setIsNapTimerActive(false)}
+                      className="px-3 py-1.5 bg-red-950 text-red-300 border border-red-500/50 rounded-xl font-bold text-xs animate-pulse"
+                    >
+                      쪽잠 중 ({Math.floor(napTimerSeconds / 60)}:{String(napTimerSeconds % 60).padStart(2, '0')}) 취소
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => { setNapTimerSeconds(20 * 60); setIsNapTimerActive(true); }}
+                      className="px-3 py-1.5 bg-indigo-900/80 text-indigo-200 border border-indigo-500/40 rounded-xl font-bold text-xs flex items-center gap-1 shadow"
+                    >
+                      <span>⚡</span> 20분 쪽잠
+                    </button>
+                  )}
+                </div>
+
+                {/* 건강 루틴 리스트 */}
+                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
+                  <div className="flex justify-between items-center pb-1 border-b border-slate-800">
+                    <span className="text-xs font-bold text-emerald-400">
+                      🥗 건강 & 휴식 루틴 ({ (appData.healthRoutines || []).filter(r => r.done).length } / { (appData.healthRoutines || []).length })
+                    </span>
+                    <button
+                      onClick={() => setShowAddRoutineModal(true)}
+                      className="text-[11px] text-yellow-400 font-bold px-2 py-0.5 rounded bg-slate-800 border border-slate-700"
+                    >
+                      + 시간 추가
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    {(appData.healthRoutines || []).map((routine) => (
+                      <div
+                        key={routine.id}
+                        className={`p-3 rounded-xl border flex items-center justify-between text-xs transition ${
+                          routine.done
+                            ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 line-through'
+                            : 'bg-slate-950 border-slate-800 text-slate-200'
+                        }`}
+                      >
+                        <div onClick={() => toggleRoutineDone(routine.id)} className="flex items-center gap-2.5 flex-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={routine.done}
+                            onChange={() => toggleRoutineDone(routine.id)}
+                            className="w-4 h-4 rounded text-emerald-500 cursor-pointer"
+                          />
+                          <div>
+                            <span className="text-[10px] text-yellow-400 font-black mr-1.5 font-mono">[{routine.time}]</span>
+                            <span className="font-medium">{routine.title}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteRoutine(routine.id)}
+                          className="text-slate-500 hover:text-red-400 px-1 font-bold text-xs"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* HUD 바로가기 배너 */}
+                <button
+                  onClick={() => setCurrentTab('hud')}
+                  className="w-full py-4 bg-gradient-to-r from-yellow-500 to-amber-400 text-slate-950 font-black rounded-2xl text-base shadow-xl flex items-center justify-center gap-2 active:scale-95 transition"
+                >
+                  <span>🏎️</span>
+                  <span>가디언 HUD 주행 모드로 전환</span>
+                </button>
+              </div>
+            )}
+
+            {/* ======================================================== */}
+            {/* 3. 가디언 HUD 탭: 외부내비 단일 버튼 & 속도계 & 방어 배너 */}
+            {/* ======================================================== */}
             {currentTab === 'hud' && (
               <div
                 className={`w-full h-full flex flex-col justify-between select-none relative overflow-hidden ${
@@ -1155,28 +1260,35 @@
                     : 'bg-slate-950'
                 }`}
               >
-                {/* 상단 컨트롤 바 */}
+                {/* 상단 컨트롤 바 (심플 외부내비 단일 버튼) */}
                 <div className="absolute top-3 left-3 right-3 z-[450] flex justify-between items-center pointer-events-auto">
                   <div className="flex gap-1.5 bg-slate-950/85 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
+                    <button
+                      onClick={() => setShowNavModal(true)}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-black flex items-center gap-1 shadow"
+                    >
+                      <span>🧭</span> 외부 내비
+                    </button>
+
                     <button
                       onClick={() => {
                         setIsPassengerMode(!isPassengerMode);
                         playNavigationChime('chime');
                       }}
-                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black border flex items-center gap-1 transition active:scale-95 ${
+                      className={`px-2.5 py-1.5 rounded-xl text-[10px] font-bold border transition ${
                         isPassengerMode
-                          ? 'bg-blue-900/90 text-blue-200 border-blue-400 shadow-md'
-                          : 'bg-yellow-500 text-black border-yellow-300 shadow-md'
+                          ? 'bg-blue-900/90 text-blue-200 border-blue-400'
+                          : 'bg-slate-800 text-slate-300 border-slate-700'
                       }`}
                     >
-                      {isPassengerMode ? '👥 탑승 모드' : '🚕 빈차 모드'}
+                      {isPassengerMode ? '👥 탑승' : '🚕 빈차'}
                     </button>
 
                     <button
                       onClick={() => setHudViewMode(hudViewMode === 'map' ? 'mirror' : 'map')}
-                      className="px-2.5 py-1.5 bg-slate-800/90 border border-slate-600 text-slate-200 rounded-xl text-[10px] font-bold active:scale-95"
+                      className="px-2.5 py-1.5 bg-slate-800/90 border border-slate-600 text-slate-200 rounded-xl text-[10px] font-bold"
                     >
-                      {hudViewMode === 'map' ? '🪞 HUD 전용' : '🗺️ 지도 보기'}
+                      {hudViewMode === 'map' ? '🪞 HUD' : '🗺️ 지도'}
                     </button>
                   </div>
 
@@ -1188,15 +1300,13 @@
                         : 'bg-slate-950/85 backdrop-blur-md text-yellow-400 border-yellow-500/50'
                     }`}
                   >
-                    {isSimDriveActive ? '🛑 모의주행 정지' : '🚗 모의 주행'}
+                    {isSimDriveActive ? '🛑 정지' : '🚗 모의주행'}
                   </button>
                 </div>
 
-                {/* 메인 5:5 가디언 HUD 화면 */}
+                {/* 메인 5:5 가디언 HUD */}
                 {hudViewMode === 'map' ? (
                   <div className="relative w-full h-full flex-1 flex flex-col">
-                    
-                    {/* 1. 배경: 실시간 지도 */}
                     <div className="absolute inset-0 z-0">
                       <FullscreenLiveMapView
                         currentCoords={currentCoords}
@@ -1207,9 +1317,7 @@
                       />
                     </div>
 
-                    {/* 2. 전면: 5:5 초투명 가디언 HUD 오버레이 */}
                     <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-20 pointer-events-none">
-                      
                       {/* 상단 1/2: 속도제한 표지판 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
                         <div className={`flex items-center justify-center w-44 h-44 rounded-full border-[5px] transition-all duration-300 ${
@@ -1223,7 +1331,6 @@
                           </div>
                         </div>
 
-                        {/* 단속 정보 배지 */}
                         {nearbyCamera ? (
                           <div className="mt-2 px-4 py-1 rounded-2xl bg-red-950/95 border border-red-500 text-red-300 font-black text-xs shadow-2xl animate-bounce pointer-events-auto">
                             <span>{nearbyCamera.type === 'speed' ? '🚨 신호·과속' : nearbyCamera.type === 'parking' ? '🚏 주정차단속' : '🛣️ 구간단속'}</span>
@@ -1233,14 +1340,12 @@
                           <span className="text-[10px] font-bold text-slate-400/30 mt-1">정상 주행 구간</span>
                         )}
 
-                        {/* 주정차 5분 타이머 */}
                         {isParkingStopped && (
                           <div className="mt-1 px-3 py-0.5 rounded-xl bg-amber-950/95 border border-yellow-400 text-yellow-300 font-black text-xs shadow-2xl animate-pulse pointer-events-auto">
                             ⏱️ 주정차 유예: {Math.floor(parkingCountdown / 60)}분 {String(parkingCountdown % 60).padStart(2, '0')}초 남음
                           </div>
                         )}
 
-                        {/* 구간단속 실시간 평균속도 */}
                         {nearbyCamera?.type === 'section' && sectionAvgSpeed > 0 && (
                           <div className="mt-1 px-3 py-0.5 rounded-xl bg-orange-950/95 border border-orange-500 text-orange-200 font-black text-xs shadow-2xl pointer-events-auto">
                             🛣️ 구간 평균속도: <span className={sectionAvgSpeed > effectiveLimit ? 'text-red-400 font-black' : 'text-cyan-300 font-black'}>{sectionAvgSpeed} km/h</span>
@@ -1251,7 +1356,6 @@
                       {/* 하단 1/2: 초대형 디지털 속도계 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2 text-center">
                         <div className={`transition-all duration-300 flex flex-col items-center justify-center w-full ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
-                          
                           <div className="w-full flex items-center justify-center leading-none">
                             <span className={`text-[11rem] font-black tracking-tighter font-mono text-center select-none ${
                               isOverSpeed
@@ -1276,7 +1380,7 @@
                       </div>
                     </div>
 
-                    {/* 3. 하단 고정: 방어/적발 배너 */}
+                    {/* 3. 방어/적발 배너 (Flex 바닥 고정) */}
                     <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto">
                       <div
                         onClick={() => setShowDefenseListModal(true)}
@@ -1310,53 +1414,29 @@
                     </div>
                   </div>
                 ) : (
-                  <div
-                    onClick={handleCycleMirrorMode}
-                    className="flex-1 flex flex-col justify-between p-3 cursor-pointer"
-                  >
+                  <div onClick={handleCycleMirrorMode} className="flex-1 flex flex-col justify-between p-3 cursor-pointer">
                     <div className="flex-1 flex flex-col items-center justify-center p-2 border-b border-slate-800/60 overflow-hidden">
                       <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
                         <div className="flex flex-col items-center justify-center">
-                          <div className={`flex items-center justify-center w-36 h-36 rounded-full border-[10px] transition-all duration-300 ${
-                            isNearCamera ? 'border-red-600 bg-white text-black animate-top-pump shadow-2xl' : 'border-red-600 bg-white text-black shadow-2xl'
-                          }`}>
+                          <div className="flex items-center justify-center w-36 h-36 rounded-full border-[10px] border-red-600 bg-white text-black shadow-2xl">
                             <div className="flex flex-col items-center justify-center leading-none">
                               <span className="text-5xl font-black tracking-tight">{effectiveLimit}</span>
                               <span className="text-[9px] font-black text-red-600 tracking-wider mt-0.5">LIMIT</span>
                             </div>
                           </div>
-                          {nearbyCamera && (
-                            <div className="mt-2 px-3 py-0.5 rounded-full bg-red-950 border border-red-500 text-red-300 font-black text-xs animate-bounce">
-                              <span>{nearbyCamera.type === 'speed' ? '🚨 신호·과속' : nearbyCamera.type === 'parking' ? '🚏 주정차' : '🛣️ 구간단속'} {nearbyCamera.dist}m</span>
-                            </div>
-                          )}
                         </div>
                       </div>
                     </div>
 
                     <div className="flex-1 flex flex-col items-center justify-center p-2 overflow-hidden">
                       <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
-                        <div className={`flex flex-col items-center justify-center transition-all duration-300 ${
-                          isNearCamera ? 'animate-bottom-pump' : ''
-                        }`}>
-                          <div className="flex items-baseline justify-center">
-                            <span className={`text-9xl font-black tracking-tighter font-mono transition-colors ${
-                              isOverSpeed ? 'text-red-500' : 'text-cyan-400'
-                            }`}>
-                              {gpsSpeed}
-                            </span>
-                            <span className="text-2xl font-bold ml-2 text-slate-400">km/h</span>
-                          </div>
-
-                          {isOverSpeed ? (
-                            <span className="text-xs font-black text-red-400 mt-1 bg-red-950/90 px-3 py-0.5 rounded-full border border-red-500/80">
-                              ⚠️ 즉시 감속 (+{gpsSpeed - effectiveLimit} km/h 초과)
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold text-slate-400 mt-1">
-                              {getMirrorModeLabel()} (화면 터치 시 반사 전환)
-                            </span>
-                          )}
+                        <div className="flex items-baseline justify-center">
+                          <span className={`text-9xl font-black tracking-tighter font-mono transition-colors ${
+                            isOverSpeed ? 'text-red-500' : 'text-cyan-400'
+                          }`}>
+                            {gpsSpeed}
+                          </span>
+                          <span className="text-2xl font-bold ml-2 text-slate-400">km/h</span>
                         </div>
                       </div>
                     </div>
@@ -1365,263 +1445,110 @@
               </div>
             )}
 
-            {/* 탭 2: 🏠 오늘 & 건강 */}
-            {currentTab === 'today' && (
-              <div className="space-y-3.5 pb-4">
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 shadow-sm space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <span className="text-[11px] text-slate-400 font-bold block">오늘의 근무 기록</span>
-                      <div className="text-xs text-slate-200">
-                        출근 <span className="text-yellow-400 font-bold">{todayRecord.startTime || '--:--'}</span> ~ 퇴근 <span className="text-yellow-400 font-bold">{todayRecord.endTime || '--:--'}</span>
-                        {todayRecord.workMinutes > 0 && (
-                          <span className="ml-1.5 text-[11px] text-green-400 font-bold">({formatMinutesToHours(todayRecord.workMinutes)})</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-1.5 items-center">
-                      <button onClick={() => handleQuickClock('start')} className="px-3 py-1.5 bg-blue-600 text-white font-bold text-xs rounded-xl shadow">출근</button>
-                      <button onClick={() => handleQuickClock('end')} className="px-3 py-1.5 bg-orange-600 text-white font-bold text-xs rounded-xl shadow">퇴근</button>
-                      {(todayRecord.startTime || todayRecord.endTime) && (
-                        <button onClick={handleResetClock} className="px-2 py-1.5 bg-slate-800 text-slate-400 font-bold text-xs rounded-xl border border-slate-700">초기화</button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-2">
-                    <div className="flex justify-between items-center text-[11px]">
-                      <span className="font-bold text-slate-300">⏱️ 출근 맞춤 건강 일과표</span>
-                      {isNapTimerActive ? (
-                        <button onClick={() => setIsNapTimerActive(false)} className="px-2 py-0.5 bg-red-950 text-red-300 border border-red-500/40 rounded-lg font-bold text-[10px] animate-pulse">
-                          쪽잠 중 ({Math.floor(napTimerSeconds / 60)}:{String(napTimerSeconds % 60).padStart(2, '0')}) 취소
-                        </button>
-                      ) : (
-                        <button onClick={() => { setNapTimerSeconds(20 * 60); setIsNapTimerActive(true); }} className="px-2 py-0.5 bg-indigo-900/80 text-indigo-200 border border-indigo-500/40 rounded-lg font-bold text-[10px]">
-                          ⚡ 20분 쪽잠 타이머
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-3 gap-1.5 text-center text-[10px]">
-                      <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800">
-                        <span className="text-slate-400 block font-semibold">1차 식사/스트레칭</span>
-                        <span className="text-yellow-400 font-bold mt-0.5 block">{shiftSchedule.rest1}</span>
-                      </div>
-                      <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800">
-                        <span className="text-slate-400 block font-semibold">2차 쪽잠 (20분)</span>
-                        <span className="text-indigo-300 font-bold mt-0.5 block">{shiftSchedule.rest2}</span>
-                      </div>
-                      <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800">
-                        <span className="text-slate-400 block font-semibold">목표 퇴근 (12h)</span>
-                        <span className="text-emerald-400 font-bold mt-0.5 block">{shiftSchedule.end}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 원터치 외부 내비 연동 & 마이크 음성인식 STT + 빠른 목적지 칩 */}
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-300">🧭 원터치 외부 내비 연동</span>
-                    <span className="text-[10px] text-slate-500">목적지 앱 자동 연동</span>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      placeholder="목적지 입력 (미입력 시 '가스충전소')"
-                      value={navQuery}
-                      onChange={(e) => setNavQuery(e.target.value)}
-                      className="flex-1 bg-slate-950 border border-slate-700 px-3 py-2 text-xs rounded-xl text-white focus:outline-none focus:border-yellow-500"
-                    />
-                    
-                    <button
-                      type="button"
-                      onClick={handleVoiceInput}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition ${
-                        isListening
-                          ? 'bg-red-600 text-white animate-pulse'
-                          : 'bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700'
-                      }`}
-                      title="음성으로 목적지 말하기"
-                    >
-                      <span>🎤</span> {isListening ? '듣는 중...' : '음성'}
-                    </button>
-
-                    {navQuery && (
-                      <button
-                        onClick={() => setNavQuery('')}
-                        className="px-2.5 bg-slate-800 text-slate-400 rounded-xl text-xs hover:text-white"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-
-                  {/* 빠른 목적지 선택 칩 */}
-                  <div className="flex gap-1.5 overflow-x-auto pb-1">
-                    {['가스충전소', '천안역', '아산역', '천안시청', '종합터미널'].map((dest) => (
-                      <button
-                        key={dest}
-                        onClick={() => setNavQuery(dest)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition whitespace-nowrap ${
-                          navQuery === dest
-                            ? 'bg-yellow-500 text-black border-yellow-400'
-                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-600 hover:text-slate-200'
-                        }`}
-                      >
-                        {dest}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 pt-1">
-                    <button onClick={() => openNavApp('tmap')} className="py-2.5 bg-red-950/80 border border-red-500/40 text-red-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🔴</span> 티맵</button>
-                    <button onClick={() => openNavApp('kakao')} className="py-2.5 bg-yellow-950/80 border border-yellow-500/40 text-yellow-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🟡</span> 카카오맵</button>
-                    <button onClick={() => openNavApp('naver')} className="py-2.5 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1"><span>🟢</span> 네이버지도</button>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-emerald-400">🥗 오늘 실천할 건강 루틴 ({ (appData.healthRoutines || []).filter(r => r.done).length } / { (appData.healthRoutines || []).length })</span>
-                    <button onClick={() => setShowAddRoutineInput(!showAddRoutineInput)} className="text-[11px] text-yellow-400 font-bold px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
-                      {showAddRoutineInput ? '닫기' : '+ 항목 추가'}
-                    </button>
-                  </div>
-                  {showAddRoutineInput && (
-                    <div className="flex gap-1.5 pt-1">
-                      <input
-                        type="text"
-                        placeholder="새 건강 목표 입력 (예: 허리보호대 착용)"
-                        value={newRoutineText}
-                        onChange={(e) => setNewRoutineText(e.target.value)}
-                        className="flex-1 bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs rounded-xl text-white focus:outline-none"
-                      />
-                      <button onClick={handleAddRoutine} className="px-3 py-1.5 bg-emerald-600 text-white font-bold text-xs rounded-xl">추가</button>
-                    </div>
-                  )}
-                  <div className="space-y-1.5 pt-1">
-                    {(appData.healthRoutines || []).map((routine) => (
-                      <div key={routine.id} className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${routine.done ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 line-through' : 'bg-slate-950 border-slate-800 text-slate-200'}`}>
-                        <div onClick={() => toggleRoutineDone(routine.id)} className="flex items-center gap-2 flex-1 cursor-pointer">
-                          <input type="checkbox" checked={routine.done} onChange={() => toggleRoutineDone(routine.id)} className="w-4 h-4 rounded text-emerald-500 cursor-pointer" />
-                          <span className="font-medium">{routine.text}</span>
-                        </div>
-                        <button onClick={() => handleDeleteRoutine(routine.id)} className="text-slate-500 hover:text-red-400 px-1 font-bold text-xs">✕</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 탭 3: 📅 운행일지 */}
+            {/* ======================================================== */}
+            {/* 4. 운행일지 탭: 달력 중심 & 초대형 [퇴근하기] */}
+            {/* ======================================================== */}
             {currentTab === 'calendar' && (
-              <div className="space-y-3 pb-4">
-                <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between">
-                  <button onClick={() => {
-                    const [y, m] = currentYearMonth.split('-').map(Number);
-                    const prevDate = new Date(y, m - 2, 1);
-                    setCurrentYearMonth(`${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`);
-                  }} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">◀</button>
-                  <div className="text-center">
-                    <span className="text-base font-black text-yellow-400">{currentYearMonth}</span>
-                    <div className="text-[11px] text-slate-400 font-medium">{currentMonthStats.workDays}일 운행 / 총 {formatMinutesToHours(currentMonthStats.totalWorkMinutes)}</div>
+              <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
+                <div className="space-y-3">
+                  {/* 월 이동 헤더 */}
+                  <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between">
+                    <button onClick={() => {
+                      const [y, m] = currentYearMonth.split('-').map(Number);
+                      const prevDate = new Date(y, m - 2, 1);
+                      setCurrentYearMonth(`${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`);
+                    }} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">◀</button>
+                    <div className="text-center">
+                      <span className="text-base font-black text-yellow-400">{currentYearMonth}</span>
+                      <div className="text-[11px] text-slate-400 font-medium">
+                        {currentMonthStats.workDays}일 운행 / {formatMinutesToHours(currentMonthStats.totalWorkMinutes)}
+                      </div>
+                    </div>
+                    <button onClick={() => {
+                      const [y, m] = currentYearMonth.split('-').map(Number);
+                      const nextDate = new Date(y, m, 1);
+                      setCurrentYearMonth(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`);
+                    }} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">▶</button>
                   </div>
-                  <button onClick={() => {
-                    const [y, m] = currentYearMonth.split('-').map(Number);
-                    const nextDate = new Date(y, m, 1);
-                    setCurrentYearMonth(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`);
-                  }} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">▶</button>
-                </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block font-semibold">이번 달 총 매출</span>
-                    <span className="text-base font-black text-yellow-400 block mt-0.5">{formatMoney(currentMonthStats.totalRevenue)}</span>
-                  </div>
-                  <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
-                    <span className="text-[11px] text-green-400 block font-semibold">{activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}</span>
-                    <span className="text-base font-black text-green-400 block mt-0.5">
-                      {activeType === 'corporate' ? formatMoney(currentMonthStats.netSalaryFromCompany) : formatMoney(currentMonthStats.netIncome)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
-                  <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
-                    {DAYS_NAME.map((dName, idx) => (
-                      <span key={dName} className={`${idx === 0 ? 'text-red-400' : idx === 6 ? 'text-blue-400' : idx === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>
-                        {dName}{idx === (appData.defaultOffDay || 1) ? '·휴' : ''}
+                  {/* 매출 요약 카드 */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
+                      <span className="text-[11px] text-slate-400 block font-semibold">이번 달 총 매출</span>
+                      <span className="text-base font-black text-yellow-400 block mt-0.5">{formatMoney(currentMonthStats.totalRevenue)}</span>
+                    </div>
+                    <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
+                      <span className="text-[11px] text-green-400 block font-semibold">{activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}</span>
+                      <span className="text-base font-black text-green-400 block mt-0.5">
+                        {activeType === 'corporate' ? formatMoney(currentMonthStats.netSalaryFromCompany) : formatMoney(currentMonthStats.netIncome)}
                       </span>
-                    ))}
+                    </div>
                   </div>
-                  <div className="grid grid-cols-7 gap-1">
-                    {calendarCells.map((dateStr, idx) => {
-                      if (!dateStr) return <div key={`empty-${idx}`} className="h-12 rounded-lg bg-transparent"></div>;
-                      const dayNum = Number(dateStr.split('-')[2]);
-                      const dayOfWeek = (idx % 7);
-                      const rec = currentRecords[dateStr];
-                      const isSelected = selectedDate === dateStr;
-                      const isDefaultOff = dayOfWeek === (appData.defaultOffDay || 1);
 
-                      return (
-                        <button
-                          key={dateStr}
-                          onClick={() => openModalForDate(dateStr)}
-                          className={`h-12 p-1 rounded-xl flex flex-col justify-between items-start text-left border transition ${
-                            isSelected ? 'border-yellow-400 bg-yellow-500/20' : rec?.isHoliday ? 'border-emerald-800/60 bg-emerald-950/30' : rec ? 'border-slate-700 bg-slate-950/80' : isDefaultOff ? 'border-slate-800/80 bg-slate-900/40' : 'border-slate-800/60 bg-slate-950/30'
-                          }`}
-                        >
-                          <div className="flex justify-between w-full items-center">
-                            <span className={`text-[10px] font-bold ${dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : dayOfWeek === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>{dayNum}</span>
-                            {isDefaultOff && !rec && <span className="text-[7px] text-emerald-500/80 font-bold">휴무</span>}
-                          </div>
-                          {rec && (
-                            rec.isHoliday ? (
-                              <span className="text-[8px] bg-emerald-950 text-emerald-300 font-bold px-1 rounded w-full text-center">휴무</span>
-                            ) : (
-                              <span className="text-[8px] text-yellow-400 font-bold truncate w-full text-center">
-                                {activeType === 'corporate' ? formatShortMoney(rec.revenue) : formatShortMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
-                              </span>
-                            )
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800 space-y-2">
-                  <div className="flex justify-between items-center pb-1">
-                    <span className="text-xs font-bold text-slate-300">운행 일지 ({sortedMonthEntries.length}건)</span>
-                    <button onClick={() => openModalForDate(todayKey)} className="px-2.5 py-1 bg-yellow-500 text-black font-bold text-[11px] rounded-lg shadow">+ 오늘 기록</button>
-                  </div>
-                  {sortedMonthEntries.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-slate-500">등록된 운행 기록이 없습니다.</div>
-                  ) : (
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                      {sortedMonthEntries.map(([date, rec]) => (
-                        <div key={date} className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-300">{date}</span>
-                            {rec?.isHoliday ? <span className="bg-emerald-950 text-emerald-300 text-[9px] px-1 rounded font-bold">휴무</span> : <span className="text-yellow-400 font-black">{activeType === 'corporate' ? formatMoney(rec?.revenue) : formatMoney(Number(rec?.cardRev || 0) + Number(rec?.cashRev || 0))}</span>}
-                            {rec?.workMinutes > 0 && <span className="text-[10px] text-slate-400 font-medium">({formatMinutesToHours(rec.workMinutes)})</span>}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <button onClick={() => openModalForDate(date)} className="px-2 py-1 bg-slate-800 text-yellow-400 font-bold rounded-lg text-[10px]">수정</button>
-                            <button onClick={() => handleDeleteDailyRecord(date)} className="text-slate-500 hover:text-red-400 text-xs px-1">✕</button>
-                          </div>
-                        </div>
+                  {/* 달력 장부 */}
+                  <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
+                    <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
+                      {DAYS_NAME.map((dName, idx) => (
+                        <span key={dName} className={`${idx === 0 ? 'text-red-400' : idx === 6 ? 'text-blue-400' : idx === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>
+                          {dName}{idx === (appData.defaultOffDay || 1) ? '·휴' : ''}
+                        </span>
                       ))}
                     </div>
-                  )}
+                    <div className="grid grid-cols-7 gap-1">
+                      {calendarCells.map((dateStr, idx) => {
+                        if (!dateStr) return <div key={`empty-${idx}`} className="h-12 rounded-lg bg-transparent"></div>;
+                        const dayNum = Number(dateStr.split('-')[2]);
+                        const dayOfWeek = (idx % 7);
+                        const rec = appData[activeType]?.records?.[dateStr];
+                        const isSelected = selectedDate === dateStr;
+                        const isDefaultOff = dayOfWeek === (appData.defaultOffDay || 1);
+
+                        return (
+                          <button
+                            key={dateStr}
+                            onClick={() => { setSelectedDate(dateStr); setShowDailyModal(true); }}
+                            className={`h-12 p-1 rounded-xl flex flex-col justify-between items-start text-left border transition ${
+                              isSelected ? 'border-yellow-400 bg-yellow-500/20' : rec?.isHoliday ? 'border-emerald-800/60 bg-emerald-950/30' : rec ? 'border-slate-700 bg-slate-950/80' : isDefaultOff ? 'border-slate-800/80 bg-slate-900/40' : 'border-slate-800/60 bg-slate-950/30'
+                            }`}
+                          >
+                            <div className="flex justify-between w-full items-center">
+                              <span className={`text-[10px] font-bold ${dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : dayOfWeek === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>{dayNum}</span>
+                              {isDefaultOff && !rec && <span className="text-[7px] text-emerald-500/80 font-bold">휴무</span>}
+                            </div>
+                            {rec && (
+                              rec.isHoliday ? (
+                                <span className="text-[8px] bg-emerald-950 text-emerald-300 font-bold px-1 rounded w-full text-center">휴무</span>
+                              ) : (
+                                <span className="text-[8px] text-yellow-400 font-bold truncate w-full text-center">
+                                  {activeType === 'corporate' ? formatShortMoney(rec.revenue) : formatShortMoney(Number(rec.cardRev || 0) + Number(rec.cashRev || 0))}
+                                </span>
+                              )
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 초대형 오늘 퇴근하기 버튼 */}
+                <div className="pt-2">
+                  <button
+                    onClick={handleEndShift}
+                    className="w-full py-4 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-black text-lg rounded-2xl shadow-xl flex items-center justify-center gap-2 active:scale-95 transition"
+                  >
+                    <span>🏁</span>
+                    <span>오늘 운행 퇴근하기 (근무 마감)</span>
+                  </button>
                 </div>
               </div>
             )}
 
-            {/* 탭 4: ⚙️ 정산 & 설정 */}
+            {/* ======================================================== */}
+            {/* 5. 정산 & 설정 탭 */}
+            {/* ======================================================== */}
             {currentTab === 'settings' && (
-              <div className="space-y-3.5 pb-4">
+              <div className="space-y-3.5 pb-6">
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center pb-1 border-b border-slate-800">
                     <span className="text-xs font-bold text-yellow-400">{currentYearMonth} 급여 정산서</span>
@@ -1667,25 +1594,27 @@
 
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between pb-1 border-b border-slate-800">
-                    <span className="text-xs font-bold text-slate-300">운행 모드 및 차량 설정</span>
-                    <span className="text-[10px] text-green-400 font-semibold">● 자동 저장</span>
+                    <span className="text-xs font-bold text-slate-300">차량 및 모드 설정</span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-400">현재 운행 모드</span>
+                    <span className="text-slate-400">운행 모드</span>
                     <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                      <button onClick={() => setVehicleType('corporate')} className={`px-3 py-1 text-xs font-bold rounded-md ${activeType === 'corporate' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>법인</button>
-                      <button onClick={() => setVehicleType('private')} className={`px-3 py-1 text-xs font-bold rounded-md ${activeType === 'private' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>개인</button>
+                      <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'corporate' }))} className={`px-3 py-1 text-xs font-bold rounded-md ${activeType === 'corporate' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>법인</button>
+                      <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'private' }))} className={`px-3 py-1 text-xs font-bold rounded-md ${activeType === 'private' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>개인</button>
                     </div>
                   </div>
                   <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
                     <span className="text-slate-400">차량 번호</span>
-                    <input type="text" placeholder="충남31바 1234" value={appData[activeType]?.carNumber || ''} onChange={(e) => handleCarNumberChange(e.target.value)} className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-36 text-white" />
-                  </div>
-                  <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
-                    <span className="text-slate-400">기본 정기 휴무 요일</span>
-                    <select value={appData.defaultOffDay !== undefined ? appData.defaultOffDay : 1} onChange={(e) => handleDefaultOffDayChange(e.target.value)} className="bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-yellow-400 font-bold rounded-xl">
-                      {DAYS_NAME.map((name, idx) => (<option key={name} value={idx}>매주 {name}요일</option>))}
-                    </select>
+                    <input
+                      type="text"
+                      placeholder="충남31바 1234"
+                      value={appData[activeType]?.carNumber || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setAppData(prev => ({ ...prev, [activeType]: { ...(prev[activeType] || {}), carNumber: val } }));
+                      }}
+                      className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-36 text-white"
+                    />
                   </div>
                 </div>
 
@@ -1702,9 +1631,9 @@
                       a.href = url;
                       a.download = `K-TAXI_BACKUP_${todayKey}.json`;
                       a.click();
-                    }} className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700">백업 파일 저장 (.json)</button>
+                    }} className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700">백업 저장 (.json)</button>
                     <label className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 text-center cursor-pointer">
-                      백업 파일 복원
+                      백업 복원
                       <input type="file" accept=".json" onChange={(e) => {
                         const file = e.target.files[0];
                         if (!file) return;
@@ -1724,6 +1653,7 @@
             )}
           </main>
 
+          {/* 하단 탭 내비게이션 */}
           <nav className="flex-shrink-0 w-full bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
             <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언HUD</span>
@@ -1739,7 +1669,114 @@
             </button>
           </nav>
 
-          {/* 단속 방어 / 적발 상세 내역 팝업 모달 */}
+          {/* ======================================================== */}
+          {/* 모달 팝업 영역 */}
+          {/* ======================================================== */}
+
+          {/* 1. 외부 내비 선택 모달 */}
+          {showNavModal && (
+            <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl text-center">
+                <h3 className="text-base font-black text-white">실행할 내비게이션을 선택하세요</h3>
+                <div className="space-y-2.5">
+                  <button
+                    onClick={() => openExternalNav('tmap')}
+                    className="w-full p-3.5 bg-red-950/80 hover:bg-red-900 border border-red-500/50 text-red-200 font-black rounded-2xl text-sm flex items-center justify-between shadow"
+                  >
+                    <span className="flex items-center gap-2"><span className="text-xl">🔴</span> 티맵 (TMAP)</span>
+                    <span>실행 ▶</span>
+                  </button>
+                  <button
+                    onClick={() => openExternalNav('kakao')}
+                    className="w-full p-3.5 bg-yellow-950/80 hover:bg-yellow-900 border border-yellow-500/50 text-yellow-200 font-black rounded-2xl text-sm flex items-center justify-between shadow"
+                  >
+                    <span className="flex items-center gap-2"><span className="text-xl">🟡</span> 카카오내비</span>
+                    <span>실행 ▶</span>
+                  </button>
+                  <button
+                    onClick={() => openExternalNav('naver')}
+                    className="w-full p-3.5 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-200 font-black rounded-2xl text-sm flex items-center justify-between shadow"
+                  >
+                    <span className="flex items-center gap-2"><span className="text-xl">🟢</span> 네이버지도</span>
+                    <span>실행 ▶</span>
+                  </button>
+                </div>
+                <button
+                  onClick={() => setShowNavModal(false)}
+                  className="w-full py-2.5 bg-slate-800 text-slate-400 font-bold rounded-xl text-xs"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 2. 퇴근 마감 격려 팝업 모달 */}
+          {showClosingModal && (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-6 z-50">
+              <div className="bg-gradient-to-b from-slate-900 to-slate-950 border-2 border-yellow-500/60 rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl text-center">
+                <div className="w-16 h-16 rounded-full bg-yellow-500/20 border border-yellow-400 flex items-center justify-center mx-auto text-3xl">
+                  🏁
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-lg font-black text-yellow-400">오늘 운행 마감 완료</h3>
+                  <p className="text-sm font-bold text-white leading-relaxed px-2">
+                    {closingMsg}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowClosingModal(false);
+                    setCurrentTab('welcome'); // 퇴근 후 첫 대기 화면으로 복귀
+                  }}
+                  className="w-full py-3.5 bg-yellow-500 text-slate-950 font-black text-sm rounded-2xl shadow-lg"
+                >
+                  확인 (첫 화면으로)
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 3. 건강 루틴 추가 모달 */}
+          {showAddRoutineModal && (
+            <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-5 space-y-3.5 shadow-2xl">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <h3 className="text-sm font-black text-emerald-400">새 건강 루틴 추가</h3>
+                  <button onClick={() => setShowAddRoutineModal(false)} className="text-slate-400 font-bold">✕</button>
+                </div>
+
+                <div className="space-y-2.5 text-xs">
+                  <div>
+                    <label className="text-slate-400 block mb-1">알림 시각</label>
+                    <input
+                      type="time"
+                      value={newRoutineTime}
+                      onChange={(e) => setNewRoutineTime(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 p-2 rounded-xl text-center text-sm font-bold text-yellow-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">루틴 내용</label>
+                    <input
+                      type="text"
+                      placeholder="예: 저녁 당뇨약 복용 / 3분 허리 스트레칭"
+                      value={newRoutineTitle}
+                      onChange={(e) => setNewRoutineTitle(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 p-2.5 rounded-xl text-white font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button onClick={handleAddRoutine} className="flex-1 py-2.5 bg-emerald-600 text-white font-black rounded-xl text-xs">추가 완료</button>
+                  <button onClick={() => setShowAddRoutineModal(false)} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 4. 단속 내역 상세 팝업 */}
           {showDefenseListModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl">
@@ -1773,16 +1810,11 @@
                     <div className="text-center py-6 text-xs text-slate-500">기록된 단속 내역이 없습니다.</div>
                   ) : (
                     defenseHistory.map((item) => (
-                      <div key={item.id} className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
-                        item.status === 'pass' ? 'bg-slate-950 border-emerald-900/50' : 'bg-red-950/40 border-red-800/60'
-                      }`}>
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg">{item.type === 'speed' ? '🚨' : item.type === 'parking' ? '🚏' : '🛣️'}</span>
-                          <div>
-                            <div className="font-bold text-slate-200">{item.name}</div>
-                            <div className="text-[10px] text-slate-400 font-medium">
-                              {item.time} 통과 ({item.type === 'parking' ? '주정차 정차' : `제한 ${item.limit} | 주행 ${item.speed}km/h`})
-                            </div>
+                      <div key={item.id} className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between text-xs">
+                        <div>
+                          <div className="font-bold text-slate-200">{item.name}</div>
+                          <div className="text-[10px] text-slate-400 font-medium">
+                            {item.time} 통과 ({item.type === 'parking' ? '주정차' : `제한 ${item.limit} | 주행 ${item.speed}km/h`})
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5">
@@ -1803,13 +1835,13 @@
                 <div className="flex gap-2">
                   <button
                     onClick={handleResetDefenseHistory}
-                    className="flex-1 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-300 font-bold rounded-xl text-xs border border-slate-700 transition active:scale-95"
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-300 font-bold rounded-xl text-xs border border-slate-700"
                   >
-                    🔄 전체 내역 초기화
+                    🔄 내역 초기화
                   </button>
                   <button
                     onClick={() => setShowDefenseListModal(false)}
-                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs shadow-lg transition active:scale-95"
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs shadow-lg"
                   >
                     닫기
                   </button>
@@ -1818,7 +1850,7 @@
             </div>
           )}
 
-          {/* 일별 기록 모달 */}
+          {/* 5. 일별 장부 입력 모달 */}
           {showDailyModal && (
             <DailyRecordModal
               activeType={activeType}
@@ -1829,65 +1861,7 @@
             />
           )}
 
-          {/* 고정 수당 모달 */}
-          {showFixedAllowanceModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h3 className="text-xs font-bold text-blue-400">고정 수당 관리</h3>
-                  <button onClick={() => setShowFixedAllowanceModal(false)} className="text-slate-400 text-base font-bold">✕</button>
-                </div>
-                <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
-                  {(appData.corporate?.fixedAllowanceItems || []).map((item) => (
-                    <div key={item.id} className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center gap-1.5">
-                      <input type="text" value={item.name} onChange={(e) => {
-                        const updated = (appData.corporate?.fixedAllowanceItems || []).map(it => it.id === item.id ? { ...it, name: e.target.value } : it);
-                        setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedAllowanceItems: updated } }));
-                      }} className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold" />
-                      <div className="flex-1">
-                        <SmartMoneyInput value={item.amount} onChange={(val) => {
-                          const updated = (appData.corporate?.fixedAllowanceItems || []).map(it => it.id === item.id ? { ...it, amount: Number(val) } : it);
-                          setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedAllowanceItems: updated } }));
-                        }} colorClass="text-blue-300" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <button onClick={() => setShowFixedAllowanceModal(false)} className="w-full py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs">완료</button>
-              </div>
-            </div>
-          )}
-
-          {/* 고정비 모달 */}
-          {showFixedExpenseModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h3 className="text-xs font-bold text-orange-400">회사 고정비 공제 관리</h3>
-                  <button onClick={() => setShowFixedExpenseModal(false)} className="text-slate-400 text-base font-bold">✕</button>
-                </div>
-                <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
-                  {(appData.corporate?.fixedExpenseItems || []).map((item) => (
-                    <div key={item.id} className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center gap-1.5">
-                      <input type="text" value={item.name} onChange={(e) => {
-                        const updated = (appData.corporate?.fixedExpenseItems || []).map(it => it.id === item.id ? { ...it, name: e.target.value } : it);
-                        setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedExpenseItems: updated } }));
-                      }} className="bg-slate-900 border border-slate-700 px-2 py-1 text-xs rounded-lg text-white w-20 font-bold" />
-                      <div className="flex-1">
-                        <SmartMoneyInput value={item.amount} onChange={(val) => {
-                          const updated = (appData.corporate?.fixedExpenseItems || []).map(it => it.id === item.id ? { ...it, amount: Number(val) } : it);
-                          setAppData(prev => ({ ...prev, corporate: { ...prev.corporate, fixedExpenseItems: updated } }));
-                        }} colorClass="text-orange-400" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <button onClick={() => setShowFixedExpenseModal(false)} className="w-full py-2 bg-yellow-500 text-black font-bold rounded-xl text-xs">완료</button>
-              </div>
-            </div>
-          )}
-
-          {/* 세무서 양식 모달 */}
+          {/* 6. 세무서 양식 모달 */}
           {showTaxModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
@@ -1995,43 +1969,9 @@
       );
     }
 
-    class ErrorBoundary extends React.Component {
-      constructor(props) {
-        super(props);
-        this.state = { hasError: false };
-      }
-      static getDerivedStateFromError(error) {
-        return { hasError: true };
-      }
-      componentDidCatch(error, errorInfo) {
-        console.error("K-TAXI Error Caught:", error, errorInfo);
-      }
-      render() {
-        if (this.state.hasError) {
-          return (
-            <div className="h-full bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
-              <div className="bg-slate-900 border border-red-500/40 p-6 rounded-3xl max-w-sm w-full space-y-4 shadow-2xl">
-                <div className="w-12 h-12 rounded-2xl bg-red-950/80 border border-red-500/40 flex items-center justify-center mx-auto text-2xl">🛡️</div>
-                <div>
-                  <h2 className="text-base font-bold text-red-400">데이터 안전 보호 모드</h2>
-                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">시스템이 정상 복구되었습니다.</p>
-                </div>
-                <button onClick={() => window.location.reload()} className="w-full py-2.5 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow">화면 새로고침</button>
-              </div>
-            </div>
-          );
-        }
-        return this.props.children;
-      }
-    }
-
     const rootElement = document.getElementById('root');
     const root = ReactDOM.createRoot(rootElement);
-    root.render(
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    );
+    root.render(<App />);
   </script>
 </body>
 </html>
