@@ -37,10 +37,11 @@
       overflow: hidden;
     }
     .hud-flip-y { transform: scaleY(-1); }
-    .hud-rot90-flip { transform: rotate(-90deg) scaleY(-1); }
+    .hud-rot90-left { transform: rotate(-90deg) scaleY(-1); }
+    .hud-rot90-right { transform: rotate(90deg) scaleY(-1); }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0.5rem); }
 
-    /* 5:5 교대 펌핑 애니메이션 */
+    /* 교대 펌핑 애니메이션 */
     @keyframes pulse-top-grow {
       0%, 100% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.95)); }
       50% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
@@ -62,7 +63,7 @@
     }
     .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
 
-    /* 속도계 고대비 폰트 스타일 */
+    /* 속도계 폰트 스타일 */
     .font-speed-hollow {
       color: rgba(255, 255, 255, 0.15);
       -webkit-text-stroke: 2.5px rgba(255, 255, 255, 0.65);
@@ -99,7 +100,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v4.0.0';
+    const APP_VERSION = 'v4.1.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -113,10 +114,10 @@
     ];
 
     const CLOSING_MESSAGES = [
-      "오늘 하루도 정말 수고하셨습니다. 편안한 밤 보내세요!",
-      "즐거운 마음으로 내일 다시 만나요! 푹 쉬세요.",
-      "내일을 위하여 오늘은 충분하고 편안한 휴식을 취하세요.",
-      "오늘도 안전하게 무사고 운행을 마쳤습니다. 고생 많으셨습니다!"
+      "오늘 하루도 정말 수고하셨습니다. 즐거운 마음으로 내일 다시 만나요!",
+      "내일을 위하여 오늘은 충분하고 편안한 휴식을 푹 취하세요.",
+      "오늘도 안전하게 무사고 완주하셨습니다. 고생 많으셨습니다!",
+      "푹 쉬시고 충전된 에너지로 내일 다시 뵙겠습니다!"
     ];
 
     // 천안·아산 주요 단속 포인트 DB
@@ -155,7 +156,7 @@
       return (brng + 360) % 360;
     };
 
-    // 고음질 전자 내비 차임벨 엔진
+    // 전자 내비 사운드 엔진
     let activeAudioSources = [];
 
     const getAudioContext = () => {
@@ -179,17 +180,6 @@
       });
       activeAudioSources = [];
     };
-
-    const unlockMobileAudio = () => {
-      const ctx = getAudioContext();
-      if (ctx && ctx.state === 'suspended') {
-        ctx.resume();
-      }
-      document.removeEventListener('touchstart', unlockMobileAudio);
-      document.removeEventListener('click', unlockMobileAudio);
-    };
-    document.addEventListener('touchstart', unlockMobileAudio, { passive: true });
-    document.addEventListener('click', unlockMobileAudio, { passive: true });
 
     const playNavigationChime = (type = 'chime') => {
       try {
@@ -266,7 +256,7 @@
 
     const DEFAULT_STORAGE = {
       hasSelectedType: false,
-      isShiftActive: false, // 출근 상태 플래그
+      isShiftActive: false,
       activeType: 'corporate',
       hudSpeedLimit: 50,
       defaultOffDay: 1,
@@ -332,7 +322,6 @@
       return DEFAULT_STORAGE;
     };
 
-    // 정방향 탑뷰 네온 택시 마커
     const createDynamicUserIcon = (cameraType, heading = 0) => {
       const rotStyle = `transform: rotate(${heading}deg); transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);`;
 
@@ -477,6 +466,73 @@
       );
     }
 
+    // =========================================================================
+    // 카카오T 스타일 '밀어서 퇴근하기' 슬라이더 컴포넌트
+    // =========================================================================
+    function SlideToUnlock({ onUnlock, text = "오른쪽으로 밀어서 퇴근하기" }) {
+      const [dragX, setDragX] = useState(0);
+      const [isDragging, setIsDragging] = useState(false);
+      const containerRef = useRef(null);
+      const startXRef = useRef(0);
+
+      const handleStart = (clientX) => {
+        setIsDragging(true);
+        startXRef.current = clientX;
+      };
+
+      const handleMove = (clientX) => {
+        if (!isDragging || !containerRef.current) return;
+        const maxDrag = containerRef.current.clientWidth - 62;
+        const delta = clientX - startXRef.current;
+        const bounded = Math.max(0, Math.min(delta, maxDrag));
+        setDragX(bounded);
+      };
+
+      const handleEnd = () => {
+        if (!isDragging || !containerRef.current) return;
+        setIsDragging(false);
+        const maxDrag = containerRef.current.clientWidth - 62;
+        if (dragX >= maxDrag * 0.82) {
+          setDragX(maxDrag);
+          onUnlock();
+          setTimeout(() => setDragX(0), 800);
+        } else {
+          setDragX(0);
+        }
+      };
+
+      return (
+        <div
+          ref={containerRef}
+          className="relative w-full h-16 bg-slate-900/90 border-2 border-orange-500/70 rounded-2xl overflow-hidden flex items-center justify-center select-none shadow-2xl"
+          onTouchStart={(e) => handleStart(e.touches[0].clientX)}
+          onTouchMove={(e) => handleMove(e.touches[0].clientX)}
+          onTouchEnd={handleEnd}
+          onMouseDown={(e) => handleStart(e.clientX)}
+          onMouseMove={(e) => handleMove(e.clientX)}
+          onMouseUp={handleEnd}
+          onMouseLeave={handleEnd}
+        >
+          <div
+            className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-orange-600/30 to-red-600/50"
+            style={{ width: `${dragX + 32}px` }}
+          />
+
+          <span className="text-xs font-black text-slate-300 tracking-wider flex items-center gap-1.5 pointer-events-none animate-pulse">
+            <span>{text}</span>
+            <span className="text-orange-400 font-bold">➔➔</span>
+          </span>
+
+          <div
+            className="absolute left-1.5 top-1.5 bottom-1.5 w-14 bg-gradient-to-tr from-orange-600 to-red-500 hover:from-orange-500 hover:to-red-400 text-white font-black text-xl rounded-xl flex items-center justify-center shadow-lg cursor-grab active:cursor-grabbing transition-transform duration-75"
+            style={{ transform: `translateX(${dragX}px)` }}
+          >
+            🏁
+          </div>
+        </div>
+      );
+    }
+
     function SmartMoneyInput({ value, onChange, placeholder = "0", className = "", colorClass = "text-white" }) {
       const numVal = Number(value) || 0;
       const displayVal = numVal > 0 ? numVal.toLocaleString('ko-KR') : '';
@@ -527,10 +583,13 @@
       const [showNavModal, setShowNavModal] = useState(false);
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
-      const [showFixedAllowanceModal, setShowFixedAllowanceModal] = useState(false);
-      const [showFixedExpenseModal, setShowFixedExpenseModal] = useState(false);
       const [showDefenseListModal, setShowDefenseListModal] = useState(false);
       const [showAddRoutineModal, setShowAddRoutineModal] = useState(false);
+      const [showEditStartTimeModal, setShowEditStartTimeModal] = useState(false);
+      const [showNapVisualModal, setShowNapVisualModal] = useState(false);
+
+      // 시간 수정 임시 상태
+      const [tempStartTime, setTempStartTime] = useState('16:30');
 
       // 새 루틴 입력 상태
       const [newRoutineTitle, setNewRoutineTitle] = useState('');
@@ -543,11 +602,10 @@
       const [userHeading, setUserHeading] = useState(0);
       const prevCoordsRef = useRef(null);
 
-      const [hudViewMode, setHudViewMode] = useState('map');
-      const [hudMirrorMode, setHudMirrorMode] = useState('rot90');
+      // HUD 4단계 화면 순환: 1: map, 2: mirror_vert, 3: mirror_rot_left, 4: mirror_rot_right
+      const [hudCycleStep, setHudCycleStep] = useState(1);
       const [isAutoTracking, setIsAutoTracking] = useState(true);
       const [nearbyCamera, setNearbyCamera] = useState(null);
-      const [isPassengerMode, setIsPassengerMode] = useState(false);
 
       // 모의 주행 상태
       const [isSimDriveActive, setIsSimDriveActive] = useState(false);
@@ -563,6 +621,11 @@
       const sectionTotalSpeed = useRef(0);
       const sectionSpeedSamples = useRef(0);
 
+      // 쪽잠 카운트다운 타이머
+      const [napTotalMinutes, setNapTotalMinutes] = useState(20);
+      const [napTimerSeconds, setNapTimerSeconds] = useState(20 * 60);
+      const [isNapTimerActive, setIsNapTimerActive] = useState(false);
+
       // 단속 방어 / 적발 이력
       const [defenseHistory, setDefenseHistory] = useState([
         { id: 1, time: '18:42', name: '불당대로 (시청 앞)', type: 'speed', limit: 50, speed: 48, status: 'pass', amount: 40000 },
@@ -570,9 +633,6 @@
       ]);
 
       const activeCameraTracking = useRef(null);
-      const [napTimerSeconds, setNapTimerSeconds] = useState(0);
-      const [isNapTimerActive, setIsNapTimerActive] = useState(false);
-
       const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
       const todayKey = getTodayKey();
       const todayRecord = appData[activeType]?.records?.[todayKey] || {};
@@ -613,7 +673,7 @@
         };
       }, [currentTab]);
 
-      // 1. 초대형 원터치 출근하기
+      // 1. 초대형 직사각형 출근하기
       const handleStartShift = () => {
         const nowTime = getCurrentTimeStr();
         const updatedRec = {
@@ -633,10 +693,42 @@
         }));
 
         playNavigationChime('chime');
-        setCurrentTab('today'); // 출근 즉시 오늘&건강 화면으로 이동
+        setCurrentTab('today');
       };
 
-      // 2. 초대형 원터치 퇴근하기 & 마감 멘트
+      // 출근 시각 초기화
+      const handleResetShift = () => {
+        if (!confirm('오늘의 출근 기록을 초기화하시겠습니까?')) return;
+        const updatedRec = { ...todayRecord, startTime: '', endTime: '', workMinutes: 0 };
+        setAppData(prev => ({
+          ...prev,
+          isShiftActive: false,
+          [activeType]: {
+            ...prev[activeType],
+            records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
+          }
+        }));
+        setCurrentTab('welcome');
+      };
+
+      // 출근 시각 직접 수정
+      const handleSaveCustomStartTime = () => {
+        const updatedRec = {
+          ...todayRecord,
+          startTime: tempStartTime,
+          workMinutes: todayRecord.endTime ? calculateMinutes(tempStartTime, todayRecord.endTime) : 0
+        };
+        setAppData(prev => ({
+          ...prev,
+          [activeType]: {
+            ...prev[activeType],
+            records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
+          }
+        }));
+        setShowEditStartTimeModal(false);
+      };
+
+      // 2. 카카오T 스타일 슬라이드 퇴근 완료 & 풀스크린 격려 멘트
       const handleEndShift = () => {
         const nowTime = getCurrentTimeStr();
         const sTime = todayRecord.startTime || nowTime;
@@ -946,7 +1038,6 @@
         setDefenseHistory(prev => prev.filter(item => item.id !== id));
       };
 
-      // 건강 루틴 체크 토글
       const toggleRoutineDone = (id) => {
         setAppData(prev => ({
           ...prev,
@@ -979,7 +1070,7 @@
         }));
       };
 
-      // 쪽잠 타이머
+      // 쪽잠 카운트다운 인터벌
       useEffect(() => {
         let interval = null;
         if (isNapTimerActive && napTimerSeconds > 0) {
@@ -988,10 +1079,16 @@
           setIsNapTimerActive(false);
           playNavigationChime('warning');
           if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 1000]);
-          alert('🔔 20분 쪽잠이 종료되었습니다! 안전 운행을 시작하세요.');
+          alert('🔔 쪽잠이 종료되었습니다! 안전 운행을 시작하세요.');
         }
         return () => clearInterval(interval);
       }, [isNapTimerActive, napTimerSeconds]);
+
+      const startNapWithDuration = (mins) => {
+        setNapTotalMinutes(mins);
+        setNapTimerSeconds(mins * 60);
+        setIsNapTimerActive(true);
+      };
 
       const handleSaveRecord = (dateKey, recordData) => {
         setAppData(prev => ({
@@ -1065,25 +1162,23 @@
         return cells;
       }, [currentYearMonth]);
 
-      const getHudInnerTransformClass = () => {
-        if (hudMirrorMode === 'flipY') return 'hud-flip-y';
-        if (hudMirrorMode === 'rot90') return 'hud-rot90-flip';
+      // 4단계 HUD 회전 순환 핸들러
+      const handleCycleHudMode = () => {
+        setHudCycleStep(prev => (prev % 4) + 1);
+      };
+
+      const getHudTransformClass = () => {
+        if (hudCycleStep === 2) return 'hud-flip-y';
+        if (hudCycleStep === 3) return 'hud-rot90-left';
+        if (hudCycleStep === 4) return 'hud-rot90-right';
         return '';
       };
 
-      const getMirrorModeLabel = () => {
-        if (hudMirrorMode === 'rot90') return '90° 회전 반사';
-        if (hudMirrorMode === 'flipY') return '가로 반사';
-        return '일반 모드';
-      };
-
-      const isOverSpeed = isCurrentlyOverspeed;
-      const isNearCamera = Boolean(nearbyCamera);
-
-      const handleCycleMirrorMode = () => {
-        if (hudMirrorMode === 'rot90') setHudMirrorMode('flipY');
-        else if (hudMirrorMode === 'flipY') setHudMirrorMode('normal');
-        else setHudMirrorMode('rot90');
+      const getHudCycleLabel = () => {
+        if (hudCycleStep === 1) return '세로 지도 (기본)';
+        if (hudCycleStep === 2) return '세로 반사 (미러)';
+        if (hudCycleStep === 3) return '가로 반사 (헤드 좌측)';
+        return '가로 반사 (헤드 우측)';
       };
 
       const DAYS_NAME = ['일', '월', '화', '수', '목', '금', '토'];
@@ -1115,15 +1210,15 @@
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3 overflow-y-auto'}`}>
             
             {/* ======================================================== */}
-            {/* 1. 첫 화면: 웰컴 멘트 & 초대형 [출근하기] */}
+            {/* 1. 첫 화면: 초대형 웰컴 멘트 & 직사각형 [출근하기] */}
             {/* ======================================================== */}
             {currentTab === 'welcome' && (
               <div className="h-full flex flex-col justify-between p-6 text-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
-                <div className="pt-8 space-y-3">
-                  <div className="inline-block bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full shadow">
+                <div className="pt-10 space-y-4">
+                  <div className="inline-block bg-yellow-500 text-black text-xs font-black px-3.5 py-1.5 rounded-full shadow-lg">
                     K-TAXI 스마트 파트너
                   </div>
-                  <h2 className="text-xl font-black text-white leading-relaxed px-2">
+                  <h2 className="text-2xl font-black text-white leading-snug px-1 drop-shadow-md">
                     {welcomeMsg}
                   </h2>
                   <p className="text-xs text-slate-400">
@@ -1131,64 +1226,81 @@
                   </p>
                 </div>
 
-                {/* 초대형 출근하기 버튼 */}
-                <div className="py-8 flex flex-col items-center justify-center">
+                {/* 직사각형 초대형 출근하기 버튼 */}
+                <div className="py-8 w-full">
                   <button
                     onClick={handleStartShift}
-                    className="w-56 h-56 rounded-full bg-gradient-to-tr from-yellow-500 to-amber-300 text-slate-950 font-black text-2xl shadow-[0_0_50px_rgba(250,204,21,0.5)] border-4 border-yellow-200 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform"
+                    className="w-full py-7 bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black text-2xl rounded-3xl shadow-[0_0_40px_rgba(250,204,21,0.45)] border-2 border-yellow-200 flex items-center justify-center gap-3 active:scale-98 transition-transform"
                   >
-                    <span className="text-5xl">🚖</span>
-                    <span>출근하기</span>
-                    <span className="text-xs font-bold text-slate-800">터치 시 운행 시작</span>
+                    <span className="text-4xl">🚖</span>
+                    <span>출근하기 (운행 시작)</span>
                   </button>
+                  <p className="text-xs text-slate-500 mt-3 font-semibold">
+                    버튼을 터치하면 출근 시간이 기록되고 스마트 건강 매니저가 열립니다.
+                  </p>
                 </div>
 
-                {/* 하단 바로가기 메뉴 */}
-                <div className="pb-4 grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setCurrentTab('calendar')}
-                    className="py-3 bg-slate-900/90 border border-slate-700 text-slate-300 font-bold rounded-2xl text-xs"
-                  >
-                    📅 지난 장부 조회
-                  </button>
-                  <button
-                    onClick={() => setCurrentTab('settings')}
-                    className="py-3 bg-slate-900/90 border border-slate-700 text-slate-300 font-bold rounded-2xl text-xs"
-                  >
-                    ⚙️ 정산 및 설정
-                  </button>
+                <div className="pb-6 text-center">
+                  <span className="text-[11px] text-slate-500">K-TAXI 안전운행 시스템 {APP_VERSION}</span>
                 </div>
               </div>
             )}
 
             {/* ======================================================== */}
-            {/* 2. 오늘&건강 탭: 스마트 건강 관리 */}
+            {/* 2. 오늘&건강 탭: 스마트 건강 관리 & 비주얼 쪽잠 */}
             {/* ======================================================== */}
             {currentTab === 'today' && (
               <div className="space-y-3 pb-6">
-                {/* 출근 상태 카드 */}
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-sm">
-                  <div>
-                    <span className="text-[11px] text-slate-400 font-bold block">오늘의 출근 시각</span>
-                    <div className="text-base font-black text-yellow-400 mt-0.5">
-                      {todayRecord.startTime ? `${todayRecord.startTime} 출근 완료` : '미출근'}
+                {/* 출근 상태 카드 & 시간 수정 / 초기화 */}
+                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] text-slate-400 font-bold block">오늘의 출근 기록</span>
+                      <div className="text-base font-black text-yellow-400 mt-0.5">
+                        {todayRecord.startTime ? `${todayRecord.startTime} 출근 완료` : '출근 기록 없음'}
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => {
+                          setTempStartTime(todayRecord.startTime || getCurrentTimeStr());
+                          setShowEditStartTimeModal(true);
+                        }}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 rounded-xl font-bold text-xs"
+                      >
+                        ✏️ 시간 수정
+                      </button>
+                      <button
+                        onClick={handleResetShift}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 border border-slate-700 rounded-xl font-bold text-xs"
+                      >
+                        🔄 초기화
+                      </button>
                     </div>
                   </div>
-                  {isNapTimerActive ? (
-                    <button
-                      onClick={() => setIsNapTimerActive(false)}
-                      className="px-3 py-1.5 bg-red-950 text-red-300 border border-red-500/50 rounded-xl font-bold text-xs animate-pulse"
-                    >
-                      쪽잠 중 ({Math.floor(napTimerSeconds / 60)}:{String(napTimerSeconds % 60).padStart(2, '0')}) 취소
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => { setNapTimerSeconds(20 * 60); setIsNapTimerActive(true); }}
-                      className="px-3 py-1.5 bg-indigo-900/80 text-indigo-200 border border-indigo-500/40 rounded-xl font-bold text-xs flex items-center gap-1 shadow"
-                    >
-                      <span>⚡</span> 20분 쪽잠
-                    </button>
-                  )}
+                </div>
+
+                {/* 비주얼 쪽잠 타이머 진입 카드 */}
+                <div
+                  onClick={() => setShowNapVisualModal(true)}
+                  className="bg-gradient-to-r from-indigo-950/80 via-slate-900 to-indigo-950/80 p-4 rounded-2xl border-2 border-indigo-500/50 shadow-xl flex items-center justify-between cursor-pointer active:scale-98 transition"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-600/30 border border-indigo-400/50 flex items-center justify-center text-2xl">
+                      ⚡
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-indigo-200">20분 전략적 파워 쪽잠 타이머</h4>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {isNapTimerActive
+                          ? `⏱️ 쪽잠 진행 중 (${Math.floor(napTimerSeconds / 60)}분 ${String(napTimerSeconds % 60).padStart(2, '0')}초 남음)`
+                          : '터치하여 쪽잠 시간 설정 및 시작'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow">
+                    {isNapTimerActive ? '보기/취소' : '시작 ▶'}
+                  </span>
                 </div>
 
                 {/* 건강 루틴 리스트 */}
@@ -1199,7 +1311,7 @@
                     </span>
                     <button
                       onClick={() => setShowAddRoutineModal(true)}
-                      className="text-[11px] text-yellow-400 font-bold px-2 py-0.5 rounded bg-slate-800 border border-slate-700"
+                      className="text-[11px] text-yellow-400 font-bold px-2.5 py-1 rounded-xl bg-slate-800 border border-slate-700"
                     >
                       + 시간 추가
                     </button>
@@ -1237,20 +1349,11 @@
                     ))}
                   </div>
                 </div>
-
-                {/* HUD 바로가기 배너 */}
-                <button
-                  onClick={() => setCurrentTab('hud')}
-                  className="w-full py-4 bg-gradient-to-r from-yellow-500 to-amber-400 text-slate-950 font-black rounded-2xl text-base shadow-xl flex items-center justify-center gap-2 active:scale-95 transition"
-                >
-                  <span>🏎️</span>
-                  <span>가디언 HUD 주행 모드로 전환</span>
-                </button>
               </div>
             )}
 
             {/* ======================================================== */}
-            {/* 3. 가디언 HUD 탭: 외부내비 단일 버튼 & 속도계 & 방어 배너 */}
+            {/* 3. 가디언 HUD 탭: 4단계 화면 순환 & 단일 외부내비 버튼 */}
             {/* ======================================================== */}
             {currentTab === 'hud' && (
               <div
@@ -1260,35 +1363,21 @@
                     : 'bg-slate-950'
                 }`}
               >
-                {/* 상단 컨트롤 바 (심플 외부내비 단일 버튼) */}
+                {/* 상단 컨트롤 바 */}
                 <div className="absolute top-3 left-3 right-3 z-[450] flex justify-between items-center pointer-events-auto">
                   <div className="flex gap-1.5 bg-slate-950/85 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
                     <button
                       onClick={() => setShowNavModal(true)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-black flex items-center gap-1 shadow"
+                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-black flex items-center gap-1 shadow"
                     >
                       <span>🧭</span> 외부 내비
                     </button>
 
                     <button
-                      onClick={() => {
-                        setIsPassengerMode(!isPassengerMode);
-                        playNavigationChime('chime');
-                      }}
-                      className={`px-2.5 py-1.5 rounded-xl text-[10px] font-bold border transition ${
-                        isPassengerMode
-                          ? 'bg-blue-900/90 text-blue-200 border-blue-400'
-                          : 'bg-slate-800 text-slate-300 border-slate-700'
-                      }`}
+                      onClick={handleCycleHudMode}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-yellow-300 rounded-xl text-[10px] font-black shadow"
                     >
-                      {isPassengerMode ? '👥 탑승' : '🚕 빈차'}
-                    </button>
-
-                    <button
-                      onClick={() => setHudViewMode(hudViewMode === 'map' ? 'mirror' : 'map')}
-                      className="px-2.5 py-1.5 bg-slate-800/90 border border-slate-600 text-slate-200 rounded-xl text-[10px] font-bold"
-                    >
-                      {hudViewMode === 'map' ? '🪞 HUD' : '🗺️ 지도'}
+                      🔄 {getHudCycleLabel()}
                     </button>
                   </div>
 
@@ -1304,8 +1393,8 @@
                   </button>
                 </div>
 
-                {/* 메인 5:5 가디언 HUD */}
-                {hudViewMode === 'map' ? (
+                {/* 1순위: 세로 정상 지도 화면 */}
+                {hudCycleStep === 1 ? (
                   <div className="relative w-full h-full flex-1 flex flex-col">
                     <div className="absolute inset-0 z-0">
                       <FullscreenLiveMapView
@@ -1353,7 +1442,7 @@
                         )}
                       </div>
 
-                      {/* 하단 1/2: 초대형 디지털 속도계 */}
+                      {/* 하단 1/2: 초대형 속도계 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2 text-center">
                         <div className={`transition-all duration-300 flex flex-col items-center justify-center w-full ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
                           <div className="w-full flex items-center justify-center leading-none">
@@ -1380,7 +1469,7 @@
                       </div>
                     </div>
 
-                    {/* 3. 방어/적발 배너 (Flex 바닥 고정) */}
+                    {/* 방어 배너 */}
                     <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto">
                       <div
                         onClick={() => setShowDefenseListModal(true)}
@@ -1414,9 +1503,10 @@
                     </div>
                   </div>
                 ) : (
-                  <div onClick={handleCycleMirrorMode} className="flex-1 flex flex-col justify-between p-3 cursor-pointer">
+                  /* 2~4순위: 미러 모드 화면 (화면 터치 시 다음 회전 모드로 전환) */
+                  <div onClick={handleCycleHudMode} className="flex-1 flex flex-col justify-between p-4 cursor-pointer">
                     <div className="flex-1 flex flex-col items-center justify-center p-2 border-b border-slate-800/60 overflow-hidden">
-                      <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
+                      <div className={`transition-transform duration-300 ${getHudTransformClass()}`}>
                         <div className="flex flex-col items-center justify-center">
                           <div className="flex items-center justify-center w-36 h-36 rounded-full border-[10px] border-red-600 bg-white text-black shadow-2xl">
                             <div className="flex flex-col items-center justify-center leading-none">
@@ -1429,7 +1519,7 @@
                     </div>
 
                     <div className="flex-1 flex flex-col items-center justify-center p-2 overflow-hidden">
-                      <div className={`transition-transform duration-300 ${getHudInnerTransformClass()}`}>
+                      <div className={`transition-transform duration-300 ${getHudTransformClass()}`}>
                         <div className="flex items-baseline justify-center">
                           <span className={`text-9xl font-black tracking-tighter font-mono transition-colors ${
                             isOverSpeed ? 'text-red-500' : 'text-cyan-400'
@@ -1438,6 +1528,9 @@
                           </span>
                           <span className="text-2xl font-bold ml-2 text-slate-400">km/h</span>
                         </div>
+                        <span className="text-[10px] font-bold text-slate-400 mt-2 block text-center">
+                          {getHudCycleLabel()} (화면 터치 시 회전 전환)
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1446,12 +1539,11 @@
             )}
 
             {/* ======================================================== */}
-            {/* 4. 운행일지 탭: 달력 중심 & 초대형 [퇴근하기] */}
+            {/* 4. 운행일지 탭: 달력 장부 & 카카오T 스타일 슬라이드 퇴근 */}
             {/* ======================================================== */}
             {currentTab === 'calendar' && (
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
-                  {/* 월 이동 헤더 */}
                   <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between">
                     <button onClick={() => {
                       const [y, m] = currentYearMonth.split('-').map(Number);
@@ -1471,7 +1563,6 @@
                     }} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">▶</button>
                   </div>
 
-                  {/* 매출 요약 카드 */}
                   <div className="grid grid-cols-2 gap-2">
                     <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
                       <span className="text-[11px] text-slate-400 block font-semibold">이번 달 총 매출</span>
@@ -1531,15 +1622,9 @@
                   </div>
                 </div>
 
-                {/* 초대형 오늘 퇴근하기 버튼 */}
+                {/* 카카오T 스타일 밀어서 퇴근하기 슬라이더 */}
                 <div className="pt-2">
-                  <button
-                    onClick={handleEndShift}
-                    className="w-full py-4 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-black text-lg rounded-2xl shadow-xl flex items-center justify-center gap-2 active:scale-95 transition"
-                  >
-                    <span>🏁</span>
-                    <span>오늘 운행 퇴근하기 (근무 마감)</span>
-                  </button>
+                  <SlideToUnlock onUnlock={handleEndShift} text="밀어서 오늘 운행 퇴근하기" />
                 </div>
               </div>
             )}
@@ -1653,21 +1738,23 @@
             )}
           </main>
 
-          {/* 하단 탭 내비게이션 */}
-          <nav className="flex-shrink-0 w-full bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
-            <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언HUD</span>
-            </button>
-            <button onClick={() => setCurrentTab('today')} className={`flex flex-col items-center py-2 ${currentTab === 'today' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-lg">🏠</span><span className="text-[10px] mt-0.5">오늘&건강</span>
-            </button>
-            <button onClick={() => setCurrentTab('calendar')} className={`flex flex-col items-center py-2 ${currentTab === 'calendar' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-lg">📅</span><span className="text-[10px] mt-0.5">운행일지</span>
-            </button>
-            <button onClick={() => setCurrentTab('settings')} className={`flex flex-col items-center py-2 ${currentTab === 'settings' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-lg">⚙️</span><span className="text-[10px] mt-0.5">정산/설정</span>
-            </button>
-          </nav>
+          {/* 하단 탭 메뉴 (출근 전 welcome 화면에서는 100% 숨김) */}
+          {currentTab !== 'welcome' && (
+            <nav className="flex-shrink-0 w-full bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
+              <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+                <span className="text-lg">🏎️</span><span className="text-[10px] mt-0.5">가디언HUD</span>
+              </button>
+              <button onClick={() => setCurrentTab('today')} className={`flex flex-col items-center py-2 ${currentTab === 'today' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+                <span className="text-lg">🏠</span><span className="text-[10px] mt-0.5">오늘&건강</span>
+              </button>
+              <button onClick={() => setCurrentTab('calendar')} className={`flex flex-col items-center py-2 ${currentTab === 'calendar' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+                <span className="text-lg">📅</span><span className="text-[10px] mt-0.5">운행일지</span>
+              </button>
+              <button onClick={() => setCurrentTab('settings')} className={`flex flex-col items-center py-2 ${currentTab === 'settings' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
+                <span className="text-lg">⚙️</span><span className="text-[10px] mt-0.5">정산/설정</span>
+              </button>
+            </nav>
+          )}
 
           {/* ======================================================== */}
           {/* 모달 팝업 영역 */}
@@ -1677,67 +1764,151 @@
           {showNavModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl text-center">
-                <h3 className="text-base font-black text-white">실행할 내비게이션을 선택하세요</h3>
+                <h3 className="text-base font-black text-white">실행할 내비게이션 선택</h3>
                 <div className="space-y-2.5">
-                  <button
-                    onClick={() => openExternalNav('tmap')}
-                    className="w-full p-3.5 bg-red-950/80 hover:bg-red-900 border border-red-500/50 text-red-200 font-black rounded-2xl text-sm flex items-center justify-between shadow"
-                  >
-                    <span className="flex items-center gap-2"><span className="text-xl">🔴</span> 티맵 (TMAP)</span>
-                    <span>실행 ▶</span>
+                  <button onClick={() => openExternalNav('tmap')} className="w-full p-3.5 bg-red-950/80 hover:bg-red-900 border border-red-500/50 text-red-200 font-black rounded-2xl text-sm flex items-center justify-between shadow">
+                    <span className="flex items-center gap-2"><span className="text-xl">🔴</span> 티맵 (TMAP)</span><span>실행 ▶</span>
                   </button>
-                  <button
-                    onClick={() => openExternalNav('kakao')}
-                    className="w-full p-3.5 bg-yellow-950/80 hover:bg-yellow-900 border border-yellow-500/50 text-yellow-200 font-black rounded-2xl text-sm flex items-center justify-between shadow"
-                  >
-                    <span className="flex items-center gap-2"><span className="text-xl">🟡</span> 카카오내비</span>
-                    <span>실행 ▶</span>
+                  <button onClick={() => openExternalNav('kakao')} className="w-full p-3.5 bg-yellow-950/80 hover:bg-yellow-900 border border-yellow-500/50 text-yellow-200 font-black rounded-2xl text-sm flex items-center justify-between shadow">
+                    <span className="flex items-center gap-2"><span className="text-xl">🟡</span> 카카오내비</span><span>실행 ▶</span>
                   </button>
-                  <button
-                    onClick={() => openExternalNav('naver')}
-                    className="w-full p-3.5 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-200 font-black rounded-2xl text-sm flex items-center justify-between shadow"
-                  >
-                    <span className="flex items-center gap-2"><span className="text-xl">🟢</span> 네이버지도</span>
-                    <span>실행 ▶</span>
+                  <button onClick={() => openExternalNav('naver')} className="w-full p-3.5 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-200 font-black rounded-2xl text-sm flex items-center justify-between shadow">
+                    <span className="flex items-center gap-2"><span className="text-xl">🟢</span> 네이버지도</span><span>실행 ▶</span>
                   </button>
                 </div>
-                <button
-                  onClick={() => setShowNavModal(false)}
-                  className="w-full py-2.5 bg-slate-800 text-slate-400 font-bold rounded-xl text-xs"
-                >
-                  닫기
-                </button>
+                <button onClick={() => setShowNavModal(false)} className="w-full py-2.5 bg-slate-800 text-slate-400 font-bold rounded-xl text-xs">닫기</button>
               </div>
             </div>
           )}
 
-          {/* 2. 퇴근 마감 격려 팝업 모달 */}
+          {/* 2. 풀스크린 퇴근 마감 격려 화면 */}
           {showClosingModal && (
-            <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-6 z-50">
-              <div className="bg-gradient-to-b from-slate-900 to-slate-950 border-2 border-yellow-500/60 rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl text-center">
-                <div className="w-16 h-16 rounded-full bg-yellow-500/20 border border-yellow-400 flex items-center justify-center mx-auto text-3xl">
+            <div className="fixed inset-0 bg-slate-950 flex flex-col justify-between p-6 z-50 text-center animate-fade-in">
+              <div className="pt-12 space-y-6">
+                <div className="w-20 h-20 rounded-full bg-yellow-500/20 border-2 border-yellow-400 flex items-center justify-center mx-auto text-4xl shadow-[0_0_30px_rgba(250,204,21,0.5)]">
                   🏁
                 </div>
-                <div className="space-y-2">
-                  <h3 className="text-lg font-black text-yellow-400">오늘 운행 마감 완료</h3>
-                  <p className="text-sm font-bold text-white leading-relaxed px-2">
+                <div className="space-y-4 px-2">
+                  <span className="inline-block bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full">
+                    오늘 운행 마감 완료
+                  </span>
+                  <h3 className="text-2xl font-black text-white leading-relaxed drop-shadow-lg">
                     {closingMsg}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    근무 시간: {formatMinutesToHours(todayRecord.workMinutes || 0)} ({todayRecord.startTime} ~ {todayRecord.endTime})
                   </p>
                 </div>
+              </div>
+
+              <div className="pb-8">
                 <button
                   onClick={() => {
                     setShowClosingModal(false);
-                    setCurrentTab('welcome'); // 퇴근 후 첫 대기 화면으로 복귀
+                    setCurrentTab('welcome');
                   }}
-                  className="w-full py-3.5 bg-yellow-500 text-slate-950 font-black text-sm rounded-2xl shadow-lg"
+                  className="w-full py-4 bg-gradient-to-r from-yellow-500 to-amber-400 text-slate-950 font-black text-lg rounded-2xl shadow-2xl active:scale-98 transition"
                 >
-                  확인 (첫 화면으로)
+                  확인 (첫 대기 화면으로)
                 </button>
               </div>
             </div>
           )}
 
-          {/* 3. 건강 루틴 추가 모달 */}
+          {/* 3. 출근 시각 수정 모달 */}
+          {showEditStartTimeModal && (
+            <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <h3 className="text-sm font-black text-yellow-400">출근 시각 직접 수정</h3>
+                  <button onClick={() => setShowEditStartTimeModal(false)} className="text-slate-400 font-bold">✕</button>
+                </div>
+                <div className="space-y-2 text-center">
+                  <label className="text-xs text-slate-400">실제 출근 시각을 입력하세요</label>
+                  <input
+                    type="time"
+                    value={tempStartTime}
+                    onChange={(e) => setTempStartTime(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 p-3 rounded-2xl text-center text-xl font-mono font-black text-yellow-400"
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={handleSaveCustomStartTime} className="flex-1 py-2.5 bg-yellow-500 text-black font-black rounded-xl text-xs">수정 완료</button>
+                  <button onClick={() => setShowEditStartTimeModal(false)} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 4. 비주얼 쪽잠 타이머 전용 모달 */}
+          {showNapVisualModal && (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-900 border-2 border-indigo-500/60 rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl text-center">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <h3 className="text-sm font-black text-indigo-300">⚡ 파워 쪽잠 매니저</h3>
+                  <button onClick={() => setShowNapVisualModal(false)} className="text-slate-400 font-bold text-base">✕</button>
+                </div>
+
+                {/* 원형 카운트다운 게이지 디스플레이 */}
+                <div className="relative w-44 h-44 mx-auto flex items-center justify-center rounded-full bg-slate-950 border-4 border-indigo-500/40 shadow-inner">
+                  <div className="flex flex-col items-center">
+                    <span className="text-3xl font-black font-mono text-indigo-200">
+                      {isNapTimerActive
+                        ? `${Math.floor(napTimerSeconds / 60)}:${String(napTimerSeconds % 60).padStart(2, '0')}`
+                        : `${napTotalMinutes}:00`}
+                    </span>
+                    <span className="text-[10px] text-slate-400 mt-1">
+                      {isNapTimerActive ? '쪽잠 카운트다운' : '설정된 시간'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 빠른 시간 선택 버튼 */}
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[10, 15, 20, 30].map((mins) => (
+                    <button
+                      key={mins}
+                      onClick={() => startNapWithDuration(mins)}
+                      className={`py-2 rounded-xl text-xs font-black border transition ${
+                        napTotalMinutes === mins
+                          ? 'bg-indigo-600 text-white border-indigo-400 shadow'
+                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-600'
+                      }`}
+                    >
+                      {mins}분
+                    </button>
+                  ))}
+                </div>
+
+                {/* 시작 및 정지 버튼 */}
+                <div className="flex gap-2 pt-1">
+                  {isNapTimerActive ? (
+                    <button
+                      onClick={() => setIsNapTimerActive(false)}
+                      className="flex-1 py-3 bg-red-600 text-white font-black rounded-xl text-xs shadow-lg"
+                    >
+                      타이머 취소 / 정지
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => startNapWithDuration(napTotalMinutes)}
+                      className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl text-xs shadow-lg"
+                    >
+                      {napTotalMinutes}분 쪽잠 시작 ▶
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowNapVisualModal(false)}
+                    className="px-4 py-3 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs"
+                  >
+                    닫기
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 5. 건강 루틴 추가 모달 */}
           {showAddRoutineModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-5 space-y-3.5 shadow-2xl">
@@ -1745,7 +1916,6 @@
                   <h3 className="text-sm font-black text-emerald-400">새 건강 루틴 추가</h3>
                   <button onClick={() => setShowAddRoutineModal(false)} className="text-slate-400 font-bold">✕</button>
                 </div>
-
                 <div className="space-y-2.5 text-xs">
                   <div>
                     <label className="text-slate-400 block mb-1">알림 시각</label>
@@ -1767,7 +1937,6 @@
                     />
                   </div>
                 </div>
-
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleAddRoutine} className="flex-1 py-2.5 bg-emerald-600 text-white font-black rounded-xl text-xs">추가 완료</button>
                   <button onClick={() => setShowAddRoutineModal(false)} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
@@ -1776,7 +1945,7 @@
             </div>
           )}
 
-          {/* 4. 단속 내역 상세 팝업 */}
+          {/* 6. 단속 내역 상세 팝업 */}
           {showDefenseListModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl">
@@ -1850,7 +2019,7 @@
             </div>
           )}
 
-          {/* 5. 일별 장부 입력 모달 */}
+          {/* 7. 일별 장부 입력 모달 */}
           {showDailyModal && (
             <DailyRecordModal
               activeType={activeType}
@@ -1861,7 +2030,7 @@
             />
           )}
 
-          {/* 6. 세무서 양식 모달 */}
+          {/* 8. 세무서 양식 모달 */}
           {showTaxModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
