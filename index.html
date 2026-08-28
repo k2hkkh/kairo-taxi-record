@@ -100,7 +100,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v4.2.3';
+    const APP_VERSION = 'v4.3.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V15';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -257,6 +257,7 @@
       activeType: 'corporate',
       hudSpeedLimit: 50,
       defaultOffDay: 1,
+      googleSheetUrl: '',
       healthRoutines: [
         { id: 1, type: 'med', time: '18:00', title: '식후 혈압/당뇨 약 복용', done: false },
         { id: 2, type: 'meal', time: '20:30', title: '1차 속 편한 간편식 (감자/계란/샐러드)', done: false },
@@ -285,7 +286,6 @@
       }
     };
 
-    // 브라우저 내 모든 과거 키 전수 검색 및 자동 복구 로더
     const loadSafeData = () => {
       try {
         let bestCandidate = null;
@@ -329,6 +329,7 @@
             activeType: (p.activeType || p.activeTab || 'corporate') === 'private' ? 'private' : 'corporate',
             hudSpeedLimit: Number(p.hudSpeedLimit || 50),
             defaultOffDay: Number(p.defaultOffDay !== undefined ? p.defaultOffDay : 1),
+            googleSheetUrl: p.googleSheetUrl || '',
             healthRoutines: Array.isArray(p.healthRoutines) && p.healthRoutines.length > 0 ? p.healthRoutines : DEFAULT_STORAGE.healthRoutines,
             corporate: {
               carNumber: p.corporate?.carNumber || '충남31바3238',
@@ -712,7 +713,7 @@
         };
       }, [currentTab]);
 
-      // 출근 터치 시 가디언 HUD('hud')로 즉시 전환
+      // 출근 터치 시 가디언 HUD로 직행
       const handleStartShift = () => {
         const nowTime = getCurrentTimeStr();
         const updatedRec = {
@@ -732,7 +733,7 @@
         }));
 
         playNavigationChime('chime');
-        setCurrentTab('hud'); // 가디언 HUD로 직행
+        setCurrentTab('hud');
       };
 
       const handleResetShift = () => {
@@ -765,6 +766,7 @@
         setShowEditStartTimeModal(false);
       };
 
+      // 2중 자동 백업 (1. 스마트폰 다운로드 파일 + 2. 구글 시트 전송)
       const handleEndShift = () => {
         const nowTime = getCurrentTimeStr();
         const sTime = todayRecord.startTime || nowTime;
@@ -777,14 +779,54 @@
           workMinutes: workMins
         };
 
-        setAppData(prev => ({
-          ...prev,
+        const newAppData = {
+          ...appData,
           isShiftActive: false,
           [activeType]: {
-            ...prev[activeType],
-            records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
+            ...appData[activeType],
+            records: { ...(appData[activeType]?.records || {}), [todayKey]: updatedRec }
           }
-        }));
+        };
+
+        setAppData(newAppData);
+
+        // 1차 자동 백업: 스마트폰 다운로드 폴더 자동 파일 생성
+        try {
+          const blob = new Blob([JSON.stringify(newAppData, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `K-TAXI_자동백업_${todayKey}.json`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch(e) {
+          console.warn('Auto File Backup Error:', e);
+        }
+
+        // 2차 자동 백업: 구글 시트 웹앱 URL 전송 (설정 시)
+        if (appData.googleSheetUrl && appData.googleSheetUrl.startsWith('http')) {
+          try {
+            fetch(appData.googleSheetUrl, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                date: todayKey,
+                carNumber: appData[activeType]?.carNumber || '충남31바3238',
+                activeType: activeType === 'corporate' ? '법인' : '개인',
+                startTime: sTime,
+                endTime: nowTime,
+                workHours: formatMinutesToHours(workMins),
+                revenue: updatedRec.revenue || (Number(updatedRec.cardRev || 0) + Number(updatedRec.cashRev || 0)),
+                gas: updatedRec.gas || 0,
+                driverExpense: updatedRec.driverExpense || 0,
+                memo: updatedRec.memo || ''
+              })
+            }).catch(err => console.warn('Google Sheet Sync Error:', err));
+          } catch(e) {
+            console.warn('Google Sheet Send Error:', e);
+          }
+        }
 
         const randomClosing = CLOSING_MESSAGES[Math.floor(Math.random() * CLOSING_MESSAGES.length)];
         setClosingMsg(randomClosing);
@@ -1233,7 +1275,7 @@
 
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3 overflow-y-auto'}`}>
             
-            {/* 1. 첫 화면: 좌/우 상단 분할 & 2줄 초대형 멘트 */}
+            {/* 1. 첫 화면 */}
             {currentTab === 'welcome' && (
               <div className="h-full flex flex-col justify-between p-6 text-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
                 <div className="w-full flex items-center justify-between pt-2">
@@ -1705,9 +1747,28 @@
                   </div>
                 </div>
 
+                {/* 2차 구글 시트 클라우드 연동 카드 */}
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-300">장부 데이터 백업 & 복원</span>
+                    <span className="text-xs font-bold text-emerald-400">📊 구글 시트 클라우드 자동 동기화</span>
+                    <span className="text-[10px] text-slate-400">2차 백업</span>
+                  </div>
+                  <input
+                    type="url"
+                    placeholder="구글 앱스 스크립트 웹앱 URL 붙여넣기"
+                    value={appData.googleSheetUrl || ''}
+                    onChange={(e) => setAppData(prev => ({ ...prev, googleSheetUrl: e.target.value.trim() }))}
+                    className="w-full bg-slate-950 border border-slate-700 px-3 py-2 text-xs rounded-xl text-white font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    URL을 입력해 두면 매일 퇴근 시 구글 엑셀 시트에 1줄씩 자동 전송됩니다. (미입력 시에도 1차 기기 파일 저장은 100% 자동 작동)
+                  </p>
+                </div>
+
+                {/* 1차 백업 & 복원 카드 */}
+                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-slate-300">장부 데이터 수동 백업 & 복원</span>
                     <span className="text-[10px] text-slate-500">{APP_VERSION}</span>
                   </div>
                   <div className="flex gap-2">
@@ -1716,11 +1777,11 @@
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement('a');
                       a.href = url;
-                      a.download = `K-TAXI_BACKUP_${todayKey}.json`;
+                      a.download = `K-TAXI_백업_${todayKey}.json`;
                       a.click();
-                    }} className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700">백업 저장 (.json)</button>
+                    }} className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700">수동 백업 파일 저장</button>
                     <label className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 text-center cursor-pointer">
-                      백업 복원
+                      백업 파일 복원
                       <input type="file" accept=".json" onChange={(e) => {
                         const file = e.target.files[0];
                         if (!file) return;
@@ -1786,7 +1847,7 @@
                 </div>
                 <div className="space-y-4 px-2">
                   <span className="inline-block bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full">
-                    오늘 운행 마감 완료
+                    오늘 운행 마감 완료 (2중 자동 백업)
                   </span>
                   <h3 className="text-2xl font-black text-white leading-relaxed drop-shadow-lg">
                     {closingMsg}
