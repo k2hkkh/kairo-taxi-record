@@ -41,7 +41,7 @@
     .hud-rot90-right { transform: rotate(90deg) scaleY(-1); }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0.5rem); }
 
-    /* 교대 펌핑 애니메이션 */
+    /* 5:5 교대 펌핑 애니메이션 */
     @keyframes pulse-top-grow {
       0%, 100% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.95)); }
       50% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
@@ -63,7 +63,7 @@
     }
     .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
 
-    /* 속도계 폰트 스타일 */
+    /* 속도계 고대비 폰트 스타일 */
     .font-speed-hollow {
       color: rgba(255, 255, 255, 0.15);
       -webkit-text-stroke: 2.5px rgba(255, 255, 255, 0.65);
@@ -100,11 +100,10 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v4.2.0';
+    const APP_VERSION = 'v4.2.1';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
-    // 기사 맞춤형 웰컴 & 격려 멘트 풀
     const WELCOME_MESSAGES = [
       "오늘도 안전운전 하실 거죠? 안전이 가장 큰 수입입니다!",
       "즐거운 마음으로 오늘도 기분 좋게 달려봐요!",
@@ -120,7 +119,6 @@
       "오늘도 안전하게 무사고 완주하셨습니다. 고생 많으셨습니다!"
     ];
 
-    // 천안·아산 주요 단속 포인트 DB
     const CAMERA_DB = [
       { id: 'cam1', name: '불당대로 (시청 앞)', lat: 36.8152, lon: 127.1135, limit: 50, type: 'speed' },
       { id: 'cam2', name: '번영로 (종합운동장)', lat: 36.8285, lon: 127.1210, limit: 60, type: 'speed' },
@@ -156,7 +154,6 @@
       return (brng + 360) % 360;
     };
 
-    // 전자 내비 사운드 엔진
     let activeAudioSources = [];
 
     const getAudioContext = () => {
@@ -300,7 +297,7 @@
           const p = JSON.parse(saved);
           return {
             hasSelectedType: p.hasSelectedType !== undefined ? p.hasSelectedType : true,
-            isShiftActive: p.isShiftActive || false,
+            isShiftActive: Boolean(p.isShiftActive),
             activeType: (p.activeType || p.activeTab || 'corporate') === 'private' ? 'private' : 'corporate',
             hudSpeedLimit: Number(p.hudSpeedLimit || 50),
             defaultOffDay: Number(p.defaultOffDay !== undefined ? p.defaultOffDay : 1),
@@ -347,7 +344,6 @@
       });
     };
 
-    // 완전히 안전하게 보호된 실시간 지도 컴포넌트
     function FullscreenLiveMapView({ currentCoords, nearbyCamera, isAutoTracking, setIsAutoTracking, userHeading }) {
       const mapContainerRef = useRef(null);
       const mapInstanceRef = useRef(null);
@@ -357,11 +353,8 @@
       useEffect(() => {
         if (!mapContainerRef.current) return;
 
-        // 기존 인스턴스 완전 제거 및 DOM 바인딩 정리
         if (mapInstanceRef.current) {
-          try {
-            mapInstanceRef.current.remove();
-          } catch(e) {}
+          try { mapInstanceRef.current.remove(); } catch(e) {}
           mapInstanceRef.current = null;
         }
         if (mapContainerRef.current._leaflet_id) {
@@ -414,7 +407,7 @@
 
           mapInstanceRef.current = map;
         } catch(err) {
-          console.warn('Leaflet Init Error Handled:', err);
+          console.warn('Leaflet Init Warn:', err);
         }
 
         const resizeTimer = setTimeout(() => {
@@ -427,9 +420,7 @@
           clearTimeout(resizeTimer);
           if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
           if (mapInstanceRef.current) {
-            try {
-              mapInstanceRef.current.remove();
-            } catch(e) {}
+            try { mapInstanceRef.current.remove(); } catch(e) {}
             mapInstanceRef.current = null;
           }
         };
@@ -595,12 +586,10 @@
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       });
 
-      // 로테이션 멘트 상태
       const [welcomeMsg] = useState(() => WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]);
       const [closingMsg, setClosingMsg] = useState('');
       const [showClosingModal, setShowClosingModal] = useState(false);
 
-      // 모달 상태
       const [showNavModal, setShowNavModal] = useState(false);
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
@@ -609,45 +598,36 @@
       const [showEditStartTimeModal, setShowEditStartTimeModal] = useState(false);
       const [showNapVisualModal, setShowNapVisualModal] = useState(false);
 
-      // 시간 수정 임시 상태
       const [tempStartTime, setTempStartTime] = useState('16:30');
 
-      // 새 루틴 입력 상태
       const [newRoutineTitle, setNewRoutineTitle] = useState('');
       const [newRoutineTime, setNewRoutineTime] = useState('12:00');
       const [newRoutineType, setNewRoutineType] = useState('med');
 
-      // GPS & HUD & 방위각 상태
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [currentCoords, setCurrentCoords] = useState(null);
       const [userHeading, setUserHeading] = useState(0);
       const prevCoordsRef = useRef(null);
 
-      // HUD 4단계 화면 순환: 1: map, 2: mirror_vert, 3: mirror_rot_left, 4: mirror_rot_right
       const [hudCycleStep, setHudCycleStep] = useState(1);
       const [isAutoTracking, setIsAutoTracking] = useState(true);
       const [nearbyCamera, setNearbyCamera] = useState(null);
 
-      // 모의 주행 상태
       const [isSimDriveActive, setIsSimDriveActive] = useState(false);
       const simDriveTimerRef = useRef(null);
 
-      // 주정차 5분 타이머 상태
       const [parkingCountdown, setParkingCountdown] = useState(300);
       const [isParkingStopped, setIsParkingStopped] = useState(false);
 
-      // 구간단속 평균속도 상태
       const [sectionAvgSpeed, setSectionAvgSpeed] = useState(0);
       const sectionStartTime = useRef(null);
       const sectionTotalSpeed = useRef(0);
       const sectionSpeedSamples = useRef(0);
 
-      // 쪽잠 카운트다운 타이머
       const [napTotalMinutes, setNapTotalMinutes] = useState(20);
       const [napTimerSeconds, setNapTimerSeconds] = useState(20 * 60);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
 
-      // 단속 방어 / 적발 이력
       const [defenseHistory, setDefenseHistory] = useState([
         { id: 1, time: '18:42', name: '불당대로 (시청 앞)', type: 'speed', limit: 50, speed: 48, status: 'pass', amount: 40000 },
         { id: 2, time: '19:15', name: '천안역 광장 (주정차)', type: 'parking', limit: 30, speed: 0, status: 'pass', amount: 40000 }
@@ -666,7 +646,6 @@
         }
       }, [appData]);
 
-      // 화면 상시 켜짐 방지
       useEffect(() => {
         let wakeLockSentinel = null;
         const requestWakeLock = async () => {
@@ -694,7 +673,6 @@
         };
       }, [currentTab]);
 
-      // 초대형 출근하기 실행
       const handleStartShift = () => {
         const nowTime = getCurrentTimeStr();
         const updatedRec = {
@@ -1197,7 +1175,6 @@
       return (
         <div className="max-w-md mx-auto w-full h-full flex flex-col bg-slate-950 border-x border-slate-800 relative overflow-hidden">
           
-          {/* 상단 콤팩트 헤더 */}
           {currentTab !== 'hud' && currentTab !== 'welcome' && (
             <header className="flex-shrink-0 p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-30">
               <div className="flex items-center gap-2">
@@ -1217,15 +1194,11 @@
             </header>
           )}
 
-          {/* 메인 뷰포트 영역 */}
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3 overflow-y-auto'}`}>
             
-            {/* ======================================================== */}
             {/* 1. 첫 화면: 좌/우 상단 분할 & 꽉 차는 2줄 초대형 멘트 */}
-            {/* ======================================================== */}
             {currentTab === 'welcome' && (
               <div className="h-full flex flex-col justify-between p-6 text-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
-                {/* 상단 좌우 분할 헤더 */}
                 <div className="w-full flex items-center justify-between pt-2">
                   <span className="bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full shadow-lg">
                     K-TAXI 스마트 파트너
@@ -1235,7 +1208,6 @@
                   </span>
                 </div>
 
-                {/* 중앙: 2줄로 시원하게 꽉 차는 초대형 응원 멘트 */}
                 <div className="flex-1 flex flex-col items-center justify-center px-1 my-auto">
                   <span className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">{todayKey}</span>
                   <h1 className="text-3xl sm:text-4xl font-black text-white leading-snug break-keep drop-shadow-xl">
@@ -1243,7 +1215,6 @@
                   </h1>
                 </div>
 
-                {/* 하단: 직사각형 초대형 출근하기 버튼 */}
                 <div className="w-full pb-8">
                   <button
                     onClick={handleStartShift}
@@ -1259,9 +1230,7 @@
               </div>
             )}
 
-            {/* ======================================================== */}
-            {/* 2. 오늘&건강 탭: 스마트 건강 관리 & 비주얼 쪽잠 */}
-            {/* ======================================================== */}
+            {/* 2. 오늘&건강 탭 */}
             {currentTab === 'today' && (
               <div className="space-y-3 pb-6">
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 shadow-sm space-y-2">
@@ -1362,9 +1331,7 @@
               </div>
             )}
 
-            {/* ======================================================== */}
-            {/* 3. 가디언 HUD 탭: 4단계 화면 순환 & 단일 외부내비 버튼 */}
-            {/* ======================================================== */}
+            {/* 3. 가디언 HUD 탭 */}
             {currentTab === 'hud' && (
               <div
                 className={`w-full h-full flex flex-col justify-between select-none relative overflow-hidden ${
@@ -1542,9 +1509,7 @@
               </div>
             )}
 
-            {/* ======================================================== */}
-            {/* 4. 운행일지 탭: 달력 장부 & 슬라이드 퇴근 */}
-            {/* ======================================================== */}
+            {/* 4. 운행일지 탭 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
@@ -1631,9 +1596,7 @@
               </div>
             )}
 
-            {/* ======================================================== */}
             {/* 5. 정산 & 설정 탭 */}
-            {/* ======================================================== */}
             {currentTab === 'settings' && (
               <div className="space-y-3.5 pb-6">
                 <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-3">
@@ -1740,7 +1703,6 @@
             )}
           </main>
 
-          {/* 하단 탭 내비게이션 */}
           {currentTab !== 'welcome' && (
             <nav className="flex-shrink-0 w-full bg-slate-900/95 backdrop-blur border-t border-slate-800 grid grid-cols-4 z-40 pb-safe">
               <button onClick={() => setCurrentTab('hud')} className={`flex flex-col items-center py-2 ${currentTab === 'hud' ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
@@ -1758,11 +1720,7 @@
             </nav>
           )}
 
-          {/* ======================================================== */}
-          {/* 모달 팝업 영역 */}
-          {/* ======================================================== */}
-
-          {/* 1. 외부 내비 선택 모달 */}
+          {/* 1. 외부 내비 모달 */}
           {showNavModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl text-center">
@@ -1783,7 +1741,7 @@
             </div>
           )}
 
-          {/* 2. 풀스크린 퇴근 마감 격려 화면 */}
+          {/* 2. 풀스크린 퇴근 마감 화면 */}
           {showClosingModal && (
             <div className="fixed inset-0 bg-slate-950 flex flex-col justify-between p-6 z-50 text-center animate-fade-in">
               <div className="pt-12 space-y-6">
@@ -2156,9 +2114,12 @@
                 <div className="w-12 h-12 rounded-2xl bg-red-950/80 border border-red-500/40 flex items-center justify-center mx-auto text-2xl">🛡️</div>
                 <div>
                   <h2 className="text-base font-bold text-red-400">데이터 안전 보호 모드</h2>
-                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">화면을 새로고침하여 시스템을 복구합니다.</p>
+                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">아래 버튼을 눌러 시스템을 복구해 주세요.</p>
                 </div>
-                <button onClick={() => window.location.reload()} className="w-full py-2.5 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow">화면 새로고침</button>
+                <div className="space-y-2 pt-1">
+                  <button onClick={() => window.location.reload()} className="w-full py-2.5 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow">화면 새로고침</button>
+                  <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-2 bg-slate-800 text-slate-400 font-bold text-[11px] rounded-xl border border-slate-700">임시 저장소 초기화 후 복구</button>
+                </div>
               </div>
             </div>
           );
