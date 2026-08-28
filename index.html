@@ -63,7 +63,7 @@
     }
     .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
 
-    /* 속도계 고대비 폰트 스타일 */
+    /* 속도계 폰트 스타일 */
     .font-speed-hollow {
       color: rgba(255, 255, 255, 0.15);
       -webkit-text-stroke: 2.5px rgba(255, 255, 255, 0.65);
@@ -100,7 +100,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, Component } = React;
 
-    const APP_VERSION = 'v4.2.1';
+    const APP_VERSION = 'v4.2.2';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V14';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -320,6 +320,7 @@
     };
 
     const createDynamicUserIcon = (cameraType, heading = 0) => {
+      if (!window.L) return null;
       const rotStyle = `transform: rotate(${heading}deg); transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);`;
 
       return L.divIcon({
@@ -351,7 +352,7 @@
       const autoResumeTimer = useRef(null);
 
       useEffect(() => {
-        if (!mapContainerRef.current) return;
+        if (!mapContainerRef.current || !window.L) return;
 
         if (mapInstanceRef.current) {
           try { mapInstanceRef.current.remove(); } catch(e) {}
@@ -420,7 +421,9 @@
           clearTimeout(resizeTimer);
           if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
           if (mapInstanceRef.current) {
-            try { mapInstanceRef.current.remove(); } catch(e) {}
+            try {
+              mapInstanceRef.current.remove();
+            } catch(e) {}
             mapInstanceRef.current = null;
           }
         };
@@ -429,7 +432,8 @@
       useEffect(() => {
         if (userMarkerRef.current) {
           const activeType = nearbyCamera ? nearbyCamera.type : null;
-          userMarkerRef.current.setIcon(createDynamicUserIcon(activeType, userHeading));
+          const icon = createDynamicUserIcon(activeType, userHeading);
+          if (icon) userMarkerRef.current.setIcon(icon);
         }
       }, [nearbyCamera, userHeading]);
 
@@ -638,6 +642,12 @@
       const todayKey = getTodayKey();
       const todayRecord = appData[activeType]?.records?.[todayKey] || {};
 
+      // HUD 렌더링에 필수적인 과속/단속 상태 변수 정의
+      const effectiveLimit = nearbyCamera ? nearbyCamera.limit : (appData.hudSpeedLimit || 50);
+      const isCurrentlyOverspeed = (gpsSpeed > effectiveLimit) && Boolean(nearbyCamera);
+      const isOverSpeed = isCurrentlyOverspeed;
+      const isNearCamera = Boolean(nearbyCamera);
+
       useEffect(() => {
         try {
           localStorage.setItem(CURRENT_STORAGE_KEY, JSON.stringify(appData));
@@ -770,9 +780,6 @@
         }
         setShowNavModal(false);
       };
-
-      const effectiveLimit = nearbyCamera ? nearbyCamera.limit : (appData.hudSpeedLimit || 50);
-      const isCurrentlyOverspeed = (gpsSpeed > effectiveLimit) && Boolean(nearbyCamera);
 
       useEffect(() => {
         let overspeedAlarmInterval = null;
@@ -918,12 +925,12 @@
             } else {
               if (activeCameraTracking.current && minDistance > 400) {
                 const { name, limit, type, maxSpeed } = activeCameraTracking.current;
-                let isOverspeed = maxSpeed > limit;
+                let isOver = maxSpeed > limit;
                 let checkSpeed = maxSpeed;
 
                 if (type === 'section' && sectionSpeedSamples.current > 0) {
                   checkSpeed = sectionAvgSpeed;
-                  isOverspeed = sectionAvgSpeed > limit;
+                  isOver = sectionAvgSpeed > limit;
                   sectionStartTime.current = null;
                   sectionTotalSpeed.current = 0;
                   sectionSpeedSamples.current = 0;
@@ -931,7 +938,7 @@
                 }
 
                 let penaltyAmount = 40000;
-                if (isOverspeed) {
+                if (isOver) {
                   const diff = checkSpeed - limit;
                   if (diff > 40) penaltyAmount = 100000;
                   else if (diff > 20) penaltyAmount = 70000;
@@ -946,8 +953,8 @@
                     type,
                     limit,
                     speed: checkSpeed,
-                    status: isOverspeed ? 'fail' : 'pass',
-                    amount: isOverspeed ? -penaltyAmount : 40000
+                    status: isOver ? 'fail' : 'pass',
+                    amount: isOver ? -penaltyAmount : 40000
                   };
                   setDefenseHistory(prev => [newEntry, ...prev]);
                 }
