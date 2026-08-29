@@ -97,7 +97,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v4.4.0';
+    const APP_VERSION = 'v4.4.1';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V15';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -660,7 +660,7 @@
       const [napTimerSeconds, setNapTimerSeconds] = useState(20 * 60);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
 
-      // PiP 오버레이 상태 및 캔버스
+      // PiP 오버레이 상태 및 DOM Ref
       const [isPipActive, setIsPipActive] = useState(false);
       const pipCanvasRef = useRef(null);
       const pipVideoRef = useRef(null);
@@ -671,9 +671,8 @@
         { id: 2, time: '19:15', name: '천안역 광장 (주정차)', type: 'parking', limit: 30, speed: 0, status: 'pass', amount: 40000 }
       ]);
 
-      // 중복 폭탄 기록 방지용 Ref
       const activeCameraTracking = useRef(null);
-      const processedCameras = useRef(new Map()); // 최근 통과 처리된 카메라 쿨다운 기록
+      const processedCameras = useRef(new Map());
 
       const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
       const todayKey = getTodayKey();
@@ -719,83 +718,94 @@
         };
       }, [currentTab]);
 
-      // PiP 플로팅 오버레이 캔버스 렌더링 루프
-      useEffect(() => {
-        if (!isPipActive || !pipCanvasRef.current) return;
+      // 모바일 최적화 PiP 캔버스 렌더러
+      const drawPipFrame = () => {
+        if (!pipCanvasRef.current) return;
         const canvas = pipCanvasRef.current;
         const ctx = canvas.getContext('2d');
-        let animId = null;
+        if (!ctx) return;
 
-        const drawPip = () => {
-          ctx.fillStyle = isOverSpeed ? '#450a0a' : '#020617';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = isOverSpeed ? '#450a0a' : '#020617';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-          // 테두리
-          ctx.strokeStyle = isOverSpeed ? '#ef4444' : isNearCamera ? '#00f5ff' : '#334155';
-          ctx.lineWidth = 6;
-          ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+        // 테두리
+        ctx.strokeStyle = isOverSpeed ? '#ef4444' : isNearCamera ? '#00f5ff' : '#334155';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
 
-          // 제한속도 표지판
-          ctx.beginPath();
-          ctx.arc(70, 70, 48, 0, Math.PI * 2);
-          ctx.fillStyle = '#ffffff';
-          ctx.fill();
-          ctx.lineWidth = 10;
-          ctx.strokeStyle = '#dc2626';
-          ctx.stroke();
+        // 제한속도 원형 표지판
+        ctx.beginPath();
+        ctx.arc(70, 75, 46, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 10;
+        ctx.strokeStyle = '#dc2626';
+        ctx.stroke();
 
-          ctx.fillStyle = '#000000';
-          ctx.font = '900 42px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(String(effectiveLimit), 70, 70);
+        ctx.fillStyle = '#000000';
+        ctx.font = '900 42px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(effectiveLimit), 70, 75);
 
-          // 현재 주행속도
-          ctx.fillStyle = isOverSpeed ? '#ff1e44' : isNearCamera ? '#00f5ff' : '#f8fafc';
-          ctx.font = '900 84px monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText(String(gpsSpeed), 200, 75);
+        // 실시간 속도계
+        ctx.fillStyle = isOverSpeed ? '#ff1e44' : isNearCamera ? '#00f5ff' : '#ffffff';
+        ctx.font = '900 78px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(gpsSpeed), 200, 75);
 
-          ctx.font = '700 18px sans-serif';
-          ctx.fillStyle = '#94a3b8';
-          ctx.fillText('km/h', 200, 115);
+        ctx.font = '700 16px sans-serif';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('KM/H', 200, 115);
 
-          // 하단 단속 상태바
-          if (nearbyCamera) {
-            ctx.fillStyle = isOverSpeed ? '#ef4444' : '#eab308';
-            ctx.font = 'bold 16px sans-serif';
-            ctx.fillText(`🚨 ${nearbyCamera.name} (${nearbyCamera.dist}m)`, 150, 140);
-          }
+        // 단속 안내바
+        if (nearbyCamera) {
+          ctx.fillStyle = isOverSpeed ? '#ef4444' : '#eab308';
+          ctx.font = 'bold 15px sans-serif';
+          ctx.fillText(`🚨 ${nearbyCamera.name} (${nearbyCamera.dist}m)`, 150, 142);
+        }
+      };
 
-          animId = requestAnimationFrame(drawPip);
-        };
-
-        drawPip();
-        return () => cancelAnimationFrame(animId);
+      useEffect(() => {
+        let timer = null;
+        if (isPipActive) {
+          drawPipFrame();
+          timer = setInterval(drawPipFrame, 500);
+        }
+        return () => { if (timer) clearInterval(timer); };
       }, [isPipActive, gpsSpeed, effectiveLimit, isOverSpeed, isNearCamera, nearbyCamera]);
 
-      // PiP 플로팅 창 토글
+      // 모바일 PiP 실행 핸들러
       const togglePipMode = async () => {
         try {
           if (document.pictureInPictureElement) {
             await document.exitPictureInPicture();
             setIsPipActive(false);
-          } else {
-            if (!pipCanvasRef.current || !pipVideoRef.current) return;
-            const video = pipVideoRef.current;
-            const stream = pipCanvasRef.current.captureStream(30);
-            video.srcObject = stream;
-            await video.play();
-            await video.requestPictureInPicture();
-            setIsPipActive(true);
-
-            video.addEventListener('leavepictureinpicture', () => {
-              setIsPipActive(false);
-            }, { once: true });
+            return;
           }
+
+          if (!pipCanvasRef.current || !pipVideoRef.current) return;
+          const canvas = pipCanvasRef.current;
+          const video = pipVideoRef.current;
+
+          drawPipFrame();
+
+          if (!video.srcObject) {
+            const stream = canvas.captureStream(25);
+            video.srcObject = stream;
+          }
+
+          await video.play();
+          await video.requestPictureInPicture();
+          setIsPipActive(true);
+
+          video.addEventListener('leavepictureinpicture', () => {
+            setIsPipActive(false);
+          }, { once: true });
+
         } catch (err) {
-          alert('현재 브라우저 환경에서 플로팅 PiP 기능을 지원하지 않거나 권한이 필요합니다.');
-          console.warn('PiP Error:', err);
+          console.warn('PiP Native Request:', err);
+          alert('브라우저 메뉴(점 3개)에서 "데스크톱 사이트"를 해제하시거나, 안드로이드 설정 > 애플리케이션 > 브라우저 > "다른 앱 위에 표시/사진 속 사진(PiP)" 권한을 허용해 주세요.');
         }
       };
 
@@ -978,7 +988,6 @@
         return () => clearInterval(timer);
       }, [isParkingStopped, parkingCountdown]);
 
-      // 정밀 단속 감지 및 중복 폭탄 방지 GPS 엔진
       useEffect(() => {
         if (!navigator.geolocation || isSimDriveActive) return;
 
@@ -1028,7 +1037,6 @@
               }
             });
 
-            // 350m 이내 진입 시 안내 시작 (단, 최근 3분 내 처리된 카메라는 중복 안내 생략)
             if (closest && closest.dist <= 350) {
               const lastProcessed = processedCameras.current.get(closest.id);
               const isCoolingDown = lastProcessed && (now - lastProcessed < 180000);
@@ -1047,7 +1055,6 @@
                     minDist: closest.dist
                   };
                 } else {
-                  // 카메라에 가장 가까워진 시점의 속도로 갱신
                   if (closest.dist < activeCameraTracking.current.minDist) {
                     activeCameraTracking.current.minDist = closest.dist;
                     activeCameraTracking.current.passSpeed = speedKmh;
@@ -1055,7 +1062,6 @@
                 }
               }
             } else {
-              // 카메라 반경을 완전히 벗어났을 때 단 1회만 판정 확정
               if (activeCameraTracking.current && minDistance > 400) {
                 const { id, name, limit, type, passSpeed } = activeCameraTracking.current;
                 const isOver = passSpeed > limit;
@@ -1307,9 +1313,11 @@
       return (
         <div className="max-w-md mx-auto w-full h-full flex flex-col bg-slate-950 border-x border-slate-800 relative overflow-hidden">
           
-          {/* PiP 오버레이용 숨김 캔버스 및 비디오 */}
-          <canvas ref={pipCanvasRef} width="300" height="160" className="hidden" />
-          <video ref={pipVideoRef} autoPlay playsInline muted className="hidden" />
+          {/* PiP 오버레이 렌더링용 캔버스 & 비디오 */}
+          <div className="absolute top-[-9999px] left-[-9999px] pointer-events-none opacity-0">
+            <canvas ref={pipCanvasRef} width="300" height="160" />
+            <video ref={pipVideoRef} autoPlay playsInline muted />
+          </div>
 
           {currentTab !== 'hud' && currentTab !== 'welcome' && (
             <header className="flex-shrink-0 p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-30">
