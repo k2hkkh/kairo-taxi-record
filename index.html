@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#020617" />
   
-  <title>K-TAXI 스마트 가디언 HUD & 운행일지</title>
+  <title>K-TAXI 스마트 가디언 HUD & 미터기</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Leaflet 지도 라이브러리 -->
@@ -41,6 +41,7 @@
     .hud-rot90-right { transform: rotate(90deg) scaleY(-1); }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0.5rem); }
 
+    /* 5:5 교대 펌핑 애니메이션 */
     @keyframes pulse-top-grow {
       0%, 100% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.95)); }
       50% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
@@ -52,6 +53,7 @@
     .animate-top-pump { animation: pulse-top-grow 0.85s infinite ease-in-out; }
     .animate-bottom-pump { animation: pulse-bottom-grow 0.85s infinite ease-in-out; }
 
+    /* 네온 스트로브 점멸 */
     @keyframes strobe-warning {
       0% { background-color: rgba(239, 68, 68, 0.35); border-color: #ef4444; }
       25% { background-color: rgba(234, 179, 8, 0.35); border-color: #eab308; }
@@ -61,6 +63,7 @@
     }
     .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
 
+    /* 속도계 폰트 */
     .font-speed-hollow {
       color: rgba(255, 255, 255, 0.15);
       -webkit-text-stroke: 2.5px rgba(255, 255, 255, 0.65);
@@ -90,14 +93,14 @@
 <body class="select-none antialiased bg-slate-950">
   <div id="root">
     <div class="h-full flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
-      K-TAXI 시스템 로딩 중...
+      K-TAXI 스마트 가디언 로딩 중...
     </div>
   </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v4.4.1';
+    const APP_VERSION = 'v4.5.0';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V15';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -116,6 +119,7 @@
       "오늘도 안전하게 무사고 완주하셨습니다. 고생 많으셨습니다!"
     ];
 
+    // 단속 카메라 DB
     const CAMERA_DB = [
       { id: 'cam1', name: '불당대로 (시청 앞)', lat: 36.8152, lon: 127.1135, limit: 50, type: 'speed' },
       { id: 'cam2', name: '번영로 (종합운동장)', lat: 36.8285, lon: 127.1210, limit: 60, type: 'speed' },
@@ -499,13 +503,13 @@
           {!isAutoTracking && (
             <button
               onClick={handleRecenter}
-              className="absolute bottom-24 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition pointer-events-auto"
+              className="absolute bottom-28 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition pointer-events-auto"
             >
               <span className="text-base">📍</span> 내 위치로
             </button>
           )}
 
-          <div className="absolute bottom-24 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow pointer-events-none">
+          <div className="absolute bottom-28 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow pointer-events-none">
             <span className={`w-2 h-2 rounded-full ${isAutoTracking ? 'bg-emerald-400 animate-pulse' : 'bg-orange-400'}`}></span>
             {isAutoTracking ? '주행 추적 중' : '자유 탐색'}
           </div>
@@ -629,6 +633,7 @@
       const [showAddRoutineModal, setShowAddRoutineModal] = useState(false);
       const [showEditStartTimeModal, setShowEditStartTimeModal] = useState(false);
       const [showNapVisualModal, setShowNapVisualModal] = useState(false);
+      const [showPaymentModal, setShowPaymentModal] = useState(false);
 
       const [tempStartTime, setTempStartTime] = useState('16:30');
 
@@ -660,7 +665,19 @@
       const [napTimerSeconds, setNapTimerSeconds] = useState(20 * 60);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
 
-      // PiP 오버레이 상태 및 DOM Ref
+      // ===== 스마트 미터기 상태 엔진 =====
+      // status: 'empty'(빈차), 'driving'(주행), 'payment'(지불)
+      const [meterStatus, setMeterStatus] = useState('empty');
+      const [meterFare, setMeterFare] = useState(0);
+      const [meterDistanceM, setMeterDistanceM] = useState(0);
+      const [meterSeconds, setMeterSeconds] = useState(0);
+      const [meterSlowSeconds, setMeterSlowSeconds] = useState(0);
+      const [isSurcharge, setIsSurcharge] = useState(false); // 심야할증 여부
+
+      const meterPrevCoords = useRef(null);
+      const meterTimerRef = useRef(null);
+
+      // PiP 오버레이 및 동기화 캔버스
       const [isPipActive, setIsPipActive] = useState(false);
       const pipCanvasRef = useRef(null);
       const pipVideoRef = useRef(null);
@@ -718,64 +735,223 @@
         };
       }, [currentTab]);
 
-      // 모바일 최적화 PiP 캔버스 렌더러
-      const drawPipFrame = () => {
-        if (!pipCanvasRef.current) return;
-        const canvas = pipCanvasRef.current;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+      // ===== 미터기 요금 계산 로직 (천안·아산 중형택시 기준) =====
+      // 기본 1.4km까지 4,000원, 이후 127m당 100원, 15km/h 이하 34초당 100원
+      useEffect(() => {
+        if (meterStatus === 'driving') {
+          meterTimerRef.current = setInterval(() => {
+            setMeterSeconds(sec => sec + 1);
+            
+            // 서행(15km/h 이하) 시간 누적
+            if (gpsSpeed < 15) {
+              setMeterSlowSeconds(sSec => {
+                const nextSSec = sSec + 1;
+                return nextSSec;
+              });
+            }
 
-        ctx.fillStyle = isOverSpeed ? '#450a0a' : '#020617';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // 실시간 심야 시간대(22:00~04:00) 자동 판별
+            const curH = new Date().getHours();
+            const surchargeActive = (curH >= 22 || curH < 4);
+            setIsSurcharge(surchargeActive);
 
-        // 테두리
-        ctx.strokeStyle = isOverSpeed ? '#ef4444' : isNearCamera ? '#00f5ff' : '#334155';
-        ctx.lineWidth = 6;
-        ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+            // 요금 연산
+            setMeterDistanceM(dist => {
+              const baseFare = 4000;
+              const baseDistM = 1400;
+              let extraDistFare = 0;
+              if (dist > baseDistM) {
+                extraDistFare = Math.floor((dist - baseDistM) / 127) * 100;
+              }
+              const extraTimeFare = Math.floor(meterSlowSeconds / 34) * 100;
+              
+              let total = baseFare + extraDistFare + extraTimeFare;
+              if (surchargeActive) {
+                total = Math.round(total * 1.2 / 100) * 100; // 20% 할증
+              }
+              setMeterFare(total);
+              return dist;
+            });
+          }, 1000);
+        } else {
+          if (meterTimerRef.current) clearInterval(meterTimerRef.current);
+        }
 
-        // 제한속도 원형 표지판
-        ctx.beginPath();
-        ctx.arc(70, 75, 46, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.lineWidth = 10;
-        ctx.strokeStyle = '#dc2626';
-        ctx.stroke();
+        return () => {
+          if (meterTimerRef.current) clearInterval(meterTimerRef.current);
+        };
+      }, [meterStatus, gpsSpeed, meterSlowSeconds]);
 
-        ctx.fillStyle = '#000000';
-        ctx.font = '900 42px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(String(effectiveLimit), 70, 75);
-
-        // 실시간 속도계
-        ctx.fillStyle = isOverSpeed ? '#ff1e44' : isNearCamera ? '#00f5ff' : '#ffffff';
-        ctx.font = '900 78px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(String(gpsSpeed), 200, 75);
-
-        ctx.font = '700 16px sans-serif';
-        ctx.fillStyle = '#94a3b8';
-        ctx.fillText('KM/H', 200, 115);
-
-        // 단속 안내바
-        if (nearbyCamera) {
-          ctx.fillStyle = isOverSpeed ? '#ef4444' : '#eab308';
-          ctx.font = 'bold 15px sans-serif';
-          ctx.fillText(`🚨 ${nearbyCamera.name} (${nearbyCamera.dist}m)`, 150, 142);
+      // 미터기 버튼 핸들러
+      const handleToggleMeter = () => {
+        if (meterStatus === 'empty') {
+          // 승차 (주행 시작)
+          setMeterStatus('driving');
+          setMeterFare(4000);
+          setMeterDistanceM(0);
+          setMeterSeconds(0);
+          setMeterSlowSeconds(0);
+          meterPrevCoords.current = currentCoords;
+          playNavigationChime('chime');
+        } else if (meterStatus === 'driving') {
+          // 지불 모드 진입
+          setMeterStatus('payment');
+          setShowPaymentModal(true);
+          playNavigationChime('chime');
         }
       };
 
-      useEffect(() => {
-        let timer = null;
-        if (isPipActive) {
-          drawPipFrame();
-          timer = setInterval(drawPipFrame, 500);
-        }
-        return () => { if (timer) clearInterval(timer); };
-      }, [isPipActive, gpsSpeed, effectiveLimit, isOverSpeed, isNearCamera, nearbyCamera]);
+      // 지불 정산 및 당일 매출 자동 합산
+      const handleCompletePayment = (payType) => {
+        const fareToAdd = Number(meterFare) || 0;
+        const prevRev = Number(todayRecord.revenue || 0);
+        const prevCard = Number(todayRecord.cardRev || 0);
+        const prevCash = Number(todayRecord.cashRev || 0);
 
-      // 모바일 PiP 실행 핸들러
+        let updatedRec = { ...todayRecord };
+        if (activeType === 'corporate') {
+          updatedRec.revenue = prevRev + fareToAdd;
+        } else {
+          if (payType === 'card') updatedRec.cardRev = prevCard + fareToAdd;
+          else updatedRec.cashRev = prevCash + fareToAdd;
+          updatedRec.revenue = (updatedRec.cardRev || 0) + (updatedRec.cashRev || 0);
+        }
+
+        setAppData(prev => ({
+          ...prev,
+          [activeType]: {
+            ...prev[activeType],
+            records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
+          }
+        }));
+
+        setMeterStatus('empty');
+        setMeterFare(0);
+        setMeterDistanceM(0);
+        setShowPaymentModal(false);
+        playNavigationChime('chime');
+      };
+
+      // ===== PiP 플로팅 캔버스 렌더러 (5:5 교대 펌핑 & 네온 스트로브 완벽 동기화) =====
+      useEffect(() => {
+        if (!isPipActive || !pipCanvasRef.current) return;
+        const canvas = pipCanvasRef.current;
+        const ctx = canvas.getContext('2d');
+        let animId = null;
+
+        const renderPip = (time) => {
+          const tSec = time / 1000;
+          // 0.85초 주기 교대 펌핑 위상 계산
+          const cycleRatio = (tSec % 0.85) / 0.85;
+          const isTopPumping = Math.sin(cycleRatio * Math.PI * 2) > 0;
+
+          // 1. 배경 채우기
+          if (isNearCamera && isOverSpeed) {
+            // 네온 스트로브 점멸 색상
+            const strobeColors = ['#450a0a', '#713f12', '#083344', '#3b0764'];
+            const colorIdx = Math.floor((time / 125) % strobeColors.length);
+            ctx.fillStyle = strobeColors[colorIdx];
+          } else {
+            ctx.fillStyle = '#020617';
+          }
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // 2. 테두리
+          ctx.lineWidth = 6;
+          if (isNearCamera && isOverSpeed) {
+            const borderColors = ['#ef4444', '#eab308', '#06b6d4', '#a855f7'];
+            ctx.strokeStyle = borderColors[Math.floor((time / 125) % borderColors.length)];
+          } else if (isNearCamera) {
+            ctx.strokeStyle = '#00f5ff';
+          } else {
+            ctx.strokeStyle = '#334155';
+          }
+          ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+
+          // 3. 상단 미터기 상태바 오버레이
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(6, 6, canvas.width - 12, 28);
+          ctx.font = 'bold 13px sans-serif';
+          if (meterStatus === 'empty') {
+            ctx.fillStyle = '#facc15';
+            ctx.fillText('🚖 빈차 [대기]', 14, 25);
+          } else if (meterStatus === 'driving') {
+            ctx.fillStyle = '#4ade80';
+            ctx.fillText(`🚕 주행 중 (${(meterDistanceM / 1000).toFixed(1)}km)`, 14, 25);
+            ctx.fillStyle = '#f8fafc';
+            ctx.textAlign = 'right';
+            ctx.fillText(`${formatMoney(meterFare)}원`, canvas.width - 16, 25);
+            ctx.textAlign = 'left';
+          } else {
+            ctx.fillStyle = '#f87171';
+            ctx.fillText(`🛑 지불 대기: ${formatMoney(meterFare)}원`, 14, 25);
+          }
+
+          // 4. 좌측 제한속도 원형 표지판 (교대 펌핑 스케일 적용)
+          const topScale = isNearCamera ? (isTopPumping ? 1.08 : 0.94) : 1.0;
+          ctx.save();
+          ctx.translate(65, 95);
+          ctx.scale(topScale, topScale);
+          ctx.beginPath();
+          ctx.arc(0, 0, 36, 0, Math.PI * 2);
+          ctx.fillStyle = isNearCamera ? '#ffffff' : 'rgba(255,255,255,0.15)';
+          ctx.fill();
+          ctx.lineWidth = 7;
+          ctx.strokeStyle = isNearCamera ? '#dc2626' : 'rgba(220,38,38,0.4)';
+          ctx.stroke();
+
+          ctx.fillStyle = isNearCamera ? '#000000' : 'rgba(255,255,255,0.4)';
+          ctx.font = '900 32px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(effectiveLimit), 0, 0);
+          ctx.restore();
+
+          // 5. 우측 실시간 속도계 (교대 펌핑 스케일 적용)
+          const bottomScale = isNearCamera ? (!isTopPumping ? 1.08 : 0.94) : 1.0;
+          ctx.save();
+          ctx.translate(200, 95);
+          ctx.scale(bottomScale, bottomScale);
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          if (isOverSpeed) {
+            ctx.fillStyle = '#ff1e44';
+            ctx.shadowColor = 'rgba(255,30,68,1)';
+            ctx.shadowBlur = 20;
+          } else if (isNearCamera) {
+            ctx.fillStyle = '#00f5ff';
+            ctx.shadowColor = 'rgba(0,245,255,1)';
+            ctx.shadowBlur = 18;
+          } else {
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            ctx.shadowBlur = 0;
+          }
+
+          ctx.font = '900 70px monospace';
+          ctx.fillText(String(gpsSpeed), 0, -4);
+
+          ctx.font = '700 13px sans-serif';
+          ctx.fillStyle = '#94a3b8';
+          ctx.shadowBlur = 0;
+          ctx.fillText('KM/H', 0, 30);
+          ctx.restore();
+
+          // 6. 하단 단속 상태바
+          if (nearbyCamera) {
+            ctx.fillStyle = isOverSpeed ? '#ef4444' : '#facc15';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`🚨 ${nearbyCamera.name} (${nearbyCamera.dist}m)`, 150, 150);
+          }
+
+          animId = requestAnimationFrame(renderPip);
+        };
+
+        animId = requestAnimationFrame(renderPip);
+        return () => cancelAnimationFrame(animId);
+      }, [isPipActive, gpsSpeed, effectiveLimit, isOverSpeed, isNearCamera, nearbyCamera, meterStatus, meterFare, meterDistanceM]);
+
       const togglePipMode = async () => {
         try {
           if (document.pictureInPictureElement) {
@@ -787,8 +963,6 @@
           if (!pipCanvasRef.current || !pipVideoRef.current) return;
           const canvas = pipCanvasRef.current;
           const video = pipVideoRef.current;
-
-          drawPipFrame();
 
           if (!video.srcObject) {
             const stream = canvas.captureStream(25);
@@ -804,8 +978,8 @@
           }, { once: true });
 
         } catch (err) {
-          console.warn('PiP Native Request:', err);
-          alert('브라우저 메뉴(점 3개)에서 "데스크톱 사이트"를 해제하시거나, 안드로이드 설정 > 애플리케이션 > 브라우저 > "다른 앱 위에 표시/사진 속 사진(PiP)" 권한을 허용해 주세요.');
+          console.warn('PiP Request Error:', err);
+          alert('브라우저 설정에서 "사진 속 사진(PiP)" 또는 "다른 앱 위에 표시" 권한을 허용해 주세요.');
         }
       };
 
@@ -884,7 +1058,7 @@
 
         setAppData(newAppData);
 
-        // 1차 자동 백업: 스마트폰 다운로드 폴더 자동 파일 생성
+        // 1차 자동 백업: JSON 파일 다운로드
         try {
           const blob = new Blob([JSON.stringify(newAppData, null, 2)], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
@@ -897,7 +1071,7 @@
           console.warn('Auto File Backup Error:', e);
         }
 
-        // 2차 자동 백업: 구글 시트 웹앱 URL 전송
+        // 2차 자동 백업: 구글 시트 웹앱 전송
         if (appData.googleSheetUrl && appData.googleSheetUrl.startsWith('http')) {
           try {
             fetch(appData.googleSheetUrl, {
@@ -988,6 +1162,7 @@
         return () => clearInterval(timer);
       }, [isParkingStopped, parkingCountdown]);
 
+      // GPS 위치 & 주행 거리 연산
       useEffect(() => {
         if (!navigator.geolocation || isSimDriveActive) return;
 
@@ -999,6 +1174,7 @@
             setCurrentCoords({ lat, lon });
             setGpsSpeed(speedKmh);
             prevCoordsRef.current = { lat, lon, time: Date.now() };
+            meterPrevCoords.current = { lat, lon };
           },
           (err) => console.warn('Initial GPS Warn:', err.message),
           { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
@@ -1011,6 +1187,20 @@
             const lon = pos.coords.longitude;
             setGpsSpeed(speedKmh);
             setCurrentCoords({ lat, lon });
+
+            // 주행 중일 때 미터기 거리 누적
+            if (meterStatus === 'driving' && meterPrevCoords.current) {
+              const deltaM = calculateDistanceMeters(
+                meterPrevCoords.current.lat, meterPrevCoords.current.lon,
+                lat, lon
+              );
+              if (deltaM >= 3 && deltaM < 200) { // 이상치 필터링
+                setMeterDistanceM(prev => prev + deltaM);
+                meterPrevCoords.current = { lat, lon };
+              }
+            } else {
+              meterPrevCoords.current = { lat, lon };
+            }
 
             if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
               setUserHeading(Math.round(pos.coords.heading));
@@ -1037,6 +1227,7 @@
               }
             });
 
+            // 350m 이내 진입 시 안내 시작 (3분 쿨다운)
             if (closest && closest.dist <= 350) {
               const lastProcessed = processedCameras.current.get(closest.id);
               const isCoolingDown = lastProcessed && (now - lastProcessed < 180000);
@@ -1101,7 +1292,7 @@
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
-      }, [isSimDriveActive, nearbyCamera, isParkingStopped, sectionAvgSpeed]);
+      }, [isSimDriveActive, nearbyCamera, isParkingStopped, sectionAvgSpeed, meterStatus]);
 
       const toggleSimDrive = (e) => {
         e.stopPropagation();
@@ -1136,6 +1327,10 @@
             setGpsSpeed(currentStep.speed);
             setUserHeading(currentStep.heading);
             setNearbyCamera(currentStep.cam);
+
+            if (meterStatus === 'driving') {
+              setMeterDistanceM(m => m + 35);
+            }
 
             if (currentStep.cam && currentStep.speed > currentStep.cam.limit) {
               playNavigationChime('warning');
@@ -1313,9 +1508,9 @@
       return (
         <div className="max-w-md mx-auto w-full h-full flex flex-col bg-slate-950 border-x border-slate-800 relative overflow-hidden">
           
-          {/* PiP 오버레이 렌더링용 캔버스 & 비디오 */}
+          {/* PiP 오버레이 렌더링용 숨김 캔버스 & 비디오 */}
           <div className="absolute top-[-9999px] left-[-9999px] pointer-events-none opacity-0">
-            <canvas ref={pipCanvasRef} width="300" height="160" />
+            <canvas ref={pipCanvasRef} width="300" height="165" />
             <video ref={pipVideoRef} autoPlay playsInline muted />
           </div>
 
@@ -1484,6 +1679,7 @@
                     : 'bg-slate-950'
                 }`}
               >
+                {/* 상단 컨트롤 바 */}
                 <div className="absolute top-3 left-3 right-3 z-[450] flex justify-between items-center pointer-events-auto">
                   <div className="flex gap-1.5 bg-slate-950/85 backdrop-blur-md p-1 rounded-2xl border border-slate-700/80 shadow-2xl">
                     <button
@@ -1536,7 +1732,10 @@
                       />
                     </div>
 
-                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-20 pointer-events-none">
+                    {/* HUD 메인 계기판 (제한속도 + 속도계) */}
+                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-12 pb-24 pointer-events-none">
+                      
+                      {/* 상단 5:5 펌핑 영역: 제한속도 표지판 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
                         <div className={`flex items-center justify-center w-44 h-44 rounded-full border-[5px] transition-all duration-300 ${
                           isNearCamera
@@ -1571,6 +1770,7 @@
                         )}
                       </div>
 
+                      {/* 하단 5:5 펌핑 영역: 실시간 속도계 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2 text-center">
                         <div className={`transition-all duration-300 flex flex-col items-center justify-center w-full ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
                           <div className="w-full flex items-center justify-center leading-none">
@@ -1597,35 +1797,57 @@
                       </div>
                     </div>
 
-                    <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto">
-                      <div
-                        onClick={() => setShowDefenseListModal(true)}
-                        className="bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-slate-950/95 border-2 border-emerald-500/80 p-2.5 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.9)] flex items-center justify-between cursor-pointer active:scale-95 transition"
-                      >
-                        <div className="flex items-center gap-2 overflow-hidden">
-                          <span className="text-xl">🛡️</span>
-                          <div className="text-xs truncate">
-                            <div className="font-black text-white">
-                              방어 <span className="text-emerald-400 font-black">{passCount}회</span> (+{formatMoney(totalSaved)}) | 
-                              적발 <span className="text-red-400 font-black">{failCount}회</span> (-{formatMoney(totalFines)})
-                            </div>
-                            <div className="text-[10px] text-yellow-400 font-bold">
-                              총 순방어액: {netSaved >= 0 ? `+${formatMoney(netSaved)}원` : `-${formatMoney(Math.abs(netSaved))}원`} (터치하여 상세)
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {/* 하단 스마트 미터기 & 단속 방어 바 */}
+                    <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto space-y-1.5">
+                      
+                      {/* 1. 가상 스마트 미터기 콘솔 바 */}
+                      <div className="bg-gradient-to-r from-slate-900/95 via-slate-950/95 to-slate-900/95 border-2 border-yellow-500/80 p-2.5 rounded-2xl shadow-2xl flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
                           <button
-                            onClick={handleResetDefenseHistory}
-                            className="px-2 py-1 bg-slate-800 hover:bg-red-900 text-slate-300 hover:text-red-200 border border-slate-600 rounded-xl text-[10px] font-bold active:scale-90"
-                            title="내역 초기화"
+                            onClick={handleToggleMeter}
+                            className={`px-4 py-2 rounded-xl font-black text-xs shadow-lg transition active:scale-95 ${
+                              meterStatus === 'empty'
+                                ? 'bg-yellow-500 text-black animate-pulse'
+                                : meterStatus === 'driving'
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-red-600 text-white'
+                            }`}
                           >
-                            🔄 리셋
+                            {meterStatus === 'empty' ? '🚖 빈차 (터치시 승차)' : meterStatus === 'driving' ? '🚕 주행 (터치시 지불)' : '🛑 정산 대기'}
                           </button>
-                          <span className="px-2 py-1 bg-emerald-900/90 text-emerald-200 border border-emerald-400/80 rounded-xl text-[10px] font-black">
-                            내역 ▶
+                          
+                          {meterStatus === 'driving' && (
+                            <div className="text-[11px]">
+                              <span className="text-slate-300 font-bold block">
+                                {(meterDistanceM / 1000).toFixed(2)}km · {Math.floor(meterSeconds / 60)}분 {meterSeconds % 60}초
+                              </span>
+                              {isSurcharge && <span className="text-orange-400 font-black text-[10px]">🌙 심야할증 20%</span>}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 font-bold block">주행 요금</span>
+                          <span className="text-xl font-black text-yellow-400 font-mono">
+                            {formatMoney(meterFare)}원
                           </span>
                         </div>
+                      </div>
+
+                      {/* 2. 단속 방어 & 적발 요약 바 */}
+                      <div
+                        onClick={() => setShowDefenseListModal(true)}
+                        className="bg-slate-950/90 border border-emerald-500/60 p-2 rounded-xl shadow flex items-center justify-between cursor-pointer active:scale-98 transition"
+                      >
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <span className="text-base">🛡️</span>
+                          <div className="text-[11px] truncate text-slate-300">
+                            방어 <span className="text-emerald-400 font-bold">{passCount}회</span> | 
+                            적발 <span className="text-red-400 font-bold">{failCount}회</span> | 
+                            순방어: <span className="text-yellow-400 font-black">{netSaved >= 0 ? `+${formatMoney(netSaved)}원` : `-${formatMoney(Math.abs(netSaved))}원`}</span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-emerald-400 font-bold">내역 ▶</span>
                       </div>
                     </div>
                   </div>
@@ -1894,7 +2116,44 @@
             </nav>
           )}
 
-          {/* 1. 외부 내비 모달 */}
+          {/* 모달 팝업들 */}
+          
+          {/* 1. 미터기 지불/정산 모달 */}
+          {showPaymentModal && (
+            <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-900 border-2 border-yellow-500 rounded-3xl w-full max-w-sm p-6 space-y-4 shadow-2xl text-center">
+                <span className="text-3xl">💳</span>
+                <h3 className="text-lg font-black text-white">요금 정산 및 매출 반영</h3>
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
+                  <span className="text-xs text-slate-400 block font-bold">최종 결제 요금</span>
+                  <span className="text-3xl font-black text-yellow-400 font-mono mt-1 block">{formatMoney(meterFare)}원</span>
+                  <span className="text-[11px] text-slate-500 mt-1 block">주행: {(meterDistanceM / 1000).toFixed(2)}km · {Math.floor(meterSeconds / 60)}분 운행</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    onClick={() => handleCompletePayment('card')}
+                    className="p-3.5 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl text-sm shadow-lg flex items-center justify-center gap-1.5 active:scale-95"
+                  >
+                    <span>💳 카드 결제</span>
+                  </button>
+                  <button
+                    onClick={() => handleCompletePayment('cash')}
+                    className="p-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl text-sm shadow-lg flex items-center justify-center gap-1.5 active:scale-95"
+                  >
+                    <span>💵 현금 결제</span>
+                  </button>
+                </div>
+                <button
+                  onClick={() => setShowPaymentModal(false)}
+                  className="w-full py-2 bg-slate-800 text-slate-400 font-bold rounded-xl text-xs"
+                >
+                  취소 (주행 계속)
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 2. 외부 내비 모달 */}
           {showNavModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl text-center">
@@ -1915,7 +2174,7 @@
             </div>
           )}
 
-          {/* 2. 퇴근 마감 화면 */}
+          {/* 3. 퇴근 마감 화면 */}
           {showClosingModal && (
             <div className="fixed inset-0 bg-slate-950 flex flex-col justify-between p-6 z-50 text-center animate-fade-in">
               <div className="pt-12 space-y-6">
@@ -1949,7 +2208,7 @@
             </div>
           )}
 
-          {/* 3. 출근 시각 수정 모달 */}
+          {/* 4. 출근 시각 수정 모달 */}
           {showEditStartTimeModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl">
@@ -1974,7 +2233,7 @@
             </div>
           )}
 
-          {/* 4. 비주얼 쪽잠 모달 */}
+          {/* 5. 쪽잠 모달 */}
           {showNapVisualModal && (
             <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-indigo-500/60 rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl text-center">
@@ -2039,7 +2298,7 @@
             </div>
           )}
 
-          {/* 5. 건강 루틴 추가 모달 */}
+          {/* 6. 건강 루틴 추가 모달 */}
           {showAddRoutineModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-5 space-y-3.5 shadow-2xl">
@@ -2076,7 +2335,7 @@
             </div>
           )}
 
-          {/* 6. 단속 내역 상세 팝업 */}
+          {/* 7. 단속 내역 상세 팝업 */}
           {showDefenseListModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl">
@@ -2135,7 +2394,7 @@
                 <div className="flex gap-2">
                   <button
                     onClick={handleResetDefenseHistory}
-                    className="flex-1 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-300 font-bold rounded-xl text-xs border border-slate-700"
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-200 font-bold rounded-xl text-xs border border-slate-700"
                   >
                     🔄 내역 초기화
                   </button>
@@ -2150,7 +2409,7 @@
             </div>
           )}
 
-          {/* 7. 일별 장부 입력 모달 */}
+          {/* 8. 일별 장부 입력 모달 */}
           {showDailyModal && (
             <DailyRecordModal
               activeType={activeType}
@@ -2161,7 +2420,7 @@
             />
           )}
 
-          {/* 8. 세무서 양식 모달 */}
+          {/* 9. 세무서 양식 모달 */}
           {showTaxModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
