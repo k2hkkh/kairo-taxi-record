@@ -100,8 +100,8 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v4.5.1';
-    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V15';
+    const APP_VERSION = 'v4.5.2';
+    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V16';
     const DEFAULT_MAP_ZOOM = 17;
 
     const WELCOME_MESSAGES = [
@@ -119,6 +119,7 @@
       "오늘도 안전하게 무사고 완주하셨습니다. 고생 많으셨습니다!"
     ];
 
+    // 단속 카메라 DB
     const CAMERA_DB = [
       { id: 'cam1', name: '불당대로 (시청 앞)', lat: 36.8152, lon: 127.1135, limit: 50, type: 'speed' },
       { id: 'cam2', name: '번영로 (종합운동장)', lat: 36.8285, lon: 127.1210, limit: 60, type: 'speed' },
@@ -258,6 +259,10 @@
       hudSpeedLimit: 50,
       defaultOffDay: 1,
       googleSheetUrl: '',
+      defenseHistory: [
+        { id: 1, time: '18:42', name: '불당대로 (시청 앞)', type: 'speed', limit: 50, speed: 48, status: 'pass', amount: 40000 },
+        { id: 2, time: '19:15', name: '천안역 광장 (주정차)', type: 'parking', limit: 30, speed: 0, status: 'pass', amount: 40000 }
+      ],
       healthRoutines: [
         { id: 1, type: 'med', time: '18:00', title: '식후 혈압/당뇨 약 복용', done: false },
         { id: 2, type: 'meal', time: '20:30', title: '1차 속 편한 간편식 (감자/계란/샐러드)', done: false },
@@ -292,7 +297,7 @@
         let mostRecordsCount = -1;
 
         const keysToScan = [];
-        for (let i = 25; i >= 1; i--) keysToScan.push(`K_TAXI_RECORD_DATA_V${i}`);
+        for (let i = 26; i >= 1; i--) keysToScan.push(`K_TAXI_RECORD_DATA_V${i}`);
         keysToScan.push('K_TAXI_RECORD_DATA', 'k_taxi_data');
 
         for (let i = 0; i < localStorage.length; i++) {
@@ -330,6 +335,7 @@
             hudSpeedLimit: Number(p.hudSpeedLimit || 50),
             defaultOffDay: Number(p.defaultOffDay !== undefined ? p.defaultOffDay : 1),
             googleSheetUrl: p.googleSheetUrl || '',
+            defenseHistory: Array.isArray(p.defenseHistory) ? p.defenseHistory : DEFAULT_STORAGE.defenseHistory,
             healthRoutines: Array.isArray(p.healthRoutines) && p.healthRoutines.length > 0 ? p.healthRoutines : DEFAULT_STORAGE.healthRoutines,
             corporate: {
               carNumber: p.corporate?.carNumber || '충남31바3238',
@@ -621,7 +627,7 @@
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       });
 
-      // 상단 펼침 메뉴 드롭다운 상태
+      // 상단 메뉴 열림 상태
       const [isMenuOpen, setIsMenuOpen] = useState(false);
 
       const [welcomeMsg] = useState(() => WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]);
@@ -683,11 +689,15 @@
       const pipCanvasRef = useRef(null);
       const pipVideoRef = useRef(null);
 
-      // 단속 방어 / 적발 이력
-      const [defenseHistory, setDefenseHistory] = useState([
-        { id: 1, time: '18:42', name: '불당대로 (시청 앞)', type: 'speed', limit: 50, speed: 48, status: 'pass', amount: 40000 },
-        { id: 2, time: '19:15', name: '천안역 광장 (주정차)', type: 'parking', limit: 30, speed: 0, status: 'pass', amount: 40000 }
-      ]);
+      // 단속 방어 / 적발 이력 (appData 연동 영구 보존)
+      const defenseHistory = appData.defenseHistory || [];
+
+      const setDefenseHistory = (updater) => {
+        setAppData(prev => {
+          const nextHistory = typeof updater === 'function' ? updater(prev.defenseHistory || []) : updater;
+          return { ...prev, defenseHistory: nextHistory };
+        });
+      };
 
       const activeCameraTracking = useRef(null);
       const processedCameras = useRef(new Map());
@@ -930,7 +940,6 @@
         return () => cancelAnimationFrame(animId);
       }, [gpsSpeed, effectiveLimit, isOverSpeed, isNearCamera, nearbyCamera, meterStatus, meterFare, meterDistanceM]);
 
-      // 안정적인 모바일 PiP 트리거
       const togglePipMode = async () => {
         try {
           if (document.pictureInPictureElement) {
@@ -958,7 +967,7 @@
 
         } catch (err) {
           console.warn('PiP Trigger Error:', err);
-          alert('플로팅 PiP 기능을 실행할 수 없습니다. 브라우저 설정에서 [사진 속 사진(PiP)] 권한이 켜져 있는지 확인해 주세요.');
+          alert('플로팅 PiP 기능을 실행할 수 없습니다. 브라우저 설정에서 [사진 속 사진(PiP)] 권한을 허용해 주세요.');
         }
       };
 
@@ -1488,8 +1497,8 @@
             <video ref={pipVideoRef} autoPlay playsInline muted />
           </div>
 
-          {/* 상단 공통 헤더 바 */}
-          <header className="flex-shrink-0 px-3 py-2 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between z-40 relative">
+          {/* 상단 공통 심플 헤더 */}
+          <header className="flex-shrink-0 px-3.5 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative">
             <div className="flex items-center gap-2">
               <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
               <span className="text-xs font-bold text-white tracking-tight truncate max-w-[130px]">
@@ -1500,10 +1509,10 @@
               </span>
             </div>
 
-            {/* 상단 우측 [☰ 전체 메뉴] 원터치 드롭다운 버튼 */}
+            {/* 통합 [☰ 메뉴] 드롭다운 트리거 버튼 */}
             <button
               onClick={() => setIsMenuOpen(prev => !prev)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border shadow transition active:scale-95 ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border shadow-lg transition active:scale-95 ${
                 isMenuOpen
                   ? 'bg-yellow-500 text-slate-950 border-yellow-400 font-black'
                   : 'bg-slate-800 hover:bg-slate-700 text-yellow-400 border-slate-700'
@@ -1514,57 +1523,113 @@
             </button>
           </header>
 
-          {/* 상단 원터치 드롭다운 메뉴 레이어 */}
+          {/* 상단 확장 메뉴 패널 (화면 상단에서 길게 펼쳐짐) */}
           {isMenuOpen && (
-            <div className="absolute top-11 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-md border-b-2 border-yellow-500/80 shadow-2xl p-3 animate-fade-in">
-              <div className="grid grid-cols-4 gap-2">
-                <button
-                  onClick={() => { setCurrentTab('hud'); setIsMenuOpen(false); }}
-                  className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
-                    currentTab === 'hud'
-                      ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
-                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <span className="text-xl mb-1">🏎️</span>
-                  <span className="text-xs font-bold">가디언HUD</span>
-                </button>
+            <div className="absolute top-11 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-lg border-b-2 border-yellow-500/80 shadow-2xl p-4 animate-fade-in space-y-3">
+              <div>
+                <span className="text-[11px] font-bold text-slate-400 mb-1.5 block">📍 메인 화면 이동</span>
+                <div className="grid grid-cols-4 gap-2">
+                  <button
+                    onClick={() => { setCurrentTab('hud'); setIsMenuOpen(false); }}
+                    className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
+                      currentTab === 'hud'
+                        ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className="text-xl mb-1">🏎️</span>
+                    <span className="text-[11px] font-bold">가디언HUD</span>
+                  </button>
 
-                <button
-                  onClick={() => { setCurrentTab('today'); setIsMenuOpen(false); }}
-                  className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
-                    currentTab === 'today'
-                      ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
-                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <span className="text-xl mb-1">🏠</span>
-                  <span className="text-xs font-bold">오늘&건강</span>
-                </button>
+                  <button
+                    onClick={() => { setCurrentTab('today'); setIsMenuOpen(false); }}
+                    className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
+                      currentTab === 'today'
+                        ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className="text-xl mb-1">🏠</span>
+                    <span className="text-[11px] font-bold">오늘&건강</span>
+                  </button>
 
-                <button
-                  onClick={() => { setCurrentTab('calendar'); setIsMenuOpen(false); }}
-                  className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
-                    currentTab === 'calendar'
-                      ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
-                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <span className="text-xl mb-1">📅</span>
-                  <span className="text-xs font-bold">운행일지</span>
-                </button>
+                  <button
+                    onClick={() => { setCurrentTab('calendar'); setIsMenuOpen(false); }}
+                    className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
+                      currentTab === 'calendar'
+                        ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className="text-xl mb-1">📅</span>
+                    <span className="text-[11px] font-bold">운행일지</span>
+                  </button>
 
-                <button
-                  onClick={() => { setCurrentTab('settings'); setIsMenuOpen(false); }}
-                  className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
-                    currentTab === 'settings'
-                      ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
-                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <span className="text-xl mb-1">⚙️</span>
-                  <span className="text-xs font-bold">정산/설정</span>
-                </button>
+                  <button
+                    onClick={() => { setCurrentTab('settings'); setIsMenuOpen(false); }}
+                    className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
+                      currentTab === 'settings'
+                        ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className="text-xl mb-1">⚙️</span>
+                    <span className="text-[11px] font-bold">정산/설정</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800">
+                <span className="text-[11px] font-bold text-yellow-400 mb-1.5 block">🛠️ 운행 제어 도구</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => { setShowNavModal(true); setIsMenuOpen(false); }}
+                    className="p-3 bg-slate-950 hover:bg-slate-800 border border-emerald-500/50 rounded-2xl flex items-center gap-2.5 text-left text-emerald-300 font-bold text-xs shadow"
+                  >
+                    <span className="text-xl">🧭</span>
+                    <div>
+                      <div className="font-black text-white text-xs">외부 내비 실행</div>
+                      <div className="text-[10px] text-slate-400">티맵 / 카카오 / 네이버</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { togglePipMode(); setIsMenuOpen(false); }}
+                    className={`p-3 bg-slate-950 hover:bg-slate-800 border rounded-2xl flex items-center gap-2.5 text-left font-bold text-xs shadow ${
+                      isPipActive ? 'border-indigo-400 text-indigo-300' : 'border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span className="text-xl">🪟</span>
+                    <div>
+                      <div className="font-black text-white text-xs">플로팅 HUD (PiP)</div>
+                      <div className="text-[10px] text-slate-400">{isPipActive ? '● 현재 켜짐' : '내비 위 팝업 위젯'}</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { handleCycleHudMode(); }}
+                    className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-700 rounded-2xl flex items-center gap-2.5 text-left text-yellow-300 font-bold text-xs shadow"
+                  >
+                    <span className="text-xl">🔄</span>
+                    <div>
+                      <div className="font-black text-white text-xs">HUD 화면 모드</div>
+                      <div className="text-[10px] text-slate-400">{getHudCycleLabel()}</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { toggleSimDrive(); setIsMenuOpen(false); }}
+                    className={`p-3 bg-slate-950 hover:bg-slate-800 border rounded-2xl flex items-center gap-2.5 text-left font-bold text-xs shadow ${
+                      isSimDriveActive ? 'border-red-500 text-red-300' : 'border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span className="text-xl">🚗</span>
+                    <div>
+                      <div className="font-black text-white text-xs">모의주행 테스트</div>
+                      <div className="text-[10px] text-slate-400">{isSimDriveActive ? '🛑 주행 정지' : '가상 주행 시작'}</div>
+                    </div>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1715,47 +1780,6 @@
                     : 'bg-slate-950'
                 }`}
               >
-                {/* 상단 1열 컨트롤 바 */}
-                <div className="absolute top-2 left-2 right-2 z-[450] flex items-center justify-between pointer-events-auto gap-1">
-                  <div className="flex gap-1 bg-slate-950/90 backdrop-blur-md p-1 rounded-2xl border border-slate-700 shadow-2xl flex-1 overflow-x-auto">
-                    <button
-                      onClick={() => setShowNavModal(true)}
-                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-black flex items-center gap-1 shadow flex-shrink-0"
-                    >
-                      <span>🧭</span> 내비
-                    </button>
-
-                    <button
-                      onClick={togglePipMode}
-                      className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 shadow border transition flex-shrink-0 ${
-                        isPipActive
-                          ? 'bg-indigo-600 text-white border-indigo-400 animate-pulse'
-                          : 'bg-slate-800 hover:bg-slate-700 text-indigo-300 border-indigo-500/40'
-                      }`}
-                    >
-                      <span>🪟</span> {isPipActive ? 'PiP 켜짐' : '플로팅HUD'}
-                    </button>
-
-                    <button
-                      onClick={handleCycleHudMode}
-                      className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-yellow-300 rounded-xl text-[10px] font-black shadow flex-shrink-0"
-                    >
-                      🔄 회전
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={toggleSimDrive}
-                    className={`px-3 py-2 rounded-2xl text-[10px] font-black border shadow-2xl transition active:scale-95 flex-shrink-0 ${
-                      isSimDriveActive
-                        ? 'bg-red-600 text-white border-white animate-pulse'
-                        : 'bg-slate-950/90 backdrop-blur-md text-yellow-400 border-yellow-500/50'
-                    }`}
-                  >
-                    {isSimDriveActive ? '🛑 정지' : '🚗 모의주행'}
-                  </button>
-                </div>
-
                 {hudCycleStep === 1 ? (
                   <div className="relative w-full h-full flex-1 flex flex-col">
                     <div className="absolute inset-0 z-0">
@@ -1769,7 +1793,7 @@
                     </div>
 
                     {/* HUD 메인 계기판 (제한속도 + 속도계) */}
-                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-10 pb-28 pointer-events-none">
+                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-4 pb-28 pointer-events-none">
                       
                       {/* 상단 5:5 펌핑 영역: 제한속도 표지판 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
@@ -2413,7 +2437,7 @@
                 <div className="flex gap-2">
                   <button
                     onClick={handleResetDefenseHistory}
-                    className="flex-1 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-200 font-bold rounded-xl text-xs border border-slate-700"
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-300 font-bold rounded-xl text-xs border border-slate-700"
                   >
                     🔄 내역 초기화
                   </button>
