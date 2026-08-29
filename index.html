@@ -100,7 +100,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v4.5.2';
+    const APP_VERSION = 'v4.5.3';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V16';
     const DEFAULT_MAP_ZOOM = 17;
 
@@ -627,7 +627,7 @@
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       });
 
-      // 상단 메뉴 열림 상태
+      // 상단 메뉴 드롭다운 상태
       const [isMenuOpen, setIsMenuOpen] = useState(false);
 
       const [welcomeMsg] = useState(() => WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]);
@@ -658,9 +658,6 @@
       const [isAutoTracking, setIsAutoTracking] = useState(true);
       const [nearbyCamera, setNearbyCamera] = useState(null);
 
-      const [isSimDriveActive, setIsSimDriveActive] = useState(false);
-      const simDriveTimerRef = useRef(null);
-
       const [parkingCountdown, setParkingCountdown] = useState(300);
       const [isParkingStopped, setIsParkingStopped] = useState(false);
 
@@ -689,7 +686,7 @@
       const pipCanvasRef = useRef(null);
       const pipVideoRef = useRef(null);
 
-      // 단속 방어 / 적발 이력 (appData 연동 영구 보존)
+      // 단속 방어 / 적발 이력
       const defenseHistory = appData.defenseHistory || [];
 
       const setDefenseHistory = (updater) => {
@@ -781,6 +778,7 @@
 
       const handleToggleMeter = () => {
         if (meterStatus === 'empty') {
+          // 빈차 -> 주행 시작
           setMeterStatus('driving');
           setMeterFare(4000);
           setMeterDistanceM(0);
@@ -788,11 +786,18 @@
           setMeterSlowSeconds(0);
           meterPrevCoords.current = currentCoords;
           playNavigationChime('chime');
-        } else if (meterStatus === 'driving') {
+        } else if (meterStatus === 'driving' || meterStatus === 'payment') {
+          // 주행 또는 정산대기 중 -> 정산 모달 열기
           setMeterStatus('payment');
           setShowPaymentModal(true);
           playNavigationChime('chime');
         }
+      };
+
+      const handleCancelPayment = () => {
+        // 지불 취소 시 주행 상태로 정상 복귀
+        setMeterStatus('driving');
+        setShowPaymentModal(false);
       };
 
       const handleCompletePayment = (payType) => {
@@ -872,7 +877,7 @@
             ctx.textAlign = 'left';
           } else {
             ctx.fillStyle = '#f87171';
-            ctx.fillText(`🛑 지불: ${formatMoney(meterFare)}원`, 14, 25);
+            ctx.fillText(`🛑 정산: ${formatMoney(meterFare)}원`, 14, 25);
           }
 
           // 좌측 제한 표지판 (5:5 교대 펌핑)
@@ -1149,7 +1154,7 @@
       }, [isParkingStopped, parkingCountdown]);
 
       useEffect(() => {
-        if (!navigator.geolocation || isSimDriveActive) return;
+        if (!navigator.geolocation) return;
 
         navigator.geolocation.getCurrentPosition(
           (pos) => {
@@ -1275,58 +1280,7 @@
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
-      }, [isSimDriveActive, nearbyCamera, isParkingStopped, sectionAvgSpeed, meterStatus]);
-
-      const toggleSimDrive = (e) => {
-        e.stopPropagation();
-        stopAllAudio();
-
-        if (isSimDriveActive) {
-          setIsSimDriveActive(false);
-          clearInterval(simDriveTimerRef.current);
-          setGpsSpeed(0);
-          setNearbyCamera(null);
-          setIsParkingStopped(false);
-          setUserHeading(0);
-        } else {
-          setIsSimDriveActive(true);
-          let step = 0;
-
-          const route = [
-            { lat: 36.8120, lon: 127.1135, speed: 45, heading: 0, cam: null },
-            { lat: 36.8135, lon: 127.1135, speed: 64, heading: 0, cam: { id: 'sim_1', name: '불당대로 (과속단속)', limit: 50, dist: 180, type: 'speed' } },
-            { lat: 36.8150, lon: 127.1135, speed: 48, heading: 0, cam: { id: 'sim_1', name: '불당대로 (과속단속)', limit: 50, dist: 40, type: 'speed' } },
-            { lat: 36.8152, lon: 127.1150, speed: 35, heading: 90, cam: null },
-            { lat: 36.8152, lon: 127.1180, speed: 50, heading: 90, cam: null },
-            { lat: 36.8130, lon: 127.1180, speed: 40, heading: 180, cam: null },
-            { lat: 36.8110, lon: 127.1180, speed: 0, heading: 180, cam: { id: 'sim_p', name: '천안역 서부광장 (주정차)', limit: 30, dist: 50, type: 'parking' } }
-          ];
-
-          playNavigationChime('chime');
-
-          simDriveTimerRef.current = setInterval(() => {
-            const currentStep = route[step % route.length];
-            setCurrentCoords({ lat: currentStep.lat, lon: currentStep.lon });
-            setGpsSpeed(currentStep.speed);
-            setUserHeading(currentStep.heading);
-            setNearbyCamera(currentStep.cam);
-
-            if (meterStatus === 'driving') {
-              setMeterDistanceM(m => m + 35);
-            }
-
-            if (currentStep.cam && currentStep.speed > currentStep.cam.limit) {
-              playNavigationChime('warning');
-            } else if (currentStep.cam && currentStep.speed === 0) {
-              setIsParkingStopped(true);
-            } else {
-              setIsParkingStopped(false);
-            }
-
-            step++;
-          }, 2400);
-        }
-      };
+      }, [nearbyCamera, isParkingStopped, sectionAvgSpeed, meterStatus]);
 
       const passCount = defenseHistory.filter(h => h.status === 'pass').length;
       const failCount = defenseHistory.filter(h => h.status === 'fail').length;
@@ -1480,10 +1434,10 @@
       };
 
       const getHudCycleLabel = () => {
-        if (hudCycleStep === 1) return '세로 지도 (기본)';
-        if (hudCycleStep === 2) return '세로 반사 (미러)';
-        if (hudCycleStep === 3) return '가로 반사 (헤드 좌측)';
-        return '가로 반사 (헤드 우측)';
+        if (hudCycleStep === 1) return '세로 지도';
+        if (hudCycleStep === 2) return '세로 미러';
+        if (hudCycleStep === 3) return '가로(좌)';
+        return '가로(우)';
       };
 
       const DAYS_NAME = ['일', '월', '화', '수', '목', '금', '토'];
@@ -1497,33 +1451,50 @@
             <video ref={pipVideoRef} autoPlay playsInline muted />
           </div>
 
-          {/* 상단 공통 심플 헤더 */}
-          <header className="flex-shrink-0 px-3.5 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative">
-            <div className="flex items-center gap-2">
-              <span className="bg-yellow-500 text-black text-[11px] font-black px-2 py-0.5 rounded shadow">K-TAXI</span>
-              <span className="text-xs font-bold text-white tracking-tight truncate max-w-[130px]">
+          {/* 상단 툴바: [K-TAXI / 차량번호] + [🧭 내비] + [🪟 플로팅] + [☰ 메뉴] */}
+          <header className="flex-shrink-0 px-2.5 py-2 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between z-40 relative">
+            <div className="flex items-center gap-1.5 overflow-hidden">
+              <span className="bg-yellow-500 text-black text-[10px] font-black px-1.5 py-0.5 rounded shadow flex-shrink-0">K-TAXI</span>
+              <span className="text-xs font-bold text-white tracking-tight truncate max-w-[100px]">
                 {appData[activeType]?.carNumber || '충남31바3238'}
-              </span>
-              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${appData.isShiftActive ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/50' : 'bg-slate-800 text-slate-400'}`}>
-                {appData.isShiftActive ? '운행중' : '대기'}
               </span>
             </div>
 
-            {/* 통합 [☰ 메뉴] 드롭다운 트리거 버튼 */}
-            <button
-              onClick={() => setIsMenuOpen(prev => !prev)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border shadow-lg transition active:scale-95 ${
-                isMenuOpen
-                  ? 'bg-yellow-500 text-slate-950 border-yellow-400 font-black'
-                  : 'bg-slate-800 hover:bg-slate-700 text-yellow-400 border-slate-700'
-              }`}
-            >
-              <span>{isMenuOpen ? '✕' : '☰'}</span>
-              <span>{isMenuOpen ? '닫기' : '메뉴'}</span>
-            </button>
+            {/* 우측 상단 3단 퀵 컨트롤 바 */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                onClick={() => setShowNavModal(true)}
+                className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-[11px] font-black flex items-center gap-1 shadow active:scale-95 transition"
+              >
+                <span>🧭</span> 내비
+              </button>
+
+              <button
+                onClick={togglePipMode}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 shadow border transition active:scale-95 ${
+                  isPipActive
+                    ? 'bg-indigo-600 text-white border-indigo-400 animate-pulse'
+                    : 'bg-slate-800 hover:bg-slate-700 text-indigo-300 border-indigo-500/40'
+                }`}
+              >
+                <span>🪟</span> {isPipActive ? 'PiP ON' : '플로팅'}
+              </button>
+
+              <button
+                onClick={() => setIsMenuOpen(prev => !prev)}
+                className={`px-3 py-1 rounded-xl text-xs font-black flex items-center gap-1 border shadow transition active:scale-95 ${
+                  isMenuOpen
+                    ? 'bg-yellow-500 text-slate-950 border-yellow-400 font-black'
+                    : 'bg-slate-800 hover:bg-slate-700 text-yellow-400 border-slate-700'
+                }`}
+              >
+                <span>{isMenuOpen ? '✕' : '☰'}</span>
+                <span>{isMenuOpen ? '닫기' : '메뉴'}</span>
+              </button>
+            </div>
           </header>
 
-          {/* 상단 확장 메뉴 패널 (화면 상단에서 길게 펼쳐짐) */}
+          {/* 상단 원터치 드롭다운 탭 메뉴 */}
           {isMenuOpen && (
             <div className="absolute top-11 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-lg border-b-2 border-yellow-500/80 shadow-2xl p-4 animate-fade-in space-y-3">
               <div>
@@ -1575,59 +1546,6 @@
                   >
                     <span className="text-xl mb-1">⚙️</span>
                     <span className="text-[11px] font-bold">정산/설정</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-800">
-                <span className="text-[11px] font-bold text-yellow-400 mb-1.5 block">🛠️ 운행 제어 도구</span>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => { setShowNavModal(true); setIsMenuOpen(false); }}
-                    className="p-3 bg-slate-950 hover:bg-slate-800 border border-emerald-500/50 rounded-2xl flex items-center gap-2.5 text-left text-emerald-300 font-bold text-xs shadow"
-                  >
-                    <span className="text-xl">🧭</span>
-                    <div>
-                      <div className="font-black text-white text-xs">외부 내비 실행</div>
-                      <div className="text-[10px] text-slate-400">티맵 / 카카오 / 네이버</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { togglePipMode(); setIsMenuOpen(false); }}
-                    className={`p-3 bg-slate-950 hover:bg-slate-800 border rounded-2xl flex items-center gap-2.5 text-left font-bold text-xs shadow ${
-                      isPipActive ? 'border-indigo-400 text-indigo-300' : 'border-slate-700 text-slate-300'
-                    }`}
-                  >
-                    <span className="text-xl">🪟</span>
-                    <div>
-                      <div className="font-black text-white text-xs">플로팅 HUD (PiP)</div>
-                      <div className="text-[10px] text-slate-400">{isPipActive ? '● 현재 켜짐' : '내비 위 팝업 위젯'}</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { handleCycleHudMode(); }}
-                    className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-700 rounded-2xl flex items-center gap-2.5 text-left text-yellow-300 font-bold text-xs shadow"
-                  >
-                    <span className="text-xl">🔄</span>
-                    <div>
-                      <div className="font-black text-white text-xs">HUD 화면 모드</div>
-                      <div className="text-[10px] text-slate-400">{getHudCycleLabel()}</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { toggleSimDrive(); setIsMenuOpen(false); }}
-                    className={`p-3 bg-slate-950 hover:bg-slate-800 border rounded-2xl flex items-center gap-2.5 text-left font-bold text-xs shadow ${
-                      isSimDriveActive ? 'border-red-500 text-red-300' : 'border-slate-700 text-slate-300'
-                    }`}
-                  >
-                    <span className="text-xl">🚗</span>
-                    <div>
-                      <div className="font-black text-white text-xs">모의주행 테스트</div>
-                      <div className="text-[10px] text-slate-400">{isSimDriveActive ? '🛑 주행 정지' : '가상 주행 시작'}</div>
-                    </div>
                   </button>
                 </div>
               </div>
@@ -1780,6 +1698,17 @@
                     : 'bg-slate-950'
                 }`}
               >
+                {/* HUD 내부 화면 모드 전환 퀵 버튼 (좌측 상단 플로팅) */}
+                <div className="absolute top-2 left-2 z-[450] pointer-events-auto">
+                  <button
+                    onClick={handleCycleHudMode}
+                    className="px-3 py-1.5 bg-slate-950/90 hover:bg-slate-800 border border-yellow-500/70 text-yellow-300 rounded-2xl text-[11px] font-black shadow-2xl flex items-center gap-1 active:scale-95 transition"
+                  >
+                    <span>🔄</span>
+                    <span>HUD: {getHudCycleLabel()}</span>
+                  </button>
+                </div>
+
                 {hudCycleStep === 1 ? (
                   <div className="relative w-full h-full flex-1 flex flex-col">
                     <div className="absolute inset-0 z-0">
@@ -1793,7 +1722,7 @@
                     </div>
 
                     {/* HUD 메인 계기판 (제한속도 + 속도계) */}
-                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-4 pb-28 pointer-events-none">
+                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-10 pb-28 pointer-events-none">
                       
                       {/* 상단 5:5 펌핑 영역: 제한속도 표지판 */}
                       <div className="flex-1 flex flex-col items-center justify-center p-2">
@@ -1870,10 +1799,10 @@
                                 ? 'bg-yellow-500 text-black animate-pulse'
                                 : meterStatus === 'driving'
                                 ? 'bg-emerald-600 text-white'
-                                : 'bg-red-600 text-white'
+                                : 'bg-red-600 text-white animate-bounce'
                             }`}
                           >
-                            {meterStatus === 'empty' ? '🚖 빈차 (터치시 승차)' : meterStatus === 'driving' ? '🚕 주행 (터치시 지불)' : '🛑 정산 대기'}
+                            {meterStatus === 'empty' ? '🚖 빈차 (터치시 승차)' : meterStatus === 'driving' ? '🚕 주행 (터치시 지불)' : '🛑 정산 대기 (터치시 완료)'}
                           </button>
                           
                           {meterStatus === 'driving' && (
@@ -2187,8 +2116,8 @@
                   </button>
                 </div>
                 <button
-                  onClick={() => setShowPaymentModal(false)}
-                  className="w-full py-2 bg-slate-800 text-slate-400 font-bold rounded-xl text-xs"
+                  onClick={handleCancelPayment}
+                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs"
                 >
                   취소 (주행 계속)
                 </button>
