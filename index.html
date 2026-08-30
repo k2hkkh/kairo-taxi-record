@@ -12,16 +12,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#020617" />
   
-  <title>K-TAXI 스마트 가디언 HUD & 미터기</title>
-  <!-- Tailwind CSS CDN -->
+  <title>K-TAXI 스마트 속도계 & 운행기록</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Leaflet 지도 라이브러리 -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- React 18 & ReactDOM -->
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <!-- Babel Standalone -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
   <style>
     html, body, #root {
@@ -43,30 +37,30 @@
 
     /* 5:5 교대 펌핑 애니메이션 */
     @keyframes pulse-top-grow {
-      0%, 100% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.95)); }
-      50% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
+      0%, 100% { transform: scale(1.06); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.95)); }
+      50% { transform: scale(0.95); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
     }
     @keyframes pulse-bottom-grow {
-      0%, 100% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
-      50% { transform: scale(1.08); filter: drop-shadow(0 0 25px rgba(0, 245, 255, 0.95)); }
+      0%, 100% { transform: scale(0.95); filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.4)); }
+      50% { transform: scale(1.06); filter: drop-shadow(0 0 25px rgba(0, 245, 255, 0.95)); }
     }
     .animate-top-pump { animation: pulse-top-grow 0.85s infinite ease-in-out; }
     .animate-bottom-pump { animation: pulse-bottom-grow 0.85s infinite ease-in-out; }
 
     /* 네온 스트로브 점멸 */
     @keyframes strobe-warning {
-      0% { background-color: rgba(239, 68, 68, 0.35); border-color: #ef4444; }
-      25% { background-color: rgba(234, 179, 8, 0.35); border-color: #eab308; }
-      50% { background-color: rgba(6, 182, 212, 0.35); border-color: #06b6d4; }
-      75% { background-color: rgba(168, 85, 247, 0.35); border-color: #a855f7; }
-      100% { background-color: rgba(239, 68, 68, 0.35); border-color: #ef4444; }
+      0% { background-color: rgba(239, 68, 68, 0.4); border-color: #ef4444; }
+      25% { background-color: rgba(234, 179, 8, 0.4); border-color: #eab308; }
+      50% { background-color: rgba(6, 182, 212, 0.4); border-color: #06b6d4; }
+      75% { background-color: rgba(168, 85, 247, 0.4); border-color: #a855f7; }
+      100% { background-color: rgba(239, 68, 68, 0.4); border-color: #ef4444; }
     }
     .animate-strobe-alert { animation: strobe-warning 0.5s infinite linear; }
 
     /* 속도계 폰트 */
     .font-speed-hollow {
       color: rgba(255, 255, 255, 0.15);
-      -webkit-text-stroke: 2.5px rgba(255, 255, 255, 0.65);
+      -webkit-text-stroke: 2.5px rgba(255, 255, 255, 0.7);
       text-shadow: 0 4px 14px rgba(0, 0, 0, 0.95);
     }
     .font-speed-cyan {
@@ -79,30 +73,20 @@
       -webkit-text-stroke: 2.5px #ffffff;
       text-shadow: 0 0 32px rgba(255, 30, 68, 1), 0 4px 14px rgba(0, 0, 0, 0.95);
     }
-
-    .leaflet-container {
-      background-color: #1e293b !important;
-      font-family: inherit;
-      width: 100% !important;
-      height: 100% !important;
-      z-index: 1;
-    }
-    .leaflet-control-attribution { display: none !important; }
   </style>
 </head>
 <body class="select-none antialiased bg-slate-950">
   <div id="root">
-    <div class="h-full flex items-center justify-center text-yellow-400 font-bold text-sm bg-slate-950">
-      K-TAXI 스마트 가디언 로딩 중...
+    <div class="h-full flex items-center justify-center text-yellow-400 font-bold text-base bg-slate-950">
+      K-TAXI 시스템 로딩 중...
     </div>
   </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v4.5.3';
-    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V16';
-    const DEFAULT_MAP_ZOOM = 17;
+    const APP_VERSION = 'v4.6.0';
+    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V17';
 
     const WELCOME_MESSAGES = [
       "오늘도 안전운전 하실 거죠? 안전이 가장 큰 수입입니다!",
@@ -119,7 +103,6 @@
       "오늘도 안전하게 무사고 완주하셨습니다. 고생 많으셨습니다!"
     ];
 
-    // 단속 카메라 DB
     const CAMERA_DB = [
       { id: 'cam1', name: '불당대로 (시청 앞)', lat: 36.8152, lon: 127.1135, limit: 50, type: 'speed' },
       { id: 'cam2', name: '번영로 (종합운동장)', lat: 36.8285, lon: 127.1210, limit: 60, type: 'speed' },
@@ -143,20 +126,7 @@
       return Math.round(R * c);
     };
 
-    const calculateBearing = (startLat, startLng, destLat, destLng) => {
-      const startLatRad = startLat * Math.PI / 180;
-      const startLngRad = startLng * Math.PI / 180;
-      const destLatRad = destLat * Math.PI / 180;
-      const destLngRad = destLng * Math.PI / 180;
-      const y = Math.sin(destLngRad - startLngRad) * Math.cos(destLatRad);
-      const x = Math.cos(startLatRad) * Math.sin(destLatRad) -
-                Math.sin(startLatRad) * Math.cos(destLatRad) * Math.cos(destLngRad - startLngRad);
-      const brng = Math.atan2(y, x) * 180 / Math.PI;
-      return (brng + 360) % 360;
-    };
-
     let activeAudioSources = [];
-
     const getAudioContext = () => {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return null;
@@ -184,7 +154,6 @@
         stopAllAudio();
         const ctx = getAudioContext();
         if (!ctx) return;
-
         const now = ctx.currentTime;
 
         if (type === 'chime') {
@@ -217,7 +186,7 @@
           });
         }
       } catch (e) {
-        console.warn('Audio Engine Error:', e);
+        console.warn('Audio Error:', e);
       }
     };
 
@@ -264,10 +233,10 @@
         { id: 2, time: '19:15', name: '천안역 광장 (주정차)', type: 'parking', limit: 30, speed: 0, status: 'pass', amount: 40000 }
       ],
       healthRoutines: [
-        { id: 1, type: 'med', time: '18:00', title: '식후 혈압/당뇨 약 복용', done: false },
-        { id: 2, type: 'meal', time: '20:30', title: '1차 속 편한 간편식 (감자/계란/샐러드)', done: false },
-        { id: 3, type: 'stretch', time: '23:00', title: '가스 충전 시 3분 허리 신전 스트레칭', done: false },
-        { id: 4, type: 'nap', time: '01:30', title: '새벽 20분 전략적 파워 쪽잠', done: false }
+        { id: 1, type: 'med', time: '18:00', title: '저녁 혈압/당뇨 약 복용', done: false },
+        { id: 2, type: 'meal', time: '20:30', title: '간편 건강식 (감자/계란/샐러드)', done: false },
+        { id: 3, type: 'stretch', time: '23:00', title: '충전 시 허리 스트레칭', done: false },
+        { id: 4, type: 'nap', time: '01:30', title: '새벽 20분 파워 쪽잠', done: false }
       ],
       corporate: {
         carNumber: '충남31바3238',
@@ -357,171 +326,6 @@
       return DEFAULT_STORAGE;
     };
 
-    const createDynamicUserIcon = (cameraType, heading = 0) => {
-      if (!window.L) return null;
-      const rotStyle = `transform: rotate(${heading}deg); transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);`;
-
-      return L.divIcon({
-        className: 'custom-user-morph-marker',
-        html: `
-          <div class="relative flex items-center justify-center" style="width:52px; height:52px; ${rotStyle}">
-            <div class="absolute w-10 h-10 rounded-full bg-blue-500/30 animate-ping"></div>
-            <svg viewBox="0 0 48 48" class="w-12 h-12 drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)]" style="filter: drop-shadow(0 0 8px rgba(250,204,21,0.9));">
-              <polygon points="16,10 4,-6 44,-6 32,10" fill="rgba(254,240,138,0.35)"/>
-              <rect x="12" y="8" width="24" height="34" rx="8" fill="#facc15" stroke="#0f172a" stroke-width="2.5"/>
-              <path d="M 15 17 L 33 17 L 31 23 L 17 23 Z" fill="#0f172a"/>
-              <path d="M 17 33 L 31 33 L 32 37 L 16 37 Z" fill="#0f172a"/>
-              <rect x="18" y="24" width="12" height="6" rx="2" fill="#ef4444" stroke="#ffffff" stroke-width="1"/>
-              <text x="24" y="28.5" font-size="3.5" font-weight="900" fill="#ffffff" text-anchor="middle">TAXI</text>
-              <circle cx="15" cy="9" r="2" fill="#ffffff"/>
-              <circle cx="33" cy="9" r="2" fill="#ffffff"/>
-            </svg>
-          </div>
-        `,
-        iconSize: [52, 52],
-        iconAnchor: [26, 26]
-      });
-    };
-
-    function FullscreenLiveMapView({ currentCoords, nearbyCamera, isAutoTracking, setIsAutoTracking, userHeading }) {
-      const mapContainerRef = useRef(null);
-      const mapInstanceRef = useRef(null);
-      const userMarkerRef = useRef(null);
-      const autoResumeTimer = useRef(null);
-
-      useEffect(() => {
-        if (!mapContainerRef.current || !window.L) return;
-
-        if (mapInstanceRef.current) {
-          try { mapInstanceRef.current.remove(); } catch(e) {}
-          mapInstanceRef.current = null;
-        }
-        if (mapContainerRef.current._leaflet_id) {
-          delete mapContainerRef.current._leaflet_id;
-        }
-
-        const defaultLat = currentCoords?.lat || 36.8152;
-        const defaultLon = currentCoords?.lon || 127.1135;
-
-        try {
-          const map = L.map(mapContainerRef.current, {
-            center: [defaultLat, defaultLon],
-            zoom: DEFAULT_MAP_ZOOM,
-            zoomControl: false,
-            attributionControl: false
-          });
-
-          L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            minZoom: 12
-          }).addTo(map);
-
-          map.on('dragstart zoomstart', () => {
-            setIsAutoTracking(false);
-            if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
-          });
-
-          map.on('dragend zoomend', () => {
-            if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
-            autoResumeTimer.current = setTimeout(() => {
-              setIsAutoTracking(true);
-            }, 6000);
-          });
-
-          CAMERA_DB.forEach((cam) => {
-            const camIcon = L.divIcon({
-              className: 'custom-cam-pin',
-              html: `<div style="background-color:#dc2626;color:white;font-weight:900;border:3px solid #ffffff;border-radius:9999px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:13px;box-shadow:0 3px 10px rgba(0,0,0,0.6);">${cam.limit}</div>`,
-              iconSize: [34, 34],
-              iconAnchor: [17, 17]
-            });
-            L.marker([cam.lat, cam.lon], { icon: camIcon })
-              .addTo(map)
-              .bindPopup(`<b>${cam.name}</b><br>제한속도: ${cam.limit}km/h`);
-          });
-
-          const initialIcon = createDynamicUserIcon(null, userHeading);
-          if (initialIcon) {
-            userMarkerRef.current = L.marker([defaultLat, defaultLon], { icon: initialIcon }).addTo(map);
-          }
-
-          mapInstanceRef.current = map;
-        } catch(err) {
-          console.warn('Leaflet Init Warn:', err);
-        }
-
-        const resizeTimer = setTimeout(() => {
-          if (mapInstanceRef.current) {
-            try { mapInstanceRef.current.invalidateSize(); } catch(e) {}
-          }
-        }, 300);
-
-        return () => {
-          clearTimeout(resizeTimer);
-          if (autoResumeTimer.current) clearTimeout(autoResumeTimer.current);
-          if (mapInstanceRef.current) {
-            try { mapInstanceRef.current.remove(); } catch(e) {}
-            mapInstanceRef.current = null;
-          }
-        };
-      }, []);
-
-      useEffect(() => {
-        if (userMarkerRef.current) {
-          const activeType = nearbyCamera ? nearbyCamera.type : null;
-          const icon = createDynamicUserIcon(activeType, userHeading);
-          if (icon) userMarkerRef.current.setIcon(icon);
-        }
-      }, [nearbyCamera, userHeading]);
-
-      useEffect(() => {
-        if (mapInstanceRef.current && currentCoords) {
-          const { lat, lon } = currentCoords;
-          if (userMarkerRef.current) {
-            userMarkerRef.current.setLatLng([lat, lon]);
-          }
-          if (isAutoTracking) {
-            try {
-              mapInstanceRef.current.panTo([lat, lon], { animate: true, duration: 0.8 });
-            } catch(e) {}
-          }
-        }
-      }, [currentCoords, isAutoTracking]);
-
-      const handleRecenter = (e) => {
-        e.stopPropagation();
-        if (mapInstanceRef.current && currentCoords) {
-          try {
-            mapInstanceRef.current.setView([currentCoords.lat, currentCoords.lon], DEFAULT_MAP_ZOOM, {
-              animate: true,
-              duration: 0.8
-            });
-            setIsAutoTracking(true);
-          } catch(e) {}
-        }
-      };
-
-      return (
-        <div className="w-full h-full relative flex-1 flex flex-col bg-slate-950">
-          <div ref={mapContainerRef} className="w-full h-full flex-1" />
-
-          {!isAutoTracking && (
-            <button
-              onClick={handleRecenter}
-              className="absolute bottom-28 right-4 z-[450] px-3.5 py-2 bg-slate-900/95 hover:bg-slate-800 text-yellow-400 font-black text-xs rounded-2xl border-2 border-yellow-500 shadow-2xl flex items-center gap-1.5 active:scale-95 transition pointer-events-auto"
-            >
-              <span className="text-base">📍</span> 내 위치로
-            </button>
-          )}
-
-          <div className="absolute bottom-28 left-4 z-[400] bg-slate-950/90 border border-slate-700 px-2.5 py-1 rounded-xl text-[10px] text-slate-200 font-bold flex items-center gap-1.5 shadow pointer-events-none">
-            <span className={`w-2 h-2 rounded-full ${isAutoTracking ? 'bg-emerald-400 animate-pulse' : 'bg-orange-400'}`}></span>
-            {isAutoTracking ? '주행 추적 중' : '자유 탐색'}
-          </div>
-        </div>
-      );
-    }
-
     function SlideToUnlock({ onUnlock, text = "오른쪽으로 밀어서 퇴근하기" }) {
       const [dragX, setDragX] = useState(0);
       const [isDragging, setIsDragging] = useState(false);
@@ -557,7 +361,7 @@
       return (
         <div
           ref={containerRef}
-          className="relative w-full h-16 bg-slate-900/90 border-2 border-orange-500/70 rounded-2xl overflow-hidden flex items-center justify-center select-none shadow-2xl"
+          className="relative w-full h-16 bg-slate-900 border-2 border-orange-500/80 rounded-2xl overflow-hidden flex items-center justify-center select-none shadow-2xl"
           onTouchStart={(e) => handleStart(e.touches[0].clientX)}
           onTouchMove={(e) => handleMove(e.touches[0].clientX)}
           onTouchEnd={handleEnd}
@@ -571,16 +375,16 @@
             style={{ width: `${dragX + 32}px` }}
           />
 
-          <span className="text-xs font-black text-slate-300 tracking-wider flex items-center gap-1.5 pointer-events-none animate-pulse">
+          <span className="text-sm font-black text-slate-200 tracking-wider flex items-center gap-2 pointer-events-none">
             <span>{text}</span>
             <span className="text-orange-400 font-bold">➔➔</span>
           </span>
 
           <div
-            className="absolute left-1.5 top-1.5 bottom-1.5 w-14 bg-gradient-to-tr from-orange-600 to-red-500 hover:from-orange-500 hover:to-red-400 text-white font-black text-xl rounded-xl flex items-center justify-center shadow-lg cursor-grab active:cursor-grabbing transition-transform duration-75"
+            className="absolute left-1.5 top-1.5 bottom-1.5 w-14 bg-gradient-to-tr from-orange-500 to-red-600 text-white font-black text-base rounded-xl flex items-center justify-center shadow-lg cursor-grab active:cursor-grabbing transition-transform duration-75"
             style={{ transform: `translateX(${dragX}px)` }}
           >
-            🏁
+            퇴근
           </div>
         </div>
       );
@@ -596,7 +400,7 @@
             <button
               type="button"
               onClick={() => onChange(0)}
-              className="absolute left-2 z-10 text-slate-400 hover:text-red-400 bg-slate-800 active:bg-slate-700 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-black"
+              className="absolute left-2 z-10 text-slate-400 hover:text-red-400 bg-slate-800 active:bg-slate-700 rounded-full w-6 h-6 flex items-center justify-center text-xs font-black"
               tabIndex={-1}
             >
               ✕
@@ -612,7 +416,7 @@
               const raw = e.target.value.replace(/[^0-9]/g, '');
               onChange(raw ? Number(raw) : 0);
             }}
-            className={`w-full bg-slate-900 border border-slate-700 p-2 text-sm rounded-xl text-right font-bold ${colorClass} focus:border-yellow-500 focus:outline-none ${className}`}
+            className={`w-full bg-slate-900 border border-slate-700 p-2.5 text-base rounded-xl text-right font-bold ${colorClass} focus:border-yellow-500 focus:outline-none ${className}`}
           />
         </div>
       );
@@ -629,6 +433,13 @@
 
       // 상단 메뉴 드롭다운 상태
       const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+      // HUD 화면 전환 시 1초 토스트 알림
+      const [hudToastText, setHudToastText] = useState('');
+      const hudToastTimer = useRef(null);
+
+      // 설정 탭 구글 주소 잠금 상태 (기본 잠김)
+      const [isSheetUrlLocked, setIsSheetUrlLocked] = useState(true);
 
       const [welcomeMsg] = useState(() => WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]);
       const [closingMsg, setClosingMsg] = useState('');
@@ -651,27 +462,21 @@
 
       const [gpsSpeed, setGpsSpeed] = useState(0);
       const [currentCoords, setCurrentCoords] = useState(null);
-      const [userHeading, setUserHeading] = useState(0);
       const prevCoordsRef = useRef(null);
 
+      // HUD 화면 모드: 1(일반 세로), 2(유리 반사 세로), 3(유리 반사 가로 좌), 4(유리 반사 가로 우)
       const [hudCycleStep, setHudCycleStep] = useState(1);
-      const [isAutoTracking, setIsAutoTracking] = useState(true);
       const [nearbyCamera, setNearbyCamera] = useState(null);
 
       const [parkingCountdown, setParkingCountdown] = useState(300);
       const [isParkingStopped, setIsParkingStopped] = useState(false);
-
-      const [sectionAvgSpeed, setSectionAvgSpeed] = useState(0);
-      const sectionStartTime = useRef(null);
-      const sectionTotalSpeed = useRef(0);
-      const sectionSpeedSamples = useRef(0);
 
       const [napTotalMinutes, setNapTotalMinutes] = useState(20);
       const [napTimerSeconds, setNapTimerSeconds] = useState(20 * 60);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
 
       // 스마트 미터기 상태 엔진
-      const [meterStatus, setMeterStatus] = useState('empty');
+      const [meterStatus, setMeterStatus] = useState('empty'); // empty, driving, payment
       const [meterFare, setMeterFare] = useState(0);
       const [meterDistanceM, setMeterDistanceM] = useState(0);
       const [meterSeconds, setMeterSeconds] = useState(0);
@@ -681,7 +486,7 @@
       const meterPrevCoords = useRef(null);
       const meterTimerRef = useRef(null);
 
-      // PiP 오버레이 및 동기화 캔버스
+      // PiP 오버레이 및 캔버스
       const [isPipActive, setIsPipActive] = useState(false);
       const pipCanvasRef = useRef(null);
       const pipVideoRef = useRef(null);
@@ -743,7 +548,7 @@
         };
       }, [currentTab]);
 
-      // 미터기 요금 계산 로직
+      // 미터기 요금 계산 로직 (천안·아산 중형택시 기준)
       useEffect(() => {
         if (meterStatus === 'driving') {
           meterTimerRef.current = setInterval(() => {
@@ -776,9 +581,9 @@
         return () => { if (meterTimerRef.current) clearInterval(meterTimerRef.current); };
       }, [meterStatus, gpsSpeed, meterSlowSeconds]);
 
-      const handleToggleMeter = () => {
+      const handleToggleMeter = (e) => {
+        if (e) e.stopPropagation();
         if (meterStatus === 'empty') {
-          // 빈차 -> 주행 시작
           setMeterStatus('driving');
           setMeterFare(4000);
           setMeterDistanceM(0);
@@ -787,7 +592,6 @@
           meterPrevCoords.current = currentCoords;
           playNavigationChime('chime');
         } else if (meterStatus === 'driving' || meterStatus === 'payment') {
-          // 주행 또는 정산대기 중 -> 정산 모달 열기
           setMeterStatus('payment');
           setShowPaymentModal(true);
           playNavigationChime('chime');
@@ -795,7 +599,6 @@
       };
 
       const handleCancelPayment = () => {
-        // 지불 취소 시 주행 상태로 정상 복귀
         setMeterStatus('driving');
         setShowPaymentModal(false);
       };
@@ -864,24 +667,24 @@
           // 상단 미터기 상태
           ctx.fillStyle = '#0f172a';
           ctx.fillRect(6, 6, canvas.width - 12, 28);
-          ctx.font = 'bold 13px sans-serif';
+          ctx.font = 'bold 14px sans-serif';
           if (meterStatus === 'empty') {
             ctx.fillStyle = '#facc15';
-            ctx.fillText('🚖 빈차 [대기]', 14, 25);
+            ctx.fillText('빈차 대기 중', 14, 25);
           } else if (meterStatus === 'driving') {
             ctx.fillStyle = '#4ade80';
-            ctx.fillText(`🚕 주행 (${(meterDistanceM / 1000).toFixed(1)}km)`, 14, 25);
+            ctx.fillText(`주행 중 (${(meterDistanceM / 1000).toFixed(1)}km)`, 14, 25);
             ctx.fillStyle = '#f8fafc';
             ctx.textAlign = 'right';
             ctx.fillText(`${formatMoney(meterFare)}원`, canvas.width - 16, 25);
             ctx.textAlign = 'left';
           } else {
             ctx.fillStyle = '#f87171';
-            ctx.fillText(`🛑 정산: ${formatMoney(meterFare)}원`, 14, 25);
+            ctx.fillText(`정산 대기: ${formatMoney(meterFare)}원`, 14, 25);
           }
 
           // 좌측 제한 표지판 (5:5 교대 펌핑)
-          const topScale = isNearCamera ? (isTopPumping ? 1.08 : 0.94) : 1.0;
+          const topScale = isNearCamera ? (isTopPumping ? 1.06 : 0.95) : 1.0;
           ctx.save();
           ctx.translate(65, 95);
           ctx.scale(topScale, topScale);
@@ -901,7 +704,7 @@
           ctx.restore();
 
           // 우측 실시간 속도계 (5:5 교대 펌핑)
-          const bottomScale = isNearCamera ? (!isTopPumping ? 1.08 : 0.94) : 1.0;
+          const bottomScale = isNearCamera ? (!isTopPumping ? 1.06 : 0.95) : 1.0;
           ctx.save();
           ctx.translate(200, 95);
           ctx.scale(bottomScale, bottomScale);
@@ -935,7 +738,7 @@
             ctx.fillStyle = isOverSpeed ? '#ef4444' : '#facc15';
             ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(`🚨 ${nearbyCamera.name} (${nearbyCamera.dist}m)`, 150, 150);
+            ctx.fillText(`${nearbyCamera.name} (${nearbyCamera.dist}m)`, 150, 150);
           }
 
           animId = requestAnimationFrame(renderPip);
@@ -972,7 +775,7 @@
 
         } catch (err) {
           console.warn('PiP Trigger Error:', err);
-          alert('플로팅 PiP 기능을 실행할 수 없습니다. 브라우저 설정에서 [사진 속 사진(PiP)] 권한을 허용해 주세요.');
+          alert('화면 위 팝업 창을 열 수 없습니다. 브라우저 설정에서 [사진 속 사진(PiP)] 권한을 허용해 주세요.');
         }
       };
 
@@ -1148,7 +951,7 @@
           };
           setDefenseHistory(prev => [failEntry, ...prev]);
           setIsParkingStopped(false);
-          alert('🚨 주정차 5분 유예시간이 초과되었습니다! 즉시 이동하세요.');
+          alert('주정차 5분 유예시간이 초과되었습니다! 즉시 이동하세요.');
         }
         return () => clearInterval(timer);
       }, [isParkingStopped, parkingCountdown]);
@@ -1166,7 +969,7 @@
             prevCoordsRef.current = { lat, lon, time: Date.now() };
             meterPrevCoords.current = { lat, lon };
           },
-          (err) => console.warn('Initial GPS Warn:', err.message),
+          (err) => console.warn('GPS Initial:', err.message),
           { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
         );
 
@@ -1189,19 +992,6 @@
               }
             } else {
               meterPrevCoords.current = { lat, lon };
-            }
-
-            if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
-              setUserHeading(Math.round(pos.coords.heading));
-            } else if (prevCoordsRef.current) {
-              const dist = calculateDistanceMeters(prevCoordsRef.current.lat, prevCoordsRef.current.lon, lat, lon);
-              if (dist >= 2) {
-                const calculatedBrng = calculateBearing(prevCoordsRef.current.lat, prevCoordsRef.current.lon, lat, lon);
-                setUserHeading(Math.round(calculatedBrng));
-                prevCoordsRef.current = { lat, lon, time: Date.now() };
-              }
-            } else {
-              prevCoordsRef.current = { lat, lon, time: Date.now() };
             }
 
             let closest = null;
@@ -1275,12 +1065,12 @@
               stopAllAudio();
             }
           },
-          (err) => console.warn('GPS Watch Error:', err.message),
+          (err) => console.warn('GPS Watch:', err.message),
           { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
-      }, [nearbyCamera, isParkingStopped, sectionAvgSpeed, meterStatus]);
+      }, [nearbyCamera, isParkingStopped, meterStatus]);
 
       const passCount = defenseHistory.filter(h => h.status === 'pass').length;
       const failCount = defenseHistory.filter(h => h.status === 'fail').length;
@@ -1339,7 +1129,7 @@
           setIsNapTimerActive(false);
           playNavigationChime('warning');
           if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 1000]);
-          alert('🔔 쪽잠이 종료되었습니다! 안전 운행을 시작하세요.');
+          alert('쪽잠이 종료되었습니다! 안전 운행을 시작하세요.');
         }
         return () => clearInterval(interval);
       }, [isNapTimerActive, napTimerSeconds]);
@@ -1422,8 +1212,21 @@
         return cells;
       }, [currentYearMonth]);
 
+      // HUD 화면 터치 시 순환 전환 및 1초 토스트 알림
       const handleCycleHudMode = () => {
-        setHudCycleStep(prev => (prev % 4) + 1);
+        const nextStep = (hudCycleStep % 4) + 1;
+        setHudCycleStep(nextStep);
+
+        let label = '일반 세로 화면';
+        if (nextStep === 2) label = '유리 반사용 세로 화면';
+        if (nextStep === 3) label = '유리 반사용 가로 (왼쪽)';
+        if (nextStep === 4) label = '유리 반사용 가로 (오른쪽)';
+
+        setHudToastText(label);
+        if (hudToastTimer.current) clearTimeout(hudToastTimer.current);
+        hudToastTimer.current = setTimeout(() => {
+          setHudToastText('');
+        }, 1200);
       };
 
       const getHudTransformClass = () => {
@@ -1431,13 +1234,6 @@
         if (hudCycleStep === 3) return 'hud-rot90-left';
         if (hudCycleStep === 4) return 'hud-rot90-right';
         return '';
-      };
-
-      const getHudCycleLabel = () => {
-        if (hudCycleStep === 1) return '세로 지도';
-        if (hudCycleStep === 2) return '세로 미러';
-        if (hudCycleStep === 3) return '가로(좌)';
-        return '가로(우)';
       };
 
       const DAYS_NAME = ['일', '월', '화', '수', '목', '금', '토'];
@@ -1451,101 +1247,122 @@
             <video ref={pipVideoRef} autoPlay playsInline muted />
           </div>
 
-          {/* 상단 툴바: [K-TAXI / 차량번호] + [🧭 내비] + [🪟 플로팅] + [☰ 메뉴] */}
-          <header className="flex-shrink-0 px-2.5 py-2 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between z-40 relative">
-            <div className="flex items-center gap-1.5 overflow-hidden">
-              <span className="bg-yellow-500 text-black text-[10px] font-black px-1.5 py-0.5 rounded shadow flex-shrink-0">K-TAXI</span>
-              <span className="text-xs font-bold text-white tracking-tight truncate max-w-[100px]">
+          {/* 상단 간결 툴바: [K-TAXI] [차량번호] + [내비] + [팝업창] + [메뉴] */}
+          <header className="flex-shrink-0 px-3 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative">
+            <div className="flex items-center gap-2 overflow-hidden">
+              <span className="bg-yellow-500 text-black text-xs font-black px-2 py-0.5 rounded shadow flex-shrink-0">K-TAXI</span>
+              <span className="text-sm font-bold text-white tracking-tight truncate max-w-[110px]">
                 {appData[activeType]?.carNumber || '충남31바3238'}
               </span>
             </div>
 
-            {/* 우측 상단 3단 퀵 컨트롤 바 */}
-            <div className="flex items-center gap-1 flex-shrink-0">
+            <div className="flex items-center gap-1.5 flex-shrink-0">
               <button
                 onClick={() => setShowNavModal(true)}
-                className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-[11px] font-black flex items-center gap-1 shadow active:scale-95 transition"
+                className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-black shadow active:scale-95 transition"
               >
-                <span>🧭</span> 내비
+                길안내 내비
               </button>
 
               <button
                 onClick={togglePipMode}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 shadow border transition active:scale-95 ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-black shadow border transition active:scale-95 ${
                   isPipActive
                     ? 'bg-indigo-600 text-white border-indigo-400 animate-pulse'
                     : 'bg-slate-800 hover:bg-slate-700 text-indigo-300 border-indigo-500/40'
                 }`}
               >
-                <span>🪟</span> {isPipActive ? 'PiP ON' : '플로팅'}
+                {isPipActive ? '팝업 켜짐' : '팝업 창'}
               </button>
 
               <button
                 onClick={() => setIsMenuOpen(prev => !prev)}
-                className={`px-3 py-1 rounded-xl text-xs font-black flex items-center gap-1 border shadow transition active:scale-95 ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-black border shadow transition active:scale-95 ${
                   isMenuOpen
                     ? 'bg-yellow-500 text-slate-950 border-yellow-400 font-black'
                     : 'bg-slate-800 hover:bg-slate-700 text-yellow-400 border-slate-700'
                 }`}
               >
-                <span>{isMenuOpen ? '✕' : '☰'}</span>
-                <span>{isMenuOpen ? '닫기' : '메뉴'}</span>
+                {isMenuOpen ? '닫기' : '전체 메뉴'}
               </button>
             </div>
           </header>
 
-          {/* 상단 원터치 드롭다운 탭 메뉴 */}
+          {/* 상단 큰 글씨 순우리말 텍스트 메뉴 패널 */}
           {isMenuOpen && (
-            <div className="absolute top-11 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-lg border-b-2 border-yellow-500/80 shadow-2xl p-4 animate-fade-in space-y-3">
+            <div className="absolute top-12 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-lg border-b-2 border-yellow-500 shadow-2xl p-4 animate-fade-in space-y-4">
               <div>
-                <span className="text-[11px] font-bold text-slate-400 mb-1.5 block">📍 메인 화면 이동</span>
-                <div className="grid grid-cols-4 gap-2">
+                <span className="text-xs font-bold text-slate-400 mb-2 block">화면 이동</span>
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => { setCurrentTab('hud'); setIsMenuOpen(false); }}
-                    className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
+                    className={`py-3.5 px-3 rounded-2xl text-left border transition ${
                       currentTab === 'hud'
                         ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    <span className="text-xl mb-1">🏎️</span>
-                    <span className="text-[11px] font-bold">가디언HUD</span>
+                    <div className="text-sm font-black">속도계 화면</div>
+                    <div className={`text-xs mt-0.5 ${currentTab === 'hud' ? 'text-slate-800' : 'text-slate-400'}`}>제한속도 및 실시간 계기판</div>
                   </button>
 
                   <button
                     onClick={() => { setCurrentTab('today'); setIsMenuOpen(false); }}
-                    className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
+                    className={`py-3.5 px-3 rounded-2xl text-left border transition ${
                       currentTab === 'today'
                         ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    <span className="text-xl mb-1">🏠</span>
-                    <span className="text-[11px] font-bold">오늘&건강</span>
+                    <div className="text-sm font-black">휴식 & 건강 알림</div>
+                    <div className={`text-xs mt-0.5 ${currentTab === 'today' ? 'text-slate-800' : 'text-slate-400'}`}>약 복용 및 쪽잠 타이머</div>
                   </button>
 
                   <button
                     onClick={() => { setCurrentTab('calendar'); setIsMenuOpen(false); }}
-                    className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
+                    className={`py-3.5 px-3 rounded-2xl text-left border transition ${
                       currentTab === 'calendar'
                         ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    <span className="text-xl mb-1">📅</span>
-                    <span className="text-[11px] font-bold">운행일지</span>
+                    <div className="text-sm font-black">운행 기록 달력</div>
+                    <div className={`text-xs mt-0.5 ${currentTab === 'calendar' ? 'text-slate-800' : 'text-slate-400'}`}>일별 매출 및 퇴근 정산</div>
                   </button>
 
                   <button
                     onClick={() => { setCurrentTab('settings'); setIsMenuOpen(false); }}
-                    className={`py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
+                    className={`py-3.5 px-3 rounded-2xl text-left border transition ${
                       currentTab === 'settings'
                         ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    <span className="text-xl mb-1">⚙️</span>
-                    <span className="text-[11px] font-bold">정산/설정</span>
+                    <div className="text-sm font-black">기본 설정</div>
+                    <div className={`text-xs mt-0.5 ${currentTab === 'settings' ? 'text-slate-800' : 'text-slate-400'}`}>차량번호 및 클라우드 연동</div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800">
+                <span className="text-xs font-bold text-yellow-400 mb-2 block">빠른 도구</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => { setShowNavModal(true); setIsMenuOpen(false); }}
+                    className="p-3 bg-slate-950 hover:bg-slate-800 border border-emerald-500/60 rounded-2xl text-left text-emerald-300 font-bold text-xs shadow"
+                  >
+                    <div className="text-sm font-black text-white">길안내 내비 켜기</div>
+                    <div className="text-xs text-slate-400 mt-0.5">티맵 / 카카오 / 네이버</div>
+                  </button>
+
+                  <button
+                    onClick={() => { togglePipMode(); setIsMenuOpen(false); }}
+                    className={`p-3 bg-slate-950 hover:bg-slate-800 border rounded-2xl text-left font-bold text-xs shadow ${
+                      isPipActive ? 'border-indigo-400 text-indigo-300' : 'border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <div className="text-sm font-black text-white">화면 위 팝업 창</div>
+                    <div className="text-xs text-slate-400 mt-0.5">{isPipActive ? '현재 켜짐' : '내비 위에 띄우기'}</div>
                   </button>
                 </div>
               </div>
@@ -1554,14 +1371,14 @@
 
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3 overflow-y-auto'}`}>
             
-            {/* 1. 첫 화면 */}
+            {/* 1. 첫 출근 대기 화면 */}
             {currentTab === 'welcome' && (
               <div className="h-full flex flex-col justify-between p-6 text-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
                 <div className="w-full flex items-center justify-between pt-2">
                   <span className="bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full shadow-lg">
                     K-TAXI 스마트 파트너
                   </span>
-                  <span className="text-xs font-bold text-slate-300 bg-slate-900/90 border border-slate-700 px-3 py-1 rounded-full">
+                  <span className="text-xs font-bold text-slate-300 bg-slate-900 border border-slate-700 px-3 py-1 rounded-full">
                     {appData[activeType]?.carNumber || '충남31바3238'} ({activeType === 'corporate' ? '법인' : '개인'})
                   </span>
                 </div>
@@ -1578,42 +1395,41 @@
                     onClick={handleStartShift}
                     className="w-full py-7 bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black text-2xl rounded-3xl shadow-[0_0_45px_rgba(250,204,21,0.5)] border-2 border-yellow-200 flex items-center justify-center gap-3 active:scale-98 transition-transform"
                   >
-                    <span className="text-4xl">🚖</span>
                     <span>출근하기 (운행 시작)</span>
                   </button>
                   <p className="text-xs text-slate-500 mt-3 font-semibold">
-                    터치 시 출근 시간이 기록되고 가디언 HUD가 즉시 실행됩니다.
+                    터치 시 출근 시간이 기록되고 속도계 화면이 즉시 열립니다.
                   </p>
                 </div>
               </div>
             )}
 
-            {/* 2. 오늘&건강 탭 */}
+            {/* 2. 오늘 & 건강 알림 탭 */}
             {currentTab === 'today' && (
               <div className="space-y-3 pb-6">
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 shadow-sm space-y-2">
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-sm space-y-2">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-[11px] text-slate-400 font-bold block">오늘의 출근 기록</span>
-                      <div className="text-base font-black text-yellow-400 mt-0.5">
+                      <span className="text-xs text-slate-400 font-bold block">오늘의 출근 기록</span>
+                      <div className="text-lg font-black text-yellow-400 mt-0.5">
                         {todayRecord.startTime ? `${todayRecord.startTime} 출근 완료` : '출근 기록 없음'}
                       </div>
                     </div>
-                    <div className="flex gap-1.5">
+                    <div className="flex gap-2">
                       <button
                         onClick={() => {
                           setTempStartTime(todayRecord.startTime || getCurrentTimeStr());
                           setShowEditStartTimeModal(true);
                         }}
-                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 rounded-xl font-bold text-xs"
+                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 rounded-xl font-bold text-xs"
                       >
-                        ✏️ 시간 수정
+                        시간 수정
                       </button>
                       <button
                         onClick={handleResetShift}
-                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 border border-slate-700 rounded-xl font-bold text-xs"
+                        className="px-3 py-2 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 border border-slate-700 rounded-xl font-bold text-xs"
                       >
-                        🔄 초기화
+                        초기화
                       </button>
                     </div>
                   </div>
@@ -1621,36 +1437,31 @@
 
                 <div
                   onClick={() => setShowNapVisualModal(true)}
-                  className="bg-gradient-to-r from-indigo-950/80 via-slate-900 to-indigo-950/80 p-4 rounded-2xl border-2 border-indigo-500/50 shadow-xl flex items-center justify-between cursor-pointer active:scale-98 transition"
+                  className="bg-gradient-to-r from-indigo-950/90 via-slate-900 to-indigo-950/90 p-4 rounded-2xl border-2 border-indigo-500/50 shadow-xl flex items-center justify-between cursor-pointer active:scale-98 transition"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-indigo-600/30 border border-indigo-400/50 flex items-center justify-center text-2xl">
-                      ⚡
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-black text-indigo-200">20분 전략적 파워 쪽잠 타이머</h4>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        {isNapTimerActive
-                          ? `⏱️ 쪽잠 진행 중 (${Math.floor(napTimerSeconds / 60)}분 ${String(napTimerSeconds % 60).padStart(2, '0')}초 남음)`
-                          : '터치하여 쪽잠 시간 설정 및 시작'}
-                      </p>
-                    </div>
+                  <div>
+                    <h4 className="text-base font-black text-indigo-200">20분 파워 쪽잠 타이머</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {isNapTimerActive
+                        ? `쪽잠 진행 중 (${Math.floor(napTimerSeconds / 60)}분 ${String(napTimerSeconds % 60).padStart(2, '0')}초 남음)`
+                        : '터치하여 쪽잠 시간 설정 및 시작'}
+                    </p>
                   </div>
-                  <span className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow">
-                    {isNapTimerActive ? '보기/취소' : '시작 ▶'}
+                  <span className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow">
+                    {isNapTimerActive ? '확인/취소' : '시작'}
                   </span>
                 </div>
 
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
-                  <div className="flex justify-between items-center pb-1 border-b border-slate-800">
-                    <span className="text-xs font-bold text-emerald-400">
-                      🥗 건강 & 휴식 루틴 ({ (appData.healthRoutines || []).filter(r => r.done).length } / { (appData.healthRoutines || []).length })
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                    <span className="text-sm font-bold text-emerald-400">
+                      건강 & 휴식 알림 ({ (appData.healthRoutines || []).filter(r => r.done).length } / { (appData.healthRoutines || []).length })
                     </span>
                     <button
                       onClick={() => setShowAddRoutineModal(true)}
-                      className="text-[11px] text-yellow-400 font-bold px-2.5 py-1 rounded-xl bg-slate-800 border border-slate-700"
+                      className="text-xs text-yellow-400 font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700"
                     >
-                      + 시간 추가
+                      + 항목 추가
                     </button>
                   </div>
 
@@ -1658,27 +1469,27 @@
                     {(appData.healthRoutines || []).map((routine) => (
                       <div
                         key={routine.id}
-                        className={`p-3 rounded-xl border flex items-center justify-between text-xs transition ${
+                        className={`p-3.5 rounded-xl border flex items-center justify-between text-sm transition ${
                           routine.done
                             ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 line-through'
                             : 'bg-slate-950 border-slate-800 text-slate-200'
                         }`}
                       >
-                        <div onClick={() => toggleRoutineDone(routine.id)} className="flex items-center gap-2.5 flex-1 cursor-pointer">
+                        <div onClick={() => toggleRoutineDone(routine.id)} className="flex items-center gap-3 flex-1 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={routine.done}
                             onChange={() => toggleRoutineDone(routine.id)}
-                            className="w-4 h-4 rounded text-emerald-500 cursor-pointer"
+                            className="w-5 h-5 rounded text-emerald-500 cursor-pointer"
                           />
                           <div>
-                            <span className="text-[10px] text-yellow-400 font-black mr-1.5 font-mono">[{routine.time}]</span>
-                            <span className="font-medium">{routine.title}</span>
+                            <span className="text-xs text-yellow-400 font-black mr-2 font-mono">[{routine.time}]</span>
+                            <span className="font-bold">{routine.title}</span>
                           </div>
                         </div>
                         <button
                           onClick={() => handleDeleteRoutine(routine.id)}
-                          className="text-slate-500 hover:text-red-400 px-1 font-bold text-xs"
+                          className="text-slate-500 hover:text-red-400 px-2 font-bold text-sm"
                         >
                           ✕
                         </button>
@@ -1689,205 +1500,148 @@
               </div>
             )}
 
-            {/* 3. 가디언 HUD 탭 */}
+            {/* 3. 속도계 화면 (HUD - 지도 없음, 화면 빈곳 터치시 4가지 모드 순환) */}
             {currentTab === 'hud' && (
               <div
-                className={`w-full h-full flex flex-col justify-between select-none relative overflow-hidden ${
+                onClick={handleCycleHudMode}
+                className={`w-full h-full flex flex-col justify-between select-none relative overflow-hidden cursor-pointer ${
                   isNearCamera && isOverSpeed
                     ? 'animate-strobe-alert'
                     : 'bg-slate-950'
                 }`}
               >
-                {/* HUD 내부 화면 모드 전환 퀵 버튼 (좌측 상단 플로팅) */}
-                <div className="absolute top-2 left-2 z-[450] pointer-events-auto">
-                  <button
-                    onClick={handleCycleHudMode}
-                    className="px-3 py-1.5 bg-slate-950/90 hover:bg-slate-800 border border-yellow-500/70 text-yellow-300 rounded-2xl text-[11px] font-black shadow-2xl flex items-center gap-1 active:scale-95 transition"
-                  >
-                    <span>🔄</span>
-                    <span>HUD: {getHudCycleLabel()}</span>
-                  </button>
-                </div>
-
-                {hudCycleStep === 1 ? (
-                  <div className="relative w-full h-full flex-1 flex flex-col">
-                    <div className="absolute inset-0 z-0">
-                      <FullscreenLiveMapView
-                        currentCoords={currentCoords}
-                        nearbyCamera={nearbyCamera}
-                        isAutoTracking={isAutoTracking}
-                        setIsAutoTracking={setIsAutoTracking}
-                        userHeading={userHeading}
-                      />
-                    </div>
-
-                    {/* HUD 메인 계기판 (제한속도 + 속도계) */}
-                    <div className="relative z-10 flex-1 flex flex-col justify-between pt-10 pb-28 pointer-events-none">
-                      
-                      {/* 상단 5:5 펌핑 영역: 제한속도 표지판 */}
-                      <div className="flex-1 flex flex-col items-center justify-center p-2">
-                        <div className={`flex items-center justify-center w-44 h-44 rounded-full border-[5px] transition-all duration-300 ${
-                          isNearCamera
-                            ? 'border-red-600 bg-white/95 text-black animate-top-pump shadow-[0_0_35px_rgba(239,68,68,1)]'
-                            : 'border-white/20 bg-slate-950/20 backdrop-blur-[1px] text-white/30 shadow-xl'
-                        }`}>
-                          <div className="flex flex-col items-center justify-center leading-none">
-                            <span className="text-7xl font-black tracking-tight drop-shadow-md">{effectiveLimit}</span>
-                            <span className={`text-[10px] font-black tracking-widest mt-0.5 ${isNearCamera ? 'text-red-600' : 'text-slate-400/40'}`}>LIMIT</span>
-                          </div>
-                        </div>
-
-                        {nearbyCamera ? (
-                          <div className="mt-2 px-4 py-1 rounded-2xl bg-red-950/95 border border-red-500 text-red-300 font-black text-xs shadow-2xl animate-bounce pointer-events-auto">
-                            <span>{nearbyCamera.type === 'speed' ? '🚨 신호·과속' : nearbyCamera.type === 'parking' ? '🚏 주정차단속' : '🛣️ 구간단속'}</span>
-                            <span className="ml-1 text-yellow-400 font-bold">{nearbyCamera.dist}m 전방</span>
-                          </div>
-                        ) : (
-                          <span className="text-[10px] font-bold text-slate-400/30 mt-1">정상 주행 구간</span>
-                        )}
-
-                        {isParkingStopped && (
-                          <div className="mt-1 px-3 py-0.5 rounded-xl bg-amber-950/95 border border-yellow-400 text-yellow-300 font-black text-xs shadow-2xl animate-pulse pointer-events-auto">
-                            ⏱️ 주정차 유예: {Math.floor(parkingCountdown / 60)}분 {String(parkingCountdown % 60).padStart(2, '0')}초 남음
-                          </div>
-                        )}
-
-                        {nearbyCamera?.type === 'section' && sectionAvgSpeed > 0 && (
-                          <div className="mt-1 px-3 py-0.5 rounded-xl bg-orange-950/95 border border-orange-500 text-orange-200 font-black text-xs shadow-2xl pointer-events-auto">
-                            🛣️ 구간 평균속도: <span className={sectionAvgSpeed > effectiveLimit ? 'text-red-400 font-black' : 'text-cyan-300 font-black'}>{sectionAvgSpeed} km/h</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 하단 5:5 펌핑 영역: 실시간 속도계 */}
-                      <div className="flex-1 flex flex-col items-center justify-center p-2 text-center">
-                        <div className={`transition-all duration-300 flex flex-col items-center justify-center w-full ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
-                          <div className="w-full flex items-center justify-center leading-none">
-                            <span className={`text-[11rem] font-black tracking-tighter font-mono text-center select-none ${
-                              isOverSpeed
-                                ? 'font-speed-red animate-pulse'
-                                : isNearCamera
-                                ? 'font-speed-cyan'
-                                : 'font-speed-hollow'
-                            }`}>
-                              {gpsSpeed}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-center gap-2 mt-[-10px]">
-                            <span className="text-xl font-black text-slate-400/70 tracking-wider">KM/H</span>
-                            {isOverSpeed && (
-                              <span className="text-[11px] font-black text-red-200 bg-red-950/95 px-3 py-0.5 rounded-full border border-red-500 shadow-xl animate-bounce">
-                                ⚠️ 즉시 감속 (+{gpsSpeed - effectiveLimit} km/h 초과)
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 하단 스마트 미터기 & 단속 방어 바 */}
-                    <div className="absolute bottom-2 left-3 right-3 z-30 pointer-events-auto space-y-1.5">
-                      
-                      {/* 1. 가상 스마트 미터기 바 */}
-                      <div className="bg-gradient-to-r from-slate-900/95 via-slate-950/95 to-slate-900/95 border-2 border-yellow-500/80 p-2.5 rounded-2xl shadow-2xl flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <button
-                            onClick={handleToggleMeter}
-                            className={`px-4 py-2 rounded-xl font-black text-xs shadow-lg transition active:scale-95 ${
-                              meterStatus === 'empty'
-                                ? 'bg-yellow-500 text-black animate-pulse'
-                                : meterStatus === 'driving'
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-red-600 text-white animate-bounce'
-                            }`}
-                          >
-                            {meterStatus === 'empty' ? '🚖 빈차 (터치시 승차)' : meterStatus === 'driving' ? '🚕 주행 (터치시 지불)' : '🛑 정산 대기 (터치시 완료)'}
-                          </button>
-                          
-                          {meterStatus === 'driving' && (
-                            <div className="text-[11px]">
-                              <span className="text-slate-300 font-bold block">
-                                {(meterDistanceM / 1000).toFixed(2)}km · {Math.floor(meterSeconds / 60)}분 {meterSeconds % 60}초
-                              </span>
-                              {isSurcharge && <span className="text-orange-400 font-black text-[10px]">🌙 심야할증 20%</span>}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="text-right">
-                          <span className="text-[10px] text-slate-400 font-bold block">주행 요금</span>
-                          <span className="text-xl font-black text-yellow-400 font-mono">
-                            {formatMoney(meterFare)}원
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* 2. 단속 방어 & 적발 요약 바 */}
-                      <div
-                        onClick={() => setShowDefenseListModal(true)}
-                        className="bg-slate-950/90 border border-emerald-500/60 p-2 rounded-xl shadow flex items-center justify-between cursor-pointer active:scale-98 transition"
-                      >
-                        <div className="flex items-center gap-2 overflow-hidden">
-                          <span className="text-base">🛡️</span>
-                          <div className="text-[11px] truncate text-slate-300">
-                            방어 <span className="text-emerald-400 font-bold">{passCount}회</span> | 
-                            적발 <span className="text-red-400 font-bold">{failCount}회</span> | 
-                            순방어: <span className="text-yellow-400 font-black">{netSaved >= 0 ? `+${formatMoney(netSaved)}원` : `-${formatMoney(Math.abs(netSaved))}원`}</span>
-                          </div>
-                        </div>
-                        <span className="text-[10px] text-emerald-400 font-bold">내역 ▶</span>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div onClick={handleCycleHudMode} className="flex-1 flex flex-col justify-between p-4 cursor-pointer">
-                    <div className="flex-1 flex flex-col items-center justify-center p-2 border-b border-slate-800/60 overflow-hidden">
-                      <div className={`transition-transform duration-300 ${getHudTransformClass()}`}>
-                        <div className="flex flex-col items-center justify-center">
-                          <div className="flex items-center justify-center w-36 h-36 rounded-full border-[10px] border-red-600 bg-white text-black shadow-2xl">
-                            <div className="flex flex-col items-center justify-center leading-none">
-                              <span className="text-5xl font-black tracking-tight">{effectiveLimit}</span>
-                              <span className="text-[9px] font-black text-red-600 tracking-wider mt-0.5">LIMIT</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex-1 flex flex-col items-center justify-center p-2 overflow-hidden">
-                      <div className={`transition-transform duration-300 ${getHudTransformClass()}`}>
-                        <div className="flex items-baseline justify-center">
-                          <span className={`text-9xl font-black tracking-tighter font-mono transition-colors ${
-                            isOverSpeed ? 'text-red-500' : 'text-cyan-400'
-                          }`}>
-                            {gpsSpeed}
-                          </span>
-                          <span className="text-2xl font-bold ml-2 text-slate-400">km/h</span>
-                        </div>
-                        <span className="text-[10px] font-bold text-slate-400 mt-2 block text-center">
-                          {getHudCycleLabel()} (화면 터치 시 회전 전환)
-                        </span>
-                      </div>
-                    </div>
+                {/* 화면 모드 변경 시 1초 토스트 안내 */}
+                {hudToastText && (
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-slate-900/95 border-2 border-yellow-400 px-6 py-3 rounded-2xl shadow-2xl pointer-events-none animate-fade-in">
+                    <span className="text-base font-black text-yellow-300">{hudToastText}</span>
                   </div>
                 )}
+
+                {/* 메인 계기판 (상단 제한속도 + 하단 실시간 속도계) */}
+                <div className={`flex-1 flex flex-col justify-between pt-6 pb-28 ${getHudTransformClass()}`}>
+                  
+                  {/* 상단 5:5 펌핑 영역: 제한속도 표지판 */}
+                  <div className="flex-1 flex flex-col items-center justify-center p-2">
+                    <div className={`flex items-center justify-center w-48 h-48 rounded-full border-[6px] transition-all duration-300 ${
+                      isNearCamera
+                        ? 'border-red-600 bg-white text-black animate-top-pump shadow-[0_0_40px_rgba(239,68,68,1)]'
+                        : 'border-white/20 bg-slate-900/40 text-white/40 shadow-xl'
+                    }`}>
+                      <div className="flex flex-col items-center justify-center leading-none">
+                        <span className="text-8xl font-black tracking-tight drop-shadow-md">{effectiveLimit}</span>
+                        <span className={`text-xs font-black tracking-widest mt-1 ${isNearCamera ? 'text-red-600' : 'text-slate-400/40'}`}>LIMIT</span>
+                      </div>
+                    </div>
+
+                    {nearbyCamera ? (
+                      <div className="mt-3 px-4 py-1.5 rounded-2xl bg-red-950 border border-red-500 text-red-300 font-black text-xs shadow-2xl animate-bounce">
+                        <span>{nearbyCamera.type === 'speed' ? '신호·과속 단속' : nearbyCamera.type === 'parking' ? '주정차 단속' : '구간 단속'}</span>
+                        <span className="ml-1.5 text-yellow-400 font-bold">{nearbyCamera.dist}m 전방</span>
+                      </div>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-500 mt-2">화면을 터치하면 화면 모드가 바뀝니다</span>
+                    )}
+
+                    {isParkingStopped && (
+                      <div className="mt-1.5 px-3.5 py-1 rounded-xl bg-amber-950 border border-yellow-400 text-yellow-300 font-black text-xs shadow-2xl animate-pulse">
+                        주정차 유예: {Math.floor(parkingCountdown / 60)}분 {String(parkingCountdown % 60).padStart(2, '0')}초 남음
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 하단 5:5 펌핑 영역: 초대형 실시간 속도계 */}
+                  <div className="flex-1 flex flex-col items-center justify-center p-2 text-center">
+                    <div className={`transition-all duration-300 flex flex-col items-center justify-center w-full ${isNearCamera ? 'animate-bottom-pump' : ''}`}>
+                      <div className="w-full flex items-center justify-center leading-none">
+                        <span className={`text-[12rem] font-black tracking-tighter font-mono text-center select-none ${
+                          isOverSpeed
+                            ? 'font-speed-red animate-pulse'
+                            : isNearCamera
+                            ? 'font-speed-cyan'
+                            : 'font-speed-hollow'
+                        }`}>
+                          {gpsSpeed}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-center gap-2 mt-[-10px]">
+                        <span className="text-2xl font-black text-slate-400/70 tracking-wider">KM/H</span>
+                        {isOverSpeed && (
+                          <span className="text-xs font-black text-red-200 bg-red-950 px-3 py-1 rounded-full border border-red-500 shadow-xl animate-bounce">
+                            즉시 감속 (+{gpsSpeed - effectiveLimit} km/h 초과)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 하단 미터기 콘솔 및 단속 요약 바 */}
+                <div onClick={(e) => e.stopPropagation()} className="absolute bottom-2 left-3 right-3 z-30 space-y-1.5">
+                  
+                  {/* 가상 미터기 바 */}
+                  <div className="bg-slate-900 border-2 border-yellow-500/80 p-3 rounded-2xl shadow-2xl flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handleToggleMeter}
+                        className={`px-4 py-2.5 rounded-xl font-black text-xs shadow-lg transition active:scale-95 ${
+                          meterStatus === 'empty'
+                            ? 'bg-yellow-500 text-black'
+                            : meterStatus === 'driving'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-red-600 text-white animate-bounce'
+                        }`}
+                      >
+                        {meterStatus === 'empty' ? '빈차 (승차하기)' : meterStatus === 'driving' ? '주행 중 (지불하기)' : '정산 대기 (완료하기)'}
+                      </button>
+                      
+                      {meterStatus === 'driving' && (
+                        <div className="text-xs">
+                          <span className="text-slate-300 font-bold block">
+                            {(meterDistanceM / 1000).toFixed(2)}km · {Math.floor(meterSeconds / 60)}분 운행
+                          </span>
+                          {isSurcharge && <span className="text-orange-400 font-black text-[11px]">심야할증 20%</span>}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-xs text-slate-400 font-bold block">주행 요금</span>
+                      <span className="text-2xl font-black text-yellow-400 font-mono">
+                        {formatMoney(meterFare)}원
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 단속 방어 1줄 요약 바 */}
+                  <div
+                    onClick={() => setShowDefenseListModal(true)}
+                    className="bg-slate-950 border border-emerald-500/60 p-2.5 rounded-xl shadow flex items-center justify-between cursor-pointer active:scale-98 transition"
+                  >
+                    <div className="text-xs text-slate-300 truncate">
+                      오늘 방어 <span className="text-emerald-400 font-bold">{passCount}회</span> | 
+                      적발 <span className="text-red-400 font-bold">{failCount}회</span> | 
+                      순방어: <span className="text-yellow-400 font-black">{netSaved >= 0 ? `+${formatMoney(netSaved)}원` : `-${formatMoney(Math.abs(netSaved))}원`}</span>
+                    </div>
+                    <span className="text-xs text-emerald-400 font-bold flex-shrink-0">상세내역 ▶</span>
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* 4. 운행일지 탭 */}
+            {/* 4. 운행 기록 달력 탭 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
-                  <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800 flex items-center justify-between">
+                  <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 flex items-center justify-between">
                     <button onClick={() => {
                       const [y, m] = currentYearMonth.split('-').map(Number);
                       const prevDate = new Date(y, m - 2, 1);
                       setCurrentYearMonth(`${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`);
-                    }} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">◀</button>
+                    }} className="w-9 h-9 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">◀</button>
                     <div className="text-center">
-                      <span className="text-base font-black text-yellow-400">{currentYearMonth}</span>
-                      <div className="text-[11px] text-slate-400 font-medium">
+                      <span className="text-lg font-black text-yellow-400">{currentYearMonth}</span>
+                      <div className="text-xs text-slate-400 font-medium">
                         {currentMonthStats.workDays}일 운행 / {formatMinutesToHours(currentMonthStats.totalWorkMinutes)}
                       </div>
                     </div>
@@ -1895,24 +1649,24 @@
                       const [y, m] = currentYearMonth.split('-').map(Number);
                       const nextDate = new Date(y, m, 1);
                       setCurrentYearMonth(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`);
-                    }} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">▶</button>
+                    }} className="w-9 h-9 flex items-center justify-center bg-slate-800 rounded-xl text-slate-300 font-bold">▶</button>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
-                      <span className="text-[11px] text-slate-400 block font-semibold">이번 달 총 매출</span>
-                      <span className="text-base font-black text-yellow-400 block mt-0.5">{formatMoney(currentMonthStats.totalRevenue)}</span>
+                    <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800">
+                      <span className="text-xs text-slate-400 block font-semibold">이번 달 총 매출</span>
+                      <span className="text-lg font-black text-yellow-400 block mt-0.5">{formatMoney(currentMonthStats.totalRevenue)}</span>
                     </div>
-                    <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800">
-                      <span className="text-[11px] text-green-400 block font-semibold">{activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}</span>
-                      <span className="text-base font-black text-green-400 block mt-0.5">
+                    <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800">
+                      <span className="text-xs text-green-400 block font-semibold">{activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}</span>
+                      <span className="text-lg font-black text-green-400 block mt-0.5">
                         {activeType === 'corporate' ? formatMoney(currentMonthStats.netSalaryFromCompany) : formatMoney(currentMonthStats.netIncome)}
                       </span>
                     </div>
                   </div>
 
-                  <div className="bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
-                    <div className="grid grid-cols-7 text-center text-[11px] font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
+                  <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800">
+                    <div className="grid grid-cols-7 text-center text-xs font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
                       {DAYS_NAME.map((dName, idx) => (
                         <span key={dName} className={`${idx === 0 ? 'text-red-400' : idx === 6 ? 'text-blue-400' : idx === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>
                           {dName}{idx === (appData.defaultOffDay || 1) ? '·휴' : ''}
@@ -1937,8 +1691,8 @@
                             }`}
                           >
                             <div className="flex justify-between w-full items-center">
-                              <span className={`text-[10px] font-bold ${dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : dayOfWeek === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>{dayNum}</span>
-                              {isDefaultOff && !rec && <span className="text-[7px] text-emerald-500/80 font-bold">휴무</span>}
+                              <span className={`text-[11px] font-bold ${dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : dayOfWeek === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>{dayNum}</span>
+                              {isDefaultOff && !rec && <span className="text-[8px] text-emerald-500/80 font-bold">휴무</span>}
                             </div>
                             {rec && (
                               rec.isHoliday ? (
@@ -1962,65 +1716,25 @@
               </div>
             )}
 
-            {/* 5. 정산 & 설정 탭 */}
+            {/* 5. 기본 설정 탭 (중복 정산서 제거 및 구글 주소 잠금 버튼) */}
             {currentTab === 'settings' && (
               <div className="space-y-3.5 pb-6">
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-3">
-                  <div className="flex justify-between items-center pb-1 border-b border-slate-800">
-                    <span className="text-xs font-bold text-yellow-400">{currentYearMonth} 급여 정산서</span>
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
+                    <span className="text-sm font-bold text-white">차량 정보 및 운행 모드</span>
                     {activeType === 'private' && (
-                      <button onClick={() => setShowTaxModal(true)} className="px-2 py-0.5 bg-yellow-500 text-black font-bold rounded-md text-[10px]">세무서 양식</button>
+                      <button onClick={() => setShowTaxModal(true)} className="px-2.5 py-1 bg-yellow-500 text-black font-bold rounded-lg text-xs">세무서 양식 복사</button>
                     )}
                   </div>
-                  {activeType === 'corporate' ? (
-                    <div className="space-y-2.5">
-                      <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1 text-xs">
-                        <div className="flex justify-between text-blue-400 font-bold">
-                          <span>세전 급여 (수당+성과급)</span>
-                          <span>{formatMoney(currentMonthStats.grossSalary)}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-400 text-[11px]">
-                          <span>고정수당: {formatMoney(currentMonthStats.totalFixedAllowances)}</span>
-                          <span>성과급(70%): +{formatMoney(currentMonthStats.totalIncentive)}</span>
-                        </div>
-                      </div>
-                      <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1 text-xs">
-                        <div className="flex justify-between text-orange-400 font-bold">
-                          <span>총 공제액</span>
-                          <span>-{formatMoney(currentMonthStats.totalDeductions)}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-400 text-[11px]">
-                          <span>4대보험/세금: -{formatMoney(currentMonthStats.taxAndInsurance)}</span>
-                          <span>고정회비: -{formatMoney(currentMonthStats.totalFixedExpenses)}</span>
-                        </div>
-                      </div>
-                      <div className="bg-gradient-to-r from-slate-950 to-indigo-950 p-3 rounded-xl border border-indigo-500/40 flex justify-between items-center">
-                        <span className="text-xs font-bold text-indigo-300">통장 예상 입금액</span>
-                        <span className="text-xl font-black text-green-400">{formatMoney(currentMonthStats.netSalaryFromCompany)}</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 text-xs">
-                      <div className="flex justify-between text-slate-300"><span>총 수입:</span><span className="font-bold text-green-400">{formatMoney(currentMonthStats.totalRevenue)}</span></div>
-                      <div className="flex justify-between text-slate-300"><span>총 지출:</span><span className="font-bold text-red-400">{formatMoney(currentMonthStats.totalExpense)}</span></div>
-                      <div className="pt-2 border-t border-slate-800 flex justify-between items-center"><span className="font-bold text-yellow-400">과세표준 소득:</span><span className="text-lg font-black text-yellow-300">{formatMoney(currentMonthStats.netIncome)}</span></div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between pb-1 border-b border-slate-800">
-                    <span className="text-xs font-bold text-slate-300">차량 및 모드 설정</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-400">운행 모드</span>
-                    <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                      <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'corporate' }))} className={`px-3 py-1 text-xs font-bold rounded-md ${activeType === 'corporate' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>법인</button>
-                      <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'private' }))} className={`px-3 py-1 text-xs font-bold rounded-md ${activeType === 'private' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>개인</button>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-300">운행 모드</span>
+                    <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+                      <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'corporate' }))} className={`px-4 py-1.5 text-xs font-bold rounded-lg ${activeType === 'corporate' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>법인 택시</button>
+                      <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'private' }))} className={`px-4 py-1.5 text-xs font-bold rounded-lg ${activeType === 'private' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>개인 택시</button>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
-                    <span className="text-slate-400">차량 번호</span>
+                  <div className="flex items-center justify-between text-sm pt-2 border-t border-slate-800">
+                    <span className="text-slate-300">차량 번호</span>
                     <input
                       type="text"
                       placeholder="충남31바 1234"
@@ -2029,34 +1743,48 @@
                         const val = e.target.value;
                         setAppData(prev => ({ ...prev, [activeType]: { ...(prev[activeType] || {}), carNumber: val } }));
                       }}
-                      className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-36 text-white"
+                      className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-40 text-white"
                     />
                   </div>
                 </div>
 
-                {/* 구글 시트 연동 카드 */}
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
+                {/* 구글 시트 연동 주소 (실수 방지 안전 잠금 기능 탑재) */}
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-emerald-400">📊 구글 시트 클라우드 자동 동기화</span>
-                    <span className="text-[10px] text-slate-400">2차 백업</span>
+                    <span className="text-sm font-bold text-emerald-400">구글 시트 자동 저장 주소</span>
+                    <button
+                      onClick={() => setIsSheetUrlLocked(prev => !prev)}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold border transition ${
+                        isSheetUrlLocked
+                          ? 'bg-slate-800 text-emerald-300 border-slate-700'
+                          : 'bg-yellow-500 text-black border-yellow-400 font-black'
+                      }`}
+                    >
+                      {isSheetUrlLocked ? '🔒 주소 잠김 (터치시 수정)' : '🔓 수정 모드 (완료시 잠금)'}
+                    </button>
                   </div>
                   <input
                     type="url"
-                    placeholder="구글 앱스 스크립트 웹앱 URL 붙여넣기"
+                    disabled={isSheetUrlLocked}
+                    placeholder="구글 웹앱 주소 붙여넣기"
                     value={appData.googleSheetUrl || ''}
                     onChange={(e) => setAppData(prev => ({ ...prev, googleSheetUrl: e.target.value.trim() }))}
-                    className="w-full bg-slate-950 border border-slate-700 px-3 py-2 text-xs rounded-xl text-white font-mono focus:outline-none focus:border-emerald-500"
+                    className={`w-full p-2.5 text-xs rounded-xl font-mono border transition ${
+                      isSheetUrlLocked
+                        ? 'bg-slate-950/60 text-slate-500 border-slate-800 cursor-not-allowed'
+                        : 'bg-slate-950 text-white border-yellow-500 focus:outline-none'
+                    }`}
                   />
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    URL을 입력해 두면 매일 퇴근 시 구글 엑셀 시트에 1줄씩 자동 전송됩니다.
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    주소가 잠겨 있으면 실수로 지워지지 않으며, 매일 퇴근 시 구글 엑셀 시트에 안전하게 자동 기록됩니다.
                   </p>
                 </div>
 
-                {/* 수동 백업 & 복원 카드 */}
-                <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
+                {/* 장부 백업 & 복원 파일 관리 */}
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-300">장부 데이터 수동 백업 & 복원</span>
-                    <span className="text-[10px] text-slate-500">{APP_VERSION}</span>
+                    <span className="text-sm font-bold text-slate-200">장부 파일 백업 & 복원</span>
+                    <span className="text-xs text-slate-500">{APP_VERSION}</span>
                   </div>
                   <div className="flex gap-2">
                     <button onClick={() => {
@@ -2064,11 +1792,13 @@
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement('a');
                       a.href = url;
-                      a.download = `K-TAXI_백업_${todayKey}.json`;
+                      a.download = `K-TAXI_장부백업_${todayKey}.json`;
                       a.click();
-                    }} className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700">수동 백업 파일 저장</button>
-                    <label className="flex-1 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 text-center cursor-pointer">
-                      백업 파일 복원
+                    }} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs border border-slate-700">
+                      수동 백업 파일 저장
+                    </button>
+                    <label className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs border border-slate-700 text-center cursor-pointer">
+                      백업 파일 불러오기
                       <input type="file" accept=".json" onChange={(e) => {
                         const file = e.target.files[0];
                         if (!file) return;
@@ -2088,57 +1818,56 @@
             )}
           </main>
 
-          {/* 모달 팝업들 */}
+          {/* 모달 창들 */}
           
-          {/* 1. 미터기 지불/정산 모달 */}
+          {/* 1. 미터기 결제 정산 모달 */}
           {showPaymentModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-yellow-500 rounded-3xl w-full max-w-sm p-6 space-y-4 shadow-2xl text-center">
-                <span className="text-3xl">💳</span>
                 <h3 className="text-lg font-black text-white">요금 정산 및 매출 반영</h3>
                 <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
                   <span className="text-xs text-slate-400 block font-bold">최종 결제 요금</span>
                   <span className="text-3xl font-black text-yellow-400 font-mono mt-1 block">{formatMoney(meterFare)}원</span>
-                  <span className="text-[11px] text-slate-500 mt-1 block">주행: {(meterDistanceM / 1000).toFixed(2)}km · {Math.floor(meterSeconds / 60)}분 운행</span>
+                  <span className="text-xs text-slate-500 mt-1 block">주행: {(meterDistanceM / 1000).toFixed(2)}km · {Math.floor(meterSeconds / 60)}분 운행</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => handleCompletePayment('card')}
-                    className="p-3.5 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl text-sm shadow-lg flex items-center justify-center gap-1.5 active:scale-95"
+                    className="py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl text-base shadow-lg active:scale-95 transition"
                   >
-                    <span>💳 카드 결제</span>
+                    카드 결제
                   </button>
                   <button
                     onClick={() => handleCompletePayment('cash')}
-                    className="p-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl text-sm shadow-lg flex items-center justify-center gap-1.5 active:scale-95"
+                    className="py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl text-base shadow-lg active:scale-95 transition"
                   >
-                    <span>💵 현금 결제</span>
+                    현금 결제
                   </button>
                 </div>
                 <button
                   onClick={handleCancelPayment}
-                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs"
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs mt-1"
                 >
-                  취소 (주행 계속)
+                  취소 (주행 계속하기)
                 </button>
               </div>
             </div>
           )}
 
-          {/* 2. 외부 내비 모달 */}
+          {/* 2. 길안내 내비 선택 모달 */}
           {showNavModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl text-center">
+              <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-6 space-y-4 shadow-2xl text-center">
                 <h3 className="text-base font-black text-white">실행할 내비게이션 선택</h3>
                 <div className="space-y-2.5">
-                  <button onClick={() => openExternalNav('tmap')} className="w-full p-3.5 bg-red-950/80 hover:bg-red-900 border border-red-500/50 text-red-200 font-black rounded-2xl text-sm flex items-center justify-between shadow">
-                    <span className="flex items-center gap-2"><span className="text-xl">🔴</span> 티맵 (TMAP)</span><span>실행 ▶</span>
+                  <button onClick={() => openExternalNav('tmap')} className="w-full p-4 bg-red-950 hover:bg-red-900 border border-red-500/60 text-red-200 font-black rounded-2xl text-base flex items-center justify-between shadow">
+                    <span>티맵 (TMAP)</span><span>실행 ▶</span>
                   </button>
-                  <button onClick={() => openExternalNav('kakao')} className="w-full p-3.5 bg-yellow-950/80 hover:bg-yellow-900 border border-yellow-500/50 text-yellow-200 font-black rounded-2xl text-sm flex items-center justify-between shadow">
-                    <span className="flex items-center gap-2"><span className="text-xl">🟡</span> 카카오내비</span><span>실행 ▶</span>
+                  <button onClick={() => openExternalNav('kakao')} className="w-full p-4 bg-yellow-950 hover:bg-yellow-900 border border-yellow-500/60 text-yellow-200 font-black rounded-2xl text-base flex items-center justify-between shadow">
+                    <span>카카오내비</span><span>실행 ▶</span>
                   </button>
-                  <button onClick={() => openExternalNav('naver')} className="w-full p-3.5 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-200 font-black rounded-2xl text-sm flex items-center justify-between shadow">
-                    <span className="flex items-center gap-2"><span className="text-xl">🟢</span> 네이버지도</span><span>실행 ▶</span>
+                  <button onClick={() => openExternalNav('naver')} className="w-full p-4 bg-emerald-950 hover:bg-emerald-900 border border-emerald-500/60 text-emerald-200 font-black rounded-2xl text-base flex items-center justify-between shadow">
+                    <span>네이버지도</span><span>실행 ▶</span>
                   </button>
                 </div>
                 <button onClick={() => setShowNavModal(false)} className="w-full py-2.5 bg-slate-800 text-slate-400 font-bold rounded-xl text-xs">닫기</button>
@@ -2149,18 +1878,15 @@
           {/* 3. 퇴근 마감 화면 */}
           {showClosingModal && (
             <div className="fixed inset-0 bg-slate-950 flex flex-col justify-between p-6 z-50 text-center animate-fade-in">
-              <div className="pt-12 space-y-6">
-                <div className="w-20 h-20 rounded-full bg-yellow-500/20 border-2 border-yellow-400 flex items-center justify-center mx-auto text-4xl shadow-[0_0_30px_rgba(250,204,21,0.5)]">
-                  🏁
-                </div>
+              <div className="pt-16 space-y-6">
                 <div className="space-y-4 px-2">
-                  <span className="inline-block bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full">
-                    오늘 운행 마감 완료 (2중 자동 백업)
+                  <span className="inline-block bg-yellow-500 text-black text-xs font-black px-4 py-1.5 rounded-full">
+                    오늘 운행 마감 완료 (클라우드 2중 자동 저장)
                   </span>
                   <h3 className="text-2xl font-black text-white leading-relaxed drop-shadow-lg">
                     {closingMsg}
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-sm text-slate-400">
                     근무 시간: {formatMinutesToHours(todayRecord.workMinutes || 0)} ({todayRecord.startTime} ~ {todayRecord.endTime})
                   </p>
                 </div>
@@ -2172,9 +1898,9 @@
                     setShowClosingModal(false);
                     setCurrentTab('welcome');
                   }}
-                  className="w-full py-4 bg-gradient-to-r from-yellow-500 to-amber-400 text-slate-950 font-black text-lg rounded-2xl shadow-2xl active:scale-98 transition"
+                  className="w-full py-5 bg-gradient-to-r from-yellow-500 to-amber-400 text-slate-950 font-black text-xl rounded-2xl shadow-2xl active:scale-98 transition"
                 >
-                  확인 (첫 대기 화면으로)
+                  확인 (첫 화면으로)
                 </button>
               </div>
             </div>
@@ -2205,23 +1931,23 @@
             </div>
           )}
 
-          {/* 5. 쪽잠 모달 */}
+          {/* 5. 쪽잠 설정 모달 */}
           {showNapVisualModal && (
             <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-indigo-500/60 rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl text-center">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h3 className="text-sm font-black text-indigo-300">⚡ 파워 쪽잠 매니저</h3>
+                  <h3 className="text-sm font-black text-indigo-300">파워 쪽잠 타이머</h3>
                   <button onClick={() => setShowNapVisualModal(false)} className="text-slate-400 font-bold text-base">✕</button>
                 </div>
 
                 <div className="relative w-44 h-44 mx-auto flex items-center justify-center rounded-full bg-slate-950 border-4 border-indigo-500/40 shadow-inner">
                   <div className="flex flex-col items-center">
-                    <span className="text-3xl font-black font-mono text-indigo-200">
+                    <span className="text-4xl font-black font-mono text-indigo-200">
                       {isNapTimerActive
                         ? `${Math.floor(napTimerSeconds / 60)}:${String(napTimerSeconds % 60).padStart(2, '0')}`
                         : `${napTotalMinutes}:00`}
                     </span>
-                    <span className="text-[10px] text-slate-400 mt-1">
+                    <span className="text-xs text-slate-400 mt-1">
                       {isNapTimerActive ? '쪽잠 카운트다운' : '설정된 시간'}
                     </span>
                   </div>
@@ -2232,10 +1958,10 @@
                     <button
                       key={mins}
                       onClick={() => startNapWithDuration(mins)}
-                      className={`py-2 rounded-xl text-xs font-black border transition ${
+                      className={`py-2.5 rounded-xl text-xs font-black border transition ${
                         napTotalMinutes === mins
                           ? 'bg-indigo-600 text-white border-indigo-400 shadow'
-                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-600'
+                          : 'bg-slate-950 text-slate-300 border-slate-800'
                       }`}
                     >
                       {mins}분
@@ -2247,21 +1973,21 @@
                   {isNapTimerActive ? (
                     <button
                       onClick={() => setIsNapTimerActive(false)}
-                      className="flex-1 py-3 bg-red-600 text-white font-black rounded-xl text-xs shadow-lg"
+                      className="flex-1 py-3.5 bg-red-600 text-white font-black rounded-xl text-xs shadow-lg"
                     >
                       타이머 취소 / 정지
                     </button>
                   ) : (
                     <button
                       onClick={() => startNapWithDuration(napTotalMinutes)}
-                      className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl text-xs shadow-lg"
+                      className="flex-1 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl text-xs shadow-lg"
                     >
                       {napTotalMinutes}분 쪽잠 시작 ▶
                     </button>
                   )}
                   <button
                     onClick={() => setShowNapVisualModal(false)}
-                    className="px-4 py-3 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs"
+                    className="px-4 py-3.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs"
                   >
                     닫기
                   </button>
@@ -2292,10 +2018,10 @@
                     <label className="text-slate-400 block mb-1">루틴 내용</label>
                     <input
                       type="text"
-                      placeholder="예: 저녁 당뇨약 복용 / 3분 허리 스트레칭"
+                      placeholder="예: 저녁 당뇨약 복용 / 허리 스트레칭"
                       value={newRoutineTitle}
                       onChange={(e) => setNewRoutineTitle(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 p-2.5 rounded-xl text-white font-bold"
+                      className="w-full bg-slate-950 border border-slate-700 p-2.5 rounded-xl text-white font-bold text-sm"
                     />
                   </div>
                 </div>
@@ -2307,29 +2033,26 @@
             </div>
           )}
 
-          {/* 7. 단속 내역 상세 팝업 */}
+          {/* 7. 단속 방어 상세 내역 모달 */}
           {showDefenseListModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl">
+              <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xl">🛡️</span>
-                    <h3 className="text-sm font-black text-emerald-400">단속 방어 & 적발 상세 내역</h3>
-                  </div>
+                  <h3 className="text-sm font-black text-emerald-400">단속 방어 & 적발 상세 내역</h3>
                   <button onClick={() => setShowDefenseListModal(false)} className="text-slate-400 font-bold text-base hover:text-white">✕</button>
                 </div>
 
                 <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 grid grid-cols-3 gap-1 text-center">
                   <div>
-                    <span className="text-[9px] text-slate-400 block font-semibold">방어 성공</span>
+                    <span className="text-[10px] text-slate-400 block font-semibold">방어 성공</span>
                     <span className="text-sm font-black text-emerald-400">{passCount}회 (+{formatShortMoney(totalSaved)})</span>
                   </div>
                   <div className="border-x border-slate-800">
-                    <span className="text-[9px] text-slate-400 block font-semibold">적발 의심</span>
+                    <span className="text-[10px] text-slate-400 block font-semibold">적발 의심</span>
                     <span className="text-sm font-black text-red-400">{failCount}회 (-{formatShortMoney(totalFines)})</span>
                   </div>
                   <div>
-                    <span className="text-[9px] text-slate-400 block font-semibold">순방어액</span>
+                    <span className="text-[10px] text-slate-400 block font-semibold">순방어액</span>
                     <span className={`text-sm font-black ${netSaved >= 0 ? 'text-yellow-400' : 'text-red-400'}`}>
                       {formatShortMoney(netSaved)}
                     </span>
@@ -2341,14 +2064,14 @@
                     <div className="text-center py-6 text-xs text-slate-500">기록된 단속 내역이 없습니다.</div>
                   ) : (
                     defenseHistory.map((item) => (
-                      <div key={item.id} className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between text-xs">
+                      <div key={item.id} className="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between text-xs">
                         <div>
-                          <div className="font-bold text-slate-200">{item.name}</div>
-                          <div className="text-[10px] text-slate-400 font-medium">
+                          <div className="font-bold text-slate-200 text-sm">{item.name}</div>
+                          <div className="text-xs text-slate-400 font-medium mt-0.5">
                             {item.time} 통과 ({item.type === 'parking' ? '주정차' : `제한 ${item.limit} | 주행 ${item.speed}km/h`})
                           </div>
                         </div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-2">
                           <span className={`text-xs font-black px-2 py-1 rounded-lg border ${
                             item.status === 'pass'
                               ? 'text-emerald-400 bg-emerald-950 border-emerald-500/40'
@@ -2356,7 +2079,7 @@
                           }`}>
                             {item.amount > 0 ? `+${formatMoney(item.amount)}` : `${formatMoney(item.amount)}`}원
                           </span>
-                          <button onClick={() => handleDeleteDefenseItem(item.id)} className="text-slate-500 hover:text-red-400 px-1 font-bold text-xs">✕</button>
+                          <button onClick={() => handleDeleteDefenseItem(item.id)} className="text-slate-500 hover:text-red-400 px-1 font-bold text-sm">✕</button>
                         </div>
                       </div>
                     ))
@@ -2366,13 +2089,13 @@
                 <div className="flex gap-2">
                   <button
                     onClick={handleResetDefenseHistory}
-                    className="flex-1 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-300 font-bold rounded-xl text-xs border border-slate-700"
+                    className="flex-1 py-3 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-300 font-bold rounded-xl text-xs border border-slate-700"
                   >
-                    🔄 내역 초기화
+                    내역 초기화
                   </button>
                   <button
                     onClick={() => setShowDefenseListModal(false)}
-                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs shadow-lg"
+                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs shadow-lg"
                   >
                     닫기
                   </button>
@@ -2397,14 +2120,14 @@
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-xs font-bold text-yellow-400">세무서 제출 양식</h3>
+                  <h3 className="text-sm font-bold text-yellow-400">세무서 제출 양식</h3>
                   <button onClick={() => setShowTaxModal(false)} className="text-slate-400 text-base font-bold">✕</button>
                 </div>
                 <textarea readOnly value={`[세무서 제출용 소득 요약서]\n귀속기간: ${currentYearMonth}\n차량번호: ${appData.private?.carNumber || '미등록'}\n매출합계: ${formatMoney(currentMonthStats.totalRevenue)}\n경비합계: ${formatMoney(currentMonthStats.totalExpense)}\n과세소득: ${formatMoney(currentMonthStats.netIncome)}`} className="w-full h-44 bg-slate-950 text-slate-200 text-xs font-mono p-2.5 rounded-xl border border-slate-800 resize-none" />
                 <button onClick={() => {
                   navigator.clipboard.writeText(`[세무서 제출용 소득 요약서]\n귀속기간: ${currentYearMonth}\n차량번호: ${appData.private?.carNumber || '미등록'}\n매출합계: ${formatMoney(currentMonthStats.totalRevenue)}\n경비합계: ${formatMoney(currentMonthStats.totalExpense)}\n과세소득: ${formatMoney(currentMonthStats.netIncome)}`);
                   alert('복사되었습니다.');
-                }} className="w-full py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs">내용 전체 복사</button>
+                }} className="w-full py-3 bg-yellow-500 text-black font-bold rounded-xl text-xs">내용 전체 복사</button>
               </div>
             </div>
           )}
@@ -2440,60 +2163,60 @@
 
       return (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3 max-h-[90vh] overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3.5 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-              <h3 className="text-xs font-bold text-yellow-400">{dateKey} 운행 기록</h3>
+              <h3 className="text-sm font-bold text-yellow-400">{dateKey} 운행 기록</h3>
               <button onClick={onClose} className="text-slate-400 font-bold text-base">✕</button>
             </div>
-            <label className="flex items-center gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800 cursor-pointer">
-              <input type="checkbox" checked={isHoliday} onChange={(e) => setIsHoliday(e.target.checked)} className="w-4 h-4 rounded text-yellow-500" />
+            <label className="flex items-center gap-2.5 bg-slate-950 p-3 rounded-xl border border-slate-800 cursor-pointer">
+              <input type="checkbox" checked={isHoliday} onChange={(e) => setIsHoliday(e.target.checked)} className="w-5 h-5 rounded text-yellow-500" />
               <span className="text-xs font-bold text-slate-300">이 날은 휴무했습니다 (미운행)</span>
             </label>
             {!isHoliday && (
-              <div className="space-y-2.5">
-                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+              <div className="space-y-3">
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
                   <div className="flex justify-between items-center">
-                    <span className="text-[11px] font-bold text-slate-300">근무 시간 (출·퇴근)</span>
-                    {calculatedMins > 0 && <span className="text-[11px] font-bold text-blue-400">{formatMinutesToHours(calculatedMins)}</span>}
+                    <span className="text-xs font-bold text-slate-300">근무 시간 (출·퇴근)</span>
+                    {calculatedMins > 0 && <span className="text-xs font-bold text-blue-400">{formatMinutesToHours(calculatedMins)}</span>}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-[10px] text-slate-400 block mb-0.5">출근 시간</label>
-                      <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs text-white text-center font-bold" />
+                      <label className="text-xs text-slate-400 block mb-1">출근 시간</label>
+                      <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-lg text-xs text-white text-center font-bold" />
                     </div>
                     <div>
-                      <label className="text-[10px] text-slate-400 block mb-0.5">퇴근 시간</label>
-                      <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs text-white text-center font-bold" />
+                      <label className="text-xs text-slate-400 block mb-1">퇴근 시간</label>
+                      <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-lg text-xs text-white text-center font-bold" />
                     </div>
                   </div>
                 </div>
                 {activeType === 'corporate' ? (
                   <>
-                    <div><label className="text-[11px] text-slate-400 block mb-1">당일 총매출</label><SmartMoneyInput value={revenue} onChange={setRevenue} colorClass="text-yellow-400" /></div>
-                    <div><label className="text-[11px] text-blue-400 block mb-1">가스비</label><SmartMoneyInput value={gas} onChange={setGas} colorClass="text-blue-300" /></div>
-                    <div><label className="text-[11px] text-orange-400 block mb-1">기타 기사경비</label><SmartMoneyInput value={driverExpense} onChange={setDriverExpense} colorClass="text-orange-300" /></div>
+                    <div><label className="text-xs text-slate-300 block mb-1">당일 총매출</label><SmartMoneyInput value={revenue} onChange={setRevenue} colorClass="text-yellow-400" /></div>
+                    <div><label className="text-xs text-blue-400 block mb-1">가스비</label><SmartMoneyInput value={gas} onChange={setGas} colorClass="text-blue-300" /></div>
+                    <div><label className="text-xs text-orange-400 block mb-1">기타 기사경비</label><SmartMoneyInput value={driverExpense} onChange={setDriverExpense} colorClass="text-orange-300" /></div>
                   </>
                 ) : (
                   <>
                     <div className="grid grid-cols-2 gap-2">
-                      <div><label className="text-[10px] text-slate-400 block mb-1">카드 수입</label><SmartMoneyInput value={cardRev} onChange={setCardRev} /></div>
-                      <div><label className="text-[10px] text-slate-400 block mb-1">현금 수입</label><SmartMoneyInput value={cashRev} onChange={setCashRev} /></div>
+                      <div><label className="text-xs text-slate-300 block mb-1">카드 수입</label><SmartMoneyInput value={cardRev} onChange={setCardRev} /></div>
+                      <div><label className="text-xs text-slate-300 block mb-1">현금 수입</label><SmartMoneyInput value={cashRev} onChange={setCashRev} /></div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <div><label className="text-[10px] text-slate-400 block mb-1">가스비</label><SmartMoneyInput value={privGas} onChange={setPrivGas} /></div>
-                      <div><label className="text-[10px] text-slate-400 block mb-1">통행료</label><SmartMoneyInput value={toll} onChange={setToll} /></div>
+                      <div><label className="text-xs text-slate-300 block mb-1">가스비</label><SmartMoneyInput value={privGas} onChange={setPrivGas} /></div>
+                      <div><label className="text-xs text-slate-300 block mb-1">통행료</label><SmartMoneyInput value={toll} onChange={setToll} /></div>
                     </div>
                   </>
                 )}
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">운행 메모</label>
-                  <input type="text" placeholder="특이사항 메모" value={memo} onChange={(e) => setMemo(e.target.value)} className="w-full bg-slate-950 border border-slate-700 p-2 text-xs rounded-xl text-white" />
+                  <label className="text-xs text-slate-300 block mb-1">운행 메모</label>
+                  <input type="text" placeholder="특이사항 메모" value={memo} onChange={(e) => setMemo(e.target.value)} className="w-full bg-slate-950 border border-slate-700 p-2.5 text-xs rounded-xl text-white" />
                 </div>
               </div>
             )}
             <div className="flex gap-2 pt-2">
-              <button onClick={handleSave} className="flex-1 py-2.5 bg-yellow-500 text-black font-bold rounded-xl text-xs">저장 완료</button>
-              <button onClick={onClose} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
+              <button onClick={handleSave} className="flex-1 py-3 bg-yellow-500 text-black font-bold rounded-xl text-xs">저장 완료</button>
+              <button onClick={onClose} className="px-4 py-3 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
             </div>
           </div>
         </div>
@@ -2516,12 +2239,11 @@
           return (
             <div className="h-full bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
               <div className="bg-slate-900 border border-red-500/40 p-6 rounded-3xl max-w-sm w-full space-y-4 shadow-2xl">
-                <div className="w-12 h-12 rounded-2xl bg-red-950/80 border border-red-500/40 flex items-center justify-center mx-auto text-2xl">🛡️</div>
                 <div>
                   <h2 className="text-base font-bold text-red-400">데이터 안전 보호 모드</h2>
                   <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">화면을 새로고침하여 시스템을 복구합니다.</p>
                 </div>
-                <button onClick={() => window.location.reload()} className="w-full py-2.5 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow">화면 새로고침</button>
+                <button onClick={() => window.location.reload()} className="w-full py-3 bg-yellow-500 text-black font-bold text-xs rounded-xl shadow">화면 새로고침</button>
               </div>
             </div>
           );
