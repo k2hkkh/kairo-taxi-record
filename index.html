@@ -31,7 +31,6 @@
       overflow: hidden;
     }
 
-    /* 선명한 네온 속도계 폰트 */
     .font-speed-neon {
       color: #00f5ff;
       -webkit-text-stroke: 3px #ffffff;
@@ -43,7 +42,6 @@
       text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
 
-    /* 유리 반사용 거울 모드 (상하 반전) */
     .hud-mirror {
       transform: scaleY(-1);
     }
@@ -59,7 +57,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v5.1.0';
+    const APP_VERSION = 'v5.1.1';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V21';
 
     const WELCOME_MESSAGES = [
@@ -309,9 +307,7 @@
       const [hudToastText, setHudToastText] = useState('');
       const hudToastTimer = useRef(null);
 
-      // HUD 모드: true면 유리 반사(거울) 모드, false면 일반 정방향 모드
       const [isHudMirror, setIsHudMirror] = useState(false);
-
       const [isSheetUrlLocked, setIsSheetUrlLocked] = useState(true);
 
       const [welcomeMsg] = useState(() => WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]);
@@ -463,22 +459,10 @@
           }
         };
 
+        // 로컬 스토리지에 즉시 안전 저장
         setAppData(newAppData);
 
-        // 기기 파일 백업
-        try {
-          const blob = new Blob([JSON.stringify(newAppData, null, 2)], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `K-TAXI_장부백업_${todayKey}.json`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        } catch(e) {
-          console.warn('Auto File Backup Error:', e);
-        }
-
-        // 구글 스프레드시트 백업
+        // 구글 스프레드시트 연동이 있는 경우 백그라운드 전송
         if (appData.googleSheetUrl && appData.googleSheetUrl.startsWith('http')) {
           try {
             fetch(appData.googleSheetUrl, {
@@ -649,7 +633,6 @@
         return cells;
       }, [currentYearMonth]);
 
-      // HUD 화면 터치 시 유리 반사 모드 On/Off 토글
       const handleToggleHudMirror = () => {
         const nextMirror = !isHudMirror;
         setIsHudMirror(nextMirror);
@@ -666,7 +649,7 @@
       return (
         <div className="w-full h-full flex flex-col bg-black relative overflow-hidden">
           
-          {/* 1. 상단 툴바: 첫 출근 대기(welcome) 화면에서는 숨김 처리 */}
+          {/* 상단 툴바 */}
           {currentTab !== 'welcome' && (
             <header className="flex-shrink-0 px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative">
               <div className="flex items-center gap-2 overflow-hidden">
@@ -756,7 +739,7 @@
 
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3.5 md:p-6 overflow-y-auto max-w-4xl mx-auto w-full'}`}>
             
-            {/* 1. 첫 출근 대기 화면 (상단 툴바 없음, 100% 풀스크린) */}
+            {/* 1. 첫 출근 대기 화면 */}
             {currentTab === 'welcome' && (
               <div className="h-full flex flex-col justify-between p-6 md:p-12 text-center bg-gradient-to-b from-black via-slate-900 to-black">
                 <div className="w-full flex items-center justify-between pt-4">
@@ -789,7 +772,7 @@
               </div>
             )}
 
-            {/* 2. 오늘 & 건강 알림 탭 (가로/세로 반응형 2열 배치) */}
+            {/* 2. 오늘 & 건강 알림 탭 */}
             {currentTab === 'today' && (
               <div className="space-y-3.5 pb-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -885,20 +868,18 @@
               </div>
             )}
 
-            {/* 3. 초대형 HUD 속도계 (가로/세로 자동 반응형 + 극대화 폰트 크기) */}
+            {/* 3. 초대형 HUD 속도계 */}
             {currentTab === 'hud' && (
               <div
                 onClick={handleToggleHudMirror}
                 className={`w-full h-full flex flex-col items-center justify-center select-none relative overflow-hidden bg-black cursor-pointer ${isHudMirror ? 'hud-mirror' : ''}`}
               >
-                {/* 1초 모드 알림 토스트 */}
                 {hudToastText && (
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-slate-900/95 border-2 border-yellow-400 px-6 py-3 rounded-2xl shadow-2xl pointer-events-none animate-fade-in">
                     <span className="text-base font-black text-yellow-300">{hudToastText}</span>
                   </div>
                 )}
 
-                {/* 반응형 초대형 속도계 렌더링 영역 */}
                 <div className="w-full h-full flex flex-col items-center justify-center p-2">
                   <span
                     className={`font-black tracking-tighter font-mono leading-none select-none ${
@@ -916,7 +897,6 @@
                   </span>
                 </div>
 
-                {/* 하단 안내 문구 */}
                 <div className="absolute bottom-3 left-0 right-0 text-center pointer-events-none">
                   <span className="text-[11px] font-bold text-slate-600">
                     화면 터치 시 유리 반사(거울) 모드가 켜집니다
@@ -925,7 +905,7 @@
               </div>
             )}
 
-            {/* 4. 운행 기록 달력 탭 (가로/세로 반응형 지원) */}
+            {/* 4. 운행 기록 달력 탭 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
@@ -1012,7 +992,7 @@
               </div>
             )}
 
-            {/* 5. 기본 설정 탭 (가로/세로 반응형 2열 지원) */}
+            {/* 5. 기본 설정 탭 */}
             {currentTab === 'settings' && (
               <div className="space-y-3.5 pb-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -1077,10 +1057,10 @@
                   </div>
                 </div>
 
-                {/* 백업 파일 관리 */}
+                {/* 백업 파일 수동 관리 */}
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-sm font-bold text-slate-200">장부 파일 백업 & 복원</span>
+                    <span className="text-sm font-bold text-slate-200">장부 파일 수동 백업 & 복원</span>
                     <span className="text-xs text-slate-500">{APP_VERSION}</span>
                   </div>
                   <div className="flex gap-2">
@@ -1092,7 +1072,7 @@
                       a.download = `K-TAXI_장부백업_${todayKey}.json`;
                       a.click();
                     }} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs border border-slate-700">
-                      수동 백업 파일 저장
+                      수동 백업 파일 다운로드
                     </button>
                     <label className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs border border-slate-700 text-center cursor-pointer">
                       백업 파일 불러오기
@@ -1117,7 +1097,6 @@
 
           {/* 모달 창 모음 */}
 
-          {/* 1. 길안내 내비 선택 모달 */}
           {showNavModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl text-center">
@@ -1138,13 +1117,12 @@
             </div>
           )}
 
-          {/* 2. 퇴근 마감 화면 */}
           {showClosingModal && (
             <div className="fixed inset-0 bg-black flex flex-col justify-between p-6 z-50 text-center animate-fade-in">
               <div className="pt-16 space-y-6">
                 <div className="space-y-4 px-2">
                   <span className="inline-block bg-yellow-500 text-black text-xs font-black px-4 py-1.5 rounded-full">
-                    오늘 운행 마감 완료 (2중 자동 백업)
+                    오늘 운행 마감 완료
                   </span>
                   <h3 className="text-2xl font-black text-white leading-relaxed drop-shadow-lg">
                     {closingMsg}
@@ -1169,7 +1147,6 @@
             </div>
           )}
 
-          {/* 3. 출근 시각 수정 모달 */}
           {showEditStartTimeModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl">
@@ -1194,7 +1171,6 @@
             </div>
           )}
 
-          {/* 4. 쪽잠 설정 모달 */}
           {showNapVisualModal && (
             <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-indigo-500/60 rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl text-center">
@@ -1259,7 +1235,6 @@
             </div>
           )}
 
-          {/* 5. 건강 루틴 추가 모달 */}
           {showAddRoutineModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-5 space-y-3.5 shadow-2xl">
@@ -1296,7 +1271,6 @@
             </div>
           )}
 
-          {/* 6. 일별 장부 입력 모달 */}
           {showDailyModal && (
             <DailyRecordModal
               activeType={activeType}
@@ -1307,7 +1281,6 @@
             />
           )}
 
-          {/* 7. 세무서 양식 모달 */}
           {showTaxModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 space-y-3">
