@@ -31,16 +31,21 @@
       overflow: hidden;
     }
 
-    /* 선명한 네온 속도계 폰트 효과 */
+    /* 선명한 네온 속도계 폰트 */
     .font-speed-neon {
       color: #00f5ff;
       -webkit-text-stroke: 3px #ffffff;
-      text-shadow: 0 0 35px rgba(0, 245, 255, 0.9), 0 0 10px rgba(255, 255, 255, 0.8);
+      text-shadow: 0 0 45px rgba(0, 245, 255, 0.95), 0 0 15px rgba(255, 255, 255, 0.9);
     }
     .font-speed-zero {
       color: rgba(255, 255, 255, 0.25);
       -webkit-text-stroke: 2px rgba(255, 255, 255, 0.6);
-      text-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+      text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+    }
+
+    /* 유리 반사용 거울 모드 (상하 반전) */
+    .hud-mirror {
+      transform: scaleY(-1);
     }
   </style>
 </head>
@@ -54,8 +59,8 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v5.0.0';
-    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V20';
+    const APP_VERSION = 'v5.1.0';
+    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V21';
 
     const WELCOME_MESSAGES = [
       "오늘도 안전운전 하실 거죠? 안전이 가장 큰 수입입니다!",
@@ -141,7 +146,7 @@
         let bestCandidate = null;
         let mostRecordsCount = -1;
         const keysToScan = [];
-        for (let i = 27; i >= 1; i--) keysToScan.push(`K_TAXI_RECORD_DATA_V${i}`);
+        for (let i = 28; i >= 1; i--) keysToScan.push(`K_TAXI_RECORD_DATA_V${i}`);
         keysToScan.push('K_TAXI_RECORD_DATA', 'k_taxi_data');
 
         for (let i = 0; i < localStorage.length; i++) {
@@ -304,6 +309,9 @@
       const [hudToastText, setHudToastText] = useState('');
       const hudToastTimer = useRef(null);
 
+      // HUD 모드: true면 유리 반사(거울) 모드, false면 일반 정방향 모드
+      const [isHudMirror, setIsHudMirror] = useState(false);
+
       const [isSheetUrlLocked, setIsSheetUrlLocked] = useState(true);
 
       const [welcomeMsg] = useState(() => WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]);
@@ -318,36 +326,14 @@
       const [showNapVisualModal, setShowNapVisualModal] = useState(false);
 
       const [tempStartTime, setTempStartTime] = useState('16:30');
-
       const [newRoutineTitle, setNewRoutineTitle] = useState('');
       const [newRoutineTime, setNewRoutineTime] = useState('12:00');
 
       const [gpsSpeed, setGpsSpeed] = useState(0);
 
-      // HUD 모드: 1(일반 세로), 2(유리반사 세로), 3(유리반사 가로 좌), 4(유리반사 가로 우)
-      const [hudCycleStep, setHudCycleStep] = useState(1);
-
       const [napTotalMinutes, setNapTotalMinutes] = useState(20);
       const [napTimerSeconds, setNapTimerSeconds] = useState(20 * 60);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
-
-      // HUD 영역 실제 크기 측정 (회전 시 찌그러짐 원천 방지)
-      const hudAreaRef = useRef(null);
-      const [hudDims, setHudDims] = useState({ w: 360, h: 500 });
-
-      useEffect(() => {
-        const updateDims = () => {
-          if (hudAreaRef.current) {
-            const rect = hudAreaRef.current.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-              setHudDims({ w: rect.width, h: rect.height });
-            }
-          }
-        };
-        updateDims();
-        window.addEventListener('resize', updateDims);
-        return () => window.removeEventListener('resize', updateDims);
-      }, [currentTab]);
 
       const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
       const todayKey = getTodayKey();
@@ -361,7 +347,7 @@
         }
       }, [appData]);
 
-      // 화면 꺼짐 방지 (Screen Wake Lock)
+      // 화면 꺼짐 방지
       useEffect(() => {
         let wakeLockSentinel = null;
         const requestWakeLock = async () => {
@@ -389,7 +375,7 @@
         };
       }, [currentTab]);
 
-      // 스마트폰 순수 GPS 속도 측정
+      // GPS 속도 측정
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -479,7 +465,7 @@
 
         setAppData(newAppData);
 
-        // 1. 기기 파일 백업
+        // 기기 파일 백업
         try {
           const blob = new Blob([JSON.stringify(newAppData, null, 2)], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
@@ -492,7 +478,7 @@
           console.warn('Auto File Backup Error:', e);
         }
 
-        // 2. 구글 스프레드시트 2중 자동 전송
+        // 구글 스프레드시트 백업
         if (appData.googleSheetUrl && appData.googleSheetUrl.startsWith('http')) {
           try {
             fetch(appData.googleSheetUrl, {
@@ -663,17 +649,12 @@
         return cells;
       }, [currentYearMonth]);
 
-      // HUD 모드 터치 순환
-      const handleCycleHudMode = () => {
-        const nextStep = (hudCycleStep % 4) + 1;
-        setHudCycleStep(nextStep);
+      // HUD 화면 터치 시 유리 반사 모드 On/Off 토글
+      const handleToggleHudMirror = () => {
+        const nextMirror = !isHudMirror;
+        setIsHudMirror(nextMirror);
 
-        let label = '일반 세로 화면';
-        if (nextStep === 2) label = '유리 반사용 세로';
-        if (nextStep === 3) label = '유리 반사용 가로 (좌)';
-        if (nextStep === 4) label = '유리 반사용 가로 (우)';
-
-        setHudToastText(label);
+        setHudToastText(nextMirror ? '유리 반사 (거울 모드)' : '일반 정방향 모드');
         if (hudToastTimer.current) clearTimeout(hudToastTimer.current);
         hudToastTimer.current = setTimeout(() => {
           setHudToastText('');
@@ -682,59 +663,46 @@
 
       const DAYS_NAME = ['일', '월', '화', '수', '목', '금', '토'];
 
-      // HUD 모드별 정밀 CSS 변환 (찌그러짐 0%)
-      const hudTransformStyle = useMemo(() => {
-        if (hudCycleStep === 1) return { width: '100%', height: '100%', transform: 'none' };
-        if (hudCycleStep === 2) return { width: '100%', height: '100%', transform: 'scaleY(-1)' };
-        const rot = hudCycleStep === 3 ? '-90deg' : '90deg';
-        return {
-          width: `${hudDims.h}px`,
-          height: `${hudDims.w}px`,
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: `translate(-50%, -50%) rotate(${rot}) scaleY(-1)`
-        };
-      }, [hudCycleStep, hudDims]);
-
       return (
-        <div className="max-w-md mx-auto w-full h-full flex flex-col bg-black border-x border-slate-900 relative overflow-hidden">
+        <div className="w-full h-full flex flex-col bg-black relative overflow-hidden">
           
-          {/* 상단 간결 툴바: [K-TAXI] [차량번호] + [길안내 내비] + [전체 메뉴] */}
-          <header className="flex-shrink-0 px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative">
-            <div className="flex items-center gap-2 overflow-hidden">
-              <span className="bg-yellow-500 text-black text-xs font-black px-2.5 py-1 rounded shadow flex-shrink-0">K-TAXI</span>
-              <span className="text-sm font-bold text-white tracking-tight truncate max-w-[150px]">
-                {appData[activeType]?.carNumber || '충남31바3238'}
-              </span>
-            </div>
+          {/* 1. 상단 툴바: 첫 출근 대기(welcome) 화면에서는 숨김 처리 */}
+          {currentTab !== 'welcome' && (
+            <header className="flex-shrink-0 px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative">
+              <div className="flex items-center gap-2 overflow-hidden">
+                <span className="bg-yellow-500 text-black text-xs font-black px-2.5 py-1 rounded shadow flex-shrink-0">K-TAXI</span>
+                <span className="text-sm font-bold text-white tracking-tight truncate max-w-[150px]">
+                  {appData[activeType]?.carNumber || '충남31바3238'}
+                </span>
+              </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button
-                onClick={() => setShowNavModal(true)}
-                className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-black shadow active:scale-95 transition"
-              >
-                길안내 내비
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => setShowNavModal(true)}
+                  className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-black shadow active:scale-95 transition"
+                >
+                  길안내 내비
+                </button>
 
-              <button
-                onClick={() => setIsMenuOpen(prev => !prev)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-black border shadow transition active:scale-95 ${
-                  isMenuOpen
-                    ? 'bg-yellow-500 text-slate-950 border-yellow-400 font-black'
-                    : 'bg-slate-800 hover:bg-slate-700 text-yellow-400 border-slate-700'
-                }`}
-              >
-                {isMenuOpen ? '닫기' : '전체 메뉴'}
-              </button>
-            </div>
-          </header>
+                <button
+                  onClick={() => setIsMenuOpen(prev => !prev)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black border shadow transition active:scale-95 ${
+                    isMenuOpen
+                      ? 'bg-yellow-500 text-slate-950 border-yellow-400 font-black'
+                      : 'bg-slate-800 hover:bg-slate-700 text-yellow-400 border-slate-700'
+                  }`}
+                >
+                  {isMenuOpen ? '닫기' : '전체 메뉴'}
+                </button>
+              </div>
+            </header>
+          )}
 
           {/* 4대 핵심 메뉴 드롭다운 */}
           {isMenuOpen && (
             <div className="absolute top-12 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-lg border-b-2 border-yellow-500 shadow-2xl p-4 animate-fade-in space-y-3">
               <span className="text-xs font-bold text-slate-400 block">화면 이동</span>
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
                 <button
                   onClick={() => { setCurrentTab('hud'); setIsMenuOpen(false); }}
                   className={`py-4 px-3.5 rounded-2xl text-left border transition ${
@@ -786,28 +754,28 @@
             </div>
           )}
 
-          <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3.5 overflow-y-auto'}`}>
+          <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3.5 md:p-6 overflow-y-auto max-w-4xl mx-auto w-full'}`}>
             
-            {/* 1. 첫 출근 대기 화면 */}
+            {/* 1. 첫 출근 대기 화면 (상단 툴바 없음, 100% 풀스크린) */}
             {currentTab === 'welcome' && (
-              <div className="h-full flex flex-col justify-between p-6 text-center bg-gradient-to-b from-black via-slate-900 to-black">
-                <div className="w-full flex items-center justify-between pt-2">
-                  <span className="bg-yellow-500 text-black text-xs font-black px-3 py-1 rounded-full shadow-lg">
+              <div className="h-full flex flex-col justify-between p-6 md:p-12 text-center bg-gradient-to-b from-black via-slate-900 to-black">
+                <div className="w-full flex items-center justify-between pt-4">
+                  <span className="bg-yellow-500 text-black text-xs font-black px-3.5 py-1.5 rounded-full shadow-lg">
                     K-TAXI 스마트 파트너
                   </span>
-                  <span className="text-xs font-bold text-slate-300 bg-slate-900 border border-slate-700 px-3 py-1 rounded-full">
+                  <span className="text-xs font-bold text-slate-300 bg-slate-900 border border-slate-700 px-3.5 py-1.5 rounded-full">
                     {appData[activeType]?.carNumber || '충남31바3238'} ({activeType === 'corporate' ? '법인' : '개인'})
                   </span>
                 </div>
 
-                <div className="flex-1 flex flex-col items-center justify-center px-1 my-auto">
+                <div className="flex-1 flex flex-col items-center justify-center px-2 my-auto">
                   <span className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">{todayKey}</span>
-                  <h1 className="text-3xl sm:text-4xl font-black text-white leading-snug break-keep drop-shadow-xl">
+                  <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-white leading-snug break-keep drop-shadow-xl max-w-xl">
                     {welcomeMsg}
                   </h1>
                 </div>
 
-                <div className="w-full pb-8">
+                <div className="w-full max-w-md mx-auto pb-8">
                   <button
                     onClick={handleStartShift}
                     className="w-full py-7 bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black text-2xl rounded-3xl shadow-[0_0_45px_rgba(250,204,21,0.5)] border-2 border-yellow-200 flex items-center justify-center gap-3 active:scale-98 transition-transform"
@@ -815,58 +783,58 @@
                     <span>출근하기 (운행 시작)</span>
                   </button>
                   <p className="text-xs text-slate-500 mt-3 font-semibold">
-                    터치 시 출근 시간이 기록되고 속도계 화면이 열립니다.
+                    터치 시 출근 시간이 기록되고 속도계 화면이 즉시 열립니다.
                   </p>
                 </div>
               </div>
             )}
 
-            {/* 2. 오늘 & 건강 알림 탭 */}
+            {/* 2. 오늘 & 건강 알림 탭 (가로/세로 반응형 2열 배치) */}
             {currentTab === 'today' && (
               <div className="space-y-3.5 pb-6">
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-sm space-y-2">
-                  <div className="flex items-center justify-between">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-sm space-y-2 flex flex-col justify-between">
                     <div>
                       <span className="text-xs text-slate-400 font-bold block">오늘의 출근 기록</span>
-                      <div className="text-lg font-black text-yellow-400 mt-0.5">
+                      <div className="text-xl font-black text-yellow-400 mt-0.5">
                         {todayRecord.startTime ? `${todayRecord.startTime} 출근 완료` : '출근 기록 없음'}
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 pt-2">
                       <button
                         onClick={() => {
                           setTempStartTime(todayRecord.startTime || getCurrentTimeStr());
                           setShowEditStartTimeModal(true);
                         }}
-                        className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 rounded-xl font-bold text-xs"
+                        className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 rounded-xl font-bold text-xs"
                       >
                         시간 수정
                       </button>
                       <button
                         onClick={handleResetShift}
-                        className="px-3.5 py-2 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 border border-slate-700 rounded-xl font-bold text-xs"
+                        className="px-4 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 border border-slate-700 rounded-xl font-bold text-xs"
                       >
                         초기화
                       </button>
                     </div>
                   </div>
-                </div>
 
-                <div
-                  onClick={() => setShowNapVisualModal(true)}
-                  className="bg-gradient-to-r from-indigo-950/90 via-slate-900 to-indigo-950/90 p-4 rounded-2xl border-2 border-indigo-500/50 shadow-xl flex items-center justify-between cursor-pointer active:scale-98 transition"
-                >
-                  <div>
-                    <h4 className="text-base font-black text-indigo-200">20분 파워 쪽잠 타이머</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {isNapTimerActive
-                        ? `쪽잠 진행 중 (${Math.floor(napTimerSeconds / 60)}분 ${String(napTimerSeconds % 60).padStart(2, '0')}초 남음)`
-                        : '터치하여 쪽잠 시간 설정 및 시작'}
-                    </p>
+                  <div
+                    onClick={() => setShowNapVisualModal(true)}
+                    className="bg-gradient-to-r from-indigo-950/90 via-slate-900 to-indigo-950/90 p-4 rounded-2xl border-2 border-indigo-500/50 shadow-xl flex items-center justify-between cursor-pointer active:scale-98 transition"
+                  >
+                    <div>
+                      <h4 className="text-base font-black text-indigo-200">20분 파워 쪽잠 타이머</h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {isNapTimerActive
+                          ? `쪽잠 진행 중 (${Math.floor(napTimerSeconds / 60)}분 ${String(napTimerSeconds % 60).padStart(2, '0')}초 남음)`
+                          : '터치하여 쪽잠 시간 설정 및 시작'}
+                      </p>
+                    </div>
+                    <span className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow">
+                      {isNapTimerActive ? '확인/취소' : '시작'}
+                    </span>
                   </div>
-                  <span className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow">
-                    {isNapTimerActive ? '확인/취소' : '시작'}
-                  </span>
                 </div>
 
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
@@ -882,7 +850,7 @@
                     </button>
                   </div>
 
-                  <div className="space-y-2 pt-1">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
                     {(appData.healthRoutines || []).map((routine) => (
                       <div
                         key={routine.id}
@@ -917,12 +885,11 @@
               </div>
             )}
 
-            {/* 3. 순수 초대형 HUD 속도계 화면 (100% 암전 + 네온 속도계) */}
+            {/* 3. 초대형 HUD 속도계 (가로/세로 자동 반응형 + 극대화 폰트 크기) */}
             {currentTab === 'hud' && (
               <div
-                ref={hudAreaRef}
-                onClick={handleCycleHudMode}
-                className="w-full h-full flex flex-col items-center justify-center select-none relative overflow-hidden bg-black cursor-pointer"
+                onClick={handleToggleHudMirror}
+                className={`w-full h-full flex flex-col items-center justify-center select-none relative overflow-hidden bg-black cursor-pointer ${isHudMirror ? 'hud-mirror' : ''}`}
               >
                 {/* 1초 모드 알림 토스트 */}
                 {hudToastText && (
@@ -931,30 +898,34 @@
                   </div>
                 )}
 
-                {/* 메인 디지털 속도계 박스 */}
-                <div style={hudTransformStyle} className="flex flex-col items-center justify-center p-4">
-                  <div className="flex flex-col items-center justify-center text-center">
-                    <span className={`text-[12rem] sm:text-[14rem] font-black tracking-tighter font-mono leading-none select-none ${
+                {/* 반응형 초대형 속도계 렌더링 영역 */}
+                <div className="w-full h-full flex flex-col items-center justify-center p-2">
+                  <span
+                    className={`font-black tracking-tighter font-mono leading-none select-none ${
                       gpsSpeed > 0 ? 'font-speed-neon' : 'font-speed-zero'
-                    }`}>
-                      {gpsSpeed}
-                    </span>
-                    <span className="text-3xl font-black text-slate-400/80 tracking-widest mt-[-10px]">
-                      KM/H
-                    </span>
-                  </div>
+                    }`}
+                    style={{ fontSize: 'min(50vw, 55vh)' }}
+                  >
+                    {gpsSpeed}
+                  </span>
+                  <span
+                    className="font-black text-slate-400/80 tracking-widest mt-[-2vh]"
+                    style={{ fontSize: 'min(6vw, 6vh)' }}
+                  >
+                    KM/H
+                  </span>
                 </div>
 
                 {/* 하단 안내 문구 */}
-                <div className="absolute bottom-4 left-0 right-0 text-center pointer-events-none">
-                  <span className="text-xs font-bold text-slate-600">
-                    화면 터치 시 전면유리 반사 모드가 바뀝니다
+                <div className="absolute bottom-3 left-0 right-0 text-center pointer-events-none">
+                  <span className="text-[11px] font-bold text-slate-600">
+                    화면 터치 시 유리 반사(거울) 모드가 켜집니다
                   </span>
                 </div>
               </div>
             )}
 
-            {/* 4. 운행 기록 달력 탭 */}
+            {/* 4. 운행 기록 달력 탭 (가로/세로 반응형 지원) */}
             {currentTab === 'calendar' && (
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
@@ -1041,68 +1012,69 @@
               </div>
             )}
 
-            {/* 5. 기본 설정 탭 */}
+            {/* 5. 기본 설정 탭 (가로/세로 반응형 2열 지원) */}
             {currentTab === 'settings' && (
               <div className="space-y-3.5 pb-6">
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
-                    <span className="text-sm font-bold text-white">차량 정보 및 운행 모드</span>
-                    {activeType === 'private' && (
-                      <button onClick={() => setShowTaxModal(true)} className="px-2.5 py-1 bg-yellow-500 text-black font-bold rounded-lg text-xs">세무서 양식 복사</button>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-300">운행 모드</span>
-                    <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
-                      <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'corporate' }))} className={`px-4 py-1.5 text-xs font-bold rounded-lg ${activeType === 'corporate' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>법인 택시</button>
-                      <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'private' }))} className={`px-4 py-1.5 text-xs font-bold rounded-lg ${activeType === 'private' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>개인 택시</button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
+                      <span className="text-sm font-bold text-white">차량 정보 및 운행 모드</span>
+                      {activeType === 'private' && (
+                        <button onClick={() => setShowTaxModal(true)} className="px-2.5 py-1 bg-yellow-500 text-black font-bold rounded-lg text-xs">세무서 양식 복사</button>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-300">운행 모드</span>
+                      <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+                        <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'corporate' }))} className={`px-4 py-1.5 text-xs font-bold rounded-lg ${activeType === 'corporate' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>법인 택시</button>
+                        <button onClick={() => setAppData(prev => ({ ...prev, activeType: 'private' }))} className={`px-4 py-1.5 text-xs font-bold rounded-lg ${activeType === 'private' ? 'bg-yellow-500 text-black' : 'text-slate-400'}`}>개인 택시</button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-sm pt-2 border-t border-slate-800">
+                      <span className="text-slate-300">차량 번호</span>
+                      <input
+                        type="text"
+                        placeholder="충남31바 1234"
+                        value={appData[activeType]?.carNumber || '충남31바3238'}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setAppData(prev => ({ ...prev, [activeType]: { ...(prev[activeType] || {}), carNumber: val } }));
+                        }}
+                        className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-40 text-white"
+                      />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between text-sm pt-2 border-t border-slate-800">
-                    <span className="text-slate-300">차량 번호</span>
-                    <input
-                      type="text"
-                      placeholder="충남31바 1234"
-                      value={appData[activeType]?.carNumber || '충남31바3238'}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setAppData(prev => ({ ...prev, [activeType]: { ...(prev[activeType] || {}), carNumber: val } }));
-                      }}
-                      className="bg-slate-950 border border-slate-700 px-3 py-1.5 rounded-xl text-right font-bold w-40 text-white"
-                    />
-                  </div>
-                </div>
 
-                {/* 구글 시트 주소 잠금 카드 */}
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-bold text-emerald-400">구글 시트 자동 저장 주소</span>
-                    <button
-                      onClick={() => setIsSheetUrlLocked(prev => !prev)}
-                      className={`px-3 py-1 rounded-xl text-xs font-bold border transition ${
+                  <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-bold text-emerald-400">구글 시트 자동 저장 주소</span>
+                      <button
+                        onClick={() => setIsSheetUrlLocked(prev => !prev)}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold border transition ${
+                          isSheetUrlLocked
+                            ? 'bg-slate-800 text-emerald-300 border-slate-700'
+                            : 'bg-yellow-500 text-black border-yellow-400 font-black'
+                        }`}
+                      >
+                        {isSheetUrlLocked ? '🔒 잠김 (수정하려면 터치)' : '🔓 수정 모드 (완료 후 잠금)'}
+                      </button>
+                    </div>
+                    <input
+                      type="url"
+                      disabled={isSheetUrlLocked}
+                      placeholder="구글 웹앱 주소 붙여넣기"
+                      value={appData.googleSheetUrl || ''}
+                      onChange={(e) => setAppData(prev => ({ ...prev, googleSheetUrl: e.target.value.trim() }))}
+                      className={`w-full p-2.5 text-xs rounded-xl font-mono border transition ${
                         isSheetUrlLocked
-                          ? 'bg-slate-800 text-emerald-300 border-slate-700'
-                          : 'bg-yellow-500 text-black border-yellow-400 font-black'
+                          ? 'bg-slate-950/60 text-slate-500 border-slate-800 cursor-not-allowed'
+                          : 'bg-slate-950 text-white border-yellow-500 focus:outline-none'
                       }`}
-                    >
-                      {isSheetUrlLocked ? '🔒 잠김 (수정하려면 터치)' : '🔓 수정 모드 (완료 후 잠금)'}
-                    </button>
+                    />
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      주소가 잠겨 있으면 실수로 지워지지 않으며, 퇴근 시 구글 엑셀 시트에 안전하게 자동 기록됩니다.
+                    </p>
                   </div>
-                  <input
-                    type="url"
-                    disabled={isSheetUrlLocked}
-                    placeholder="구글 웹앱 주소 붙여넣기"
-                    value={appData.googleSheetUrl || ''}
-                    onChange={(e) => setAppData(prev => ({ ...prev, googleSheetUrl: e.target.value.trim() }))}
-                    className={`w-full p-2.5 text-xs rounded-xl font-mono border transition ${
-                      isSheetUrlLocked
-                        ? 'bg-slate-950/60 text-slate-500 border-slate-800 cursor-not-allowed'
-                        : 'bg-slate-950 text-white border-yellow-500 focus:outline-none'
-                    }`}
-                  />
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    주소가 잠겨 있으면 실수로 지워지지 않으며, 매일 퇴근 시 구글 엑셀 시트에 안전하게 자동 기록됩니다.
-                  </p>
                 </div>
 
                 {/* 백업 파일 관리 */}
