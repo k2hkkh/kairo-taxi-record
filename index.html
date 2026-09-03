@@ -56,7 +56,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v5.4.4';
+    const APP_VERSION = 'v5.4.5';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V24';
 
     const WELCOME_MESSAGES = [
@@ -223,6 +223,7 @@
       return DEFAULT_STORAGE;
     };
 
+    // 최상위 z-[70]으로 항상 맨 위에 뜨는 터치식 시/분/오전오후 시간 설정 컴포넌트
     function DirectTimePickerModal({ initialTime = "12:00", title = "시간 설정", onSave, onClose }) {
       const parseTime = (tStr) => {
         if (!tStr || !tStr.includes(':')) return { ampm: '오후', hour: '12', min: '00' };
@@ -248,7 +249,8 @@
         setMin(nowParsed.min);
       };
 
-      const handleConfirm = () => {
+      const handleConfirm = (e) => {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
         let h = Number(hour) || 12;
         if (h > 12) h = 12;
         if (h < 1) h = 1;
@@ -268,8 +270,8 @@
       };
 
       return (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border-2 border-yellow-500/80 rounded-3xl w-full max-w-xs p-5 space-y-3.5 shadow-2xl">
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-[70]">
+          <div className="bg-slate-900 border-2 border-yellow-500 rounded-3xl w-full max-w-xs p-5 space-y-3.5 shadow-2xl relative z-[71]">
             <div className="flex justify-between items-center pb-1">
               <h3 className="text-base font-black text-white">{title}</h3>
               <button
@@ -454,7 +456,6 @@
       const todayKey = getTodayKey();
       const todayRecord = appData[activeType]?.records?.[todayKey] || {};
 
-      // 출근 기록(startTime)이 없거나 이미 퇴근 완료(endTime 존재) 상태라면 무조건 첫 출근 대기 화면(welcome)으로 시작
       const isShiftRunning = Boolean(appData.isShiftActive && todayRecord.startTime && !todayRecord.endTime);
       const [currentTab, setCurrentTab] = useState(() => (isShiftRunning ? 'calendar' : 'welcome'));
       
@@ -473,6 +474,7 @@
       const [hudToastText, setHudToastText] = useState('');
       const hudToastTimer = useRef(null);
 
+      // 속도계 6대 모드 순서: 1.일반세로 -> 2.반사세로 -> 3.일반가로(좌) -> 4.반사가로(좌) -> 5.일반가로(우) -> 6.반사가로(우)
       const [hudCycleStep, setHudCycleStep] = useState(1);
       const hudAreaRef = useRef(null);
       const [hudDims, setHudDims] = useState({ w: 360, h: 600 });
@@ -489,6 +491,7 @@
       const [showNavModal, setShowNavModal] = useState(false);
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
+      const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
       
       const [showShiftTimePicker, setShowShiftTimePicker] = useState(false);
       const [showRoutineTimePicker, setShowRoutineTimePicker] = useState(false);
@@ -504,21 +507,33 @@
       const [napTimerSeconds, setNapTimerSeconds] = useState(20 * 60);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
 
-      // 스마트폰 뒤로가기 버튼 실수 터치 방지 (종료 확인 알림)
+      // 안드로이드 뒤로가기 (<) 버튼 강력 차단 및 맞춤형 종료 확인 모달 연동
       useEffect(() => {
-        window.history.pushState({ page: 'ktaxi_main' }, '');
+        const setupBackGuard = () => {
+          window.history.pushState({ guard: 'ktaxi_stay' }, '');
+        };
+        setupBackGuard();
 
         const handlePopState = (e) => {
-          const confirmExit = window.confirm("K-TAXI 앱을 정말 종료하고 나가시겠습니까?");
-          if (!confirmExit) {
-            window.history.pushState({ page: 'ktaxi_main' }, '');
-          } else {
-            window.history.back();
-          }
+          setupBackGuard();
+          setShowExitConfirmModal(true);
+        };
+
+        const handleFirstInteraction = () => {
+          setupBackGuard();
+          window.removeEventListener('click', handleFirstInteraction);
+          window.removeEventListener('touchstart', handleFirstInteraction);
         };
 
         window.addEventListener('popstate', handlePopState);
-        return () => window.removeEventListener('popstate', handlePopState);
+        window.addEventListener('click', handleFirstInteraction);
+        window.addEventListener('touchstart', handleFirstInteraction);
+
+        return () => {
+          window.removeEventListener('popstate', handlePopState);
+          window.removeEventListener('click', handleFirstInteraction);
+          window.removeEventListener('touchstart', handleFirstInteraction);
+        };
       }, []);
 
       useEffect(() => {
@@ -599,7 +614,6 @@
         return () => clearInterval(intv);
       }, [appData.healthRoutines]);
 
-      // 출근하기: 출근 시 첫 화면을 운행기록 달력(calendar)으로 전환
       const handleStartShift = () => {
         const nowTime = getCurrentTimeStr();
         const initialStart = todayRecord.startTime || nowTime;
@@ -719,7 +733,8 @@
         }));
       };
 
-      const handleSaveRoutine = () => {
+      const handleSaveRoutine = (e) => {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
         if (!routineTitleInput.trim()) return;
 
         if (editingRoutine) {
@@ -904,6 +919,7 @@
         }
       };
 
+      // 화면 두 번 톡톡 터치: 1.일반세로 -> 2.반사세로 -> 3.일반가로(좌) -> 4.반사가로(좌) -> 5.일반가로(우) -> 6.반사가로(우) 순환
       const handleHudClick = () => {
         if (isLongPressTriggered.current) {
           isLongPressTriggered.current = false;
@@ -919,11 +935,11 @@
 
           const modeLabels = {
             1: '1. 일반 세로 모드',
-            2: '2. 일반 가로 모드 (좌)',
-            3: '3. 일반 가로 모드 (우)',
-            4: '4. 유리 반사 (거울 세로)',
-            5: '5. 유리 반사 (거울 가로 좌)',
-            6: '6. 유리 반사 (거울 가로 우)'
+            2: '2. 반사 세로 모드 (거울 세로)',
+            3: '3. 일반 가로 모드 (좌)',
+            4: '4. 반사 가로 모드 (거울 가로 좌)',
+            5: '5. 일반 가로 모드 (우)',
+            6: '6. 반사 가로 모드 (거울 가로 우)'
           };
 
           setHudToastText(modeLabels[nextStep]);
@@ -945,9 +961,11 @@
         return 'min(32vw, 36vh)';
       };
 
+      // 순서에 따른 transform 매핑
       const hudNumberTransformStyle = useMemo(() => {
-        if (hudCycleStep === 1) return { transform: 'none' };
-        if (hudCycleStep === 2) {
+        if (hudCycleStep === 1) return { transform: 'none' }; // 1. 일반 세로
+        if (hudCycleStep === 2) return { transform: 'scaleY(-1)' }; // 2. 반사 세로
+        if (hudCycleStep === 3) { // 3. 일반 가로 (좌)
           return {
             width: `${hudDims.h}px`,
             height: `${hudDims.w}px`,
@@ -957,18 +975,7 @@
             transform: 'translate(-50%, -50%) rotate(90deg)'
           };
         }
-        if (hudCycleStep === 3) {
-          return {
-            width: `${hudDims.h}px`,
-            height: `${hudDims.w}px`,
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%) rotate(-90deg)'
-          };
-        }
-        if (hudCycleStep === 4) return { transform: 'scaleY(-1)' };
-        if (hudCycleStep === 5) {
+        if (hudCycleStep === 4) { // 4. 반사 가로 (좌)
           return {
             width: `${hudDims.h}px`,
             height: `${hudDims.w}px`,
@@ -978,7 +985,17 @@
             transform: 'translate(-50%, -50%) rotate(90deg) scaleY(-1)'
           };
         }
-        if (hudCycleStep === 6) {
+        if (hudCycleStep === 5) { // 5. 일반 가로 (우)
+          return {
+            width: `${hudDims.h}px`,
+            height: `${hudDims.w}px`,
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%) rotate(-90deg)'
+          };
+        }
+        if (hudCycleStep === 6) { // 6. 반사 가로 (우)
           return {
             width: `${hudDims.h}px`,
             height: `${hudDims.w}px`,
@@ -996,7 +1013,6 @@
       return (
         <div className="w-full h-full flex flex-col bg-black relative overflow-hidden">
           
-          {/* 출근 대기 화면(welcome)이 아닐 때만 상단 툴바 노출 */}
           {currentTab !== 'welcome' && (currentTab !== 'hud' || isHudToolbarVisible) && (
             <header className="flex-shrink-0 px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative animate-fade-in">
               <div className="flex items-center gap-2 overflow-hidden">
@@ -1028,7 +1044,7 @@
             </header>
           )}
 
-          {/* 전체 메뉴: 달력 > 휴식건강 > 속도계 > 설정 순서로 재배치 */}
+          {/* 전체 메뉴: 달력 > 휴식건강 > 속도계 > 설정 순서 */}
           {isMenuOpen && (
             <div className="absolute top-12 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-lg border-b-2 border-yellow-500 shadow-2xl p-4 animate-fade-in space-y-3">
               <span className="text-xs font-bold text-slate-400 block">화면 이동</span>
@@ -1127,7 +1143,6 @@
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
                   
-                  {/* 상단 출근 상태 박스 (퇴근 버튼 완전 삭제, [시간수정] 버튼만 깔끔히 배치) */}
                   <div className="bg-slate-900 px-4 py-3 rounded-2xl border border-slate-800 flex items-center justify-between shadow">
                     {!todayRecord.startTime ? (
                       <button
@@ -1293,6 +1308,7 @@
                       건강 & 휴식 알림 관리 (총 { (appData.healthRoutines || []).length }개)
                     </span>
                     <button
+                      type="button"
                       onClick={() => {
                         setEditingRoutine(null);
                         setRoutineTitleInput('');
@@ -1328,6 +1344,7 @@
 
                         <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-900">
                           <button
+                            type="button"
                             onClick={() => toggleRoutineAlarm(routine.id)}
                             className={`px-3 py-1.5 rounded-xl text-xs font-black border transition ${
                               routine.alarmEnabled
@@ -1338,6 +1355,7 @@
                             {routine.alarmEnabled ? '🔔 알람 켜짐' : '🔕 알람 꺼짐'}
                           </button>
                           <button
+                            type="button"
                             onClick={() => {
                               setEditingRoutine(routine);
                               setRoutineTitleInput(routine.title);
@@ -1349,6 +1367,7 @@
                             수정
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleDeleteRoutine(routine.id)}
                             className="px-3 py-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-400 border border-slate-700 rounded-xl text-xs font-bold"
                           >
@@ -1506,6 +1525,7 @@
             )}
           </main>
 
+          {/* 출근 시간 직접 수정 모달 (z-[70]) */}
           {showShiftTimePicker && (
             <DirectTimePickerModal
               initialTime={todayRecord.startTime || getCurrentTimeStr()}
@@ -1515,6 +1535,7 @@
             />
           )}
 
+          {/* 건강 알림 시간 설정 모달 (z-[70]) */}
           {showRoutineTimePicker && (
             <DirectTimePickerModal
               initialTime={routineTimeInput}
@@ -1527,6 +1548,7 @@
             />
           )}
 
+          {/* 건강 알림 추가/수정 모달 (z-50) */}
           {showRoutineModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl">
@@ -1534,7 +1556,7 @@
                   <h3 className="text-sm font-black text-emerald-400">
                     {editingRoutine ? '알림 항목 수정' : '새 알림 항목 추가'}
                   </h3>
-                  <button onClick={() => setShowRoutineModal(false)} className="text-slate-400 font-bold">✕</button>
+                  <button type="button" onClick={() => setShowRoutineModal(false)} className="text-slate-400 font-bold">✕</button>
                 </div>
 
                 <div className="space-y-3 text-xs">
@@ -1553,19 +1575,24 @@
                     <label className="text-slate-400 block mb-1">알림 시각</label>
                     <button
                       type="button"
-                      onClick={() => setShowRoutineTimePicker(true)}
-                      className="w-full py-3 bg-slate-950 border border-slate-700 rounded-xl text-yellow-400 font-mono font-black text-center text-base active:scale-98 transition"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setShowRoutineTimePicker(true);
+                      }}
+                      className="w-full py-3 bg-slate-950 hover:bg-slate-800 border-2 border-yellow-500/50 rounded-xl text-yellow-400 font-mono font-black text-center text-base active:scale-98 transition flex items-center justify-center gap-2"
                     >
-                      {routineTimeInput} (터치하여 변경)
+                      <span>{routineTimeInput}</span>
+                      <span className="text-xs text-slate-400 font-sans font-normal">(터치하여 변경)</span>
                     </button>
                   </div>
                 </div>
 
                 <div className="flex gap-2 pt-1">
-                  <button onClick={handleSaveRoutine} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs">
+                  <button type="button" onClick={handleSaveRoutine} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs">
                     저장
                   </button>
-                  <button onClick={() => setShowRoutineModal(false)} className="px-4 py-3 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">
+                  <button type="button" onClick={() => setShowRoutineModal(false)} className="px-4 py-3 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">
                     취소
                   </button>
                 </div>
@@ -1619,6 +1646,38 @@
                 >
                   확인 (첫 화면으로)
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* 뒤로가기(<) 실수 방지 맞춤형 종료 확인 모달 */}
+          {showExitConfirmModal && (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-[90] animate-fade-in">
+              <div className="bg-slate-900 border-2 border-red-500/80 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl text-center">
+                <div className="w-12 h-12 rounded-full bg-red-500/20 text-red-400 mx-auto flex items-center justify-center text-xl font-black">
+                  !
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">앱을 종료하시겠습니까?</h3>
+                  <p className="text-xs text-slate-400 mt-1">뒤로가기 버튼이 눌렸습니다. 나가기를 누르면 앱이 닫힙니다.</p>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => {
+                      setShowExitConfirmModal(false);
+                      window.history.go(-2);
+                    }}
+                    className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-black text-xs rounded-xl shadow"
+                  >
+                    나가기
+                  </button>
+                  <button
+                    onClick={() => setShowExitConfirmModal(false)}
+                    className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl"
+                  >
+                    계속 사용
+                  </button>
+                </div>
               </div>
             </div>
           )}
