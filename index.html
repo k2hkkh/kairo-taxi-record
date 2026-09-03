@@ -41,10 +41,6 @@
       -webkit-text-stroke: 2px rgba(255, 255, 255, 0.6);
       text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
     }
-
-    .hud-mirror {
-      transform: scaleY(-1);
-    }
   </style>
 </head>
 <body class="select-none antialiased bg-black">
@@ -57,8 +53,8 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v5.1.1';
-    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V21';
+    const APP_VERSION = 'v5.2.1';
+    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V22';
 
     const WELCOME_MESSAGES = [
       "오늘도 안전운전 하실 거죠? 안전이 가장 큰 수입입니다!",
@@ -104,6 +100,23 @@
       const hours = Math.floor(totalMins / 60);
       const mins = totalMins % 60;
       return mins === 0 ? `${hours}시간` : `${hours}시간 ${mins}분`;
+    };
+
+    const playAlarmSound = () => {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 1.5);
+      } catch (e) {
+        console.warn('Audio play failed', e);
+      }
     };
 
     const DEFAULT_STORAGE = {
@@ -304,10 +317,26 @@
       });
 
       const [isMenuOpen, setIsMenuOpen] = useState(false);
+      const [isHudToolbarVisible, setIsHudToolbarVisible] = useState(false);
+      const hudToolbarTimer = useRef(null);
+
       const [hudToastText, setHudToastText] = useState('');
       const hudToastTimer = useRef(null);
 
-      const [isHudMirror, setIsHudMirror] = useState(false);
+      // 5대 HUD 모드:
+      // 1: 일반 세로
+      // 2: 일반 가로 (좌)
+      // 3: 일반 가로 (우)
+      // 4: 유리반사 (거울 세로)
+      // 5: 유리반사 (거울 가로)
+      const [hudCycleStep, setHudCycleStep] = useState(1);
+
+      const hudAreaRef = useRef(null);
+      const [hudDims, setHudDims] = useState({ w: 360, h: 600 });
+
+      const tapTimesRef = useRef([]);
+      const lastTapTimeRef = useRef(0);
+
       const [isSheetUrlLocked, setIsSheetUrlLocked] = useState(true);
 
       const [welcomeMsg] = useState(() => WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]);
@@ -318,12 +347,13 @@
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
       const [showAddRoutineModal, setShowAddRoutineModal] = useState(false);
+      const [editingRoutine, setEditingRoutine] = useState(null);
       const [showEditStartTimeModal, setShowEditStartTimeModal] = useState(false);
       const [showNapVisualModal, setShowNapVisualModal] = useState(false);
 
       const [tempStartTime, setTempStartTime] = useState('16:30');
-      const [newRoutineTitle, setNewRoutineTitle] = useState('');
-      const [newRoutineTime, setNewRoutineTime] = useState('12:00');
+      const [routineTitleInput, setRoutineTitleInput] = useState('');
+      const [routineTimeInput, setRoutineTimeInput] = useState('12:00');
 
       const [gpsSpeed, setGpsSpeed] = useState(0);
 
@@ -343,7 +373,20 @@
         }
       }, [appData]);
 
-      // 화면 꺼짐 방지
+      useEffect(() => {
+        const updateDims = () => {
+          if (hudAreaRef.current) {
+            const rect = hudAreaRef.current.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              setHudDims({ w: rect.width, h: rect.height });
+            }
+          }
+        };
+        updateDims();
+        window.addEventListener('resize', updateDims);
+        return () => window.removeEventListener('resize', updateDims);
+      }, [currentTab]);
+
       useEffect(() => {
         let wakeLockSentinel = null;
         const requestWakeLock = async () => {
@@ -371,7 +414,6 @@
         };
       }, [currentTab]);
 
-      // GPS 속도 측정
       useEffect(() => {
         if (!navigator.geolocation) return;
 
@@ -406,6 +448,7 @@
         }));
 
         setCurrentTab('hud');
+        setIsHudToolbarVisible(false);
       };
 
       const handleResetShift = () => {
@@ -459,10 +502,8 @@
           }
         };
 
-        // 로컬 스토리지에 즉시 안전 저장
         setAppData(newAppData);
 
-        // 구글 스프레드시트 연동이 있는 경우 백그라운드 전송
         if (appData.googleSheetUrl && appData.googleSheetUrl.startsWith('http')) {
           try {
             fetch(appData.googleSheetUrl, {
@@ -519,19 +560,29 @@
         }));
       };
 
-      const handleAddRoutine = () => {
-        if (!newRoutineTitle.trim()) return;
-        const newEntry = {
-          id: Date.now(),
-          time: newRoutineTime,
-          title: newRoutineTitle.trim(),
-          done: false
-        };
-        setAppData(prev => ({
-          ...prev,
-          healthRoutines: [...(prev.healthRoutines || []), newEntry]
-        }));
-        setNewRoutineTitle('');
+      const handleSaveRoutine = () => {
+        if (!routineTitleInput.trim()) return;
+
+        if (editingRoutine) {
+          setAppData(prev => ({
+            ...prev,
+            healthRoutines: (prev.healthRoutines || []).map(r => r.id === editingRoutine.id ? { ...r, time: routineTimeInput, title: routineTitleInput.trim() } : r)
+          }));
+        } else {
+          const newEntry = {
+            id: Date.now(),
+            time: routineTimeInput,
+            title: routineTitleInput.trim(),
+            done: false
+          };
+          setAppData(prev => ({
+            ...prev,
+            healthRoutines: [...(prev.healthRoutines || []), newEntry]
+          }));
+        }
+
+        setEditingRoutine(null);
+        setRoutineTitleInput('');
         setShowAddRoutineModal(false);
       };
 
@@ -549,7 +600,8 @@
           interval = setInterval(() => setNapTimerSeconds(prev => prev - 1), 1000);
         } else if (isNapTimerActive && napTimerSeconds === 0) {
           setIsNapTimerActive(false);
-          if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 1000]);
+          playAlarmSound();
+          if (navigator.vibrate) navigator.vibrate([500, 250, 500, 250, 1000]);
           alert('쪽잠이 종료되었습니다! 편안한 상태에서 운행을 시작하세요.');
         }
         return () => clearInterval(interval);
@@ -601,7 +653,20 @@
           const grossSalary = totalFixedAllowances + totalIncentive;
           const taxAndInsurance = Math.round(grossSalary * deductionRate);
           const totalDeductions = taxAndInsurance + totalFixedExpenses;
-          return { workDays, holidayDays, totalWorkMinutes, totalRevenue, totalGasCompany, totalIncentive, grossSalary, taxAndInsurance, totalFixedExpenses, totalDeductions, netSalaryFromCompany: grossSalary - totalDeductions, totalDriverExpense, finalNetIncome: grossSalary - totalDeductions - totalDriverExpense };
+          const netSalary = grossSalary - totalDeductions;
+          const finalNet = netSalary - totalDriverExpense;
+
+          const avgDailyMinutes = workDays > 0 ? Math.round(totalWorkMinutes / workDays) : 0;
+          const avgDailyRevenue = workDays > 0 ? Math.round(totalRevenue / workDays) : 0;
+          const totalWorkHours = totalWorkMinutes / 60;
+          const avgHourlyWage = totalWorkHours > 0 ? Math.round(finalNet / totalWorkHours) : 0;
+
+          return {
+            workDays, holidayDays, totalWorkMinutes, totalRevenue, totalGasCompany, totalIncentive,
+            grossSalary, taxAndInsurance, totalFixedExpenses, totalDeductions,
+            netSalaryFromCompany: netSalary, totalDriverExpense, finalNetIncome: finalNet,
+            avgDailyMinutes, avgDailyRevenue, avgHourlyWage
+          };
         } else {
           let cardTotal = 0, cashTotal = 0, gasTotal = 0, tollTotal = 0, maintTotal = 0, otherTotal = 0;
           entries.forEach(([_, r]) => {
@@ -619,7 +684,18 @@
           });
           const totalRevenue = cardTotal + cashTotal;
           const totalExpense = gasTotal + tollTotal + maintTotal + otherTotal;
-          return { workDays, holidayDays, totalWorkMinutes, cardTotal, cashTotal, totalRevenue, gasTotal, tollTotal, maintTotal, otherTotal, totalExpense, netIncome: totalRevenue - totalExpense };
+          const netIncome = totalRevenue - totalExpense;
+
+          const avgDailyMinutes = workDays > 0 ? Math.round(totalWorkMinutes / workDays) : 0;
+          const avgDailyRevenue = workDays > 0 ? Math.round(totalRevenue / workDays) : 0;
+          const totalWorkHours = totalWorkMinutes / 60;
+          const avgHourlyWage = totalWorkHours > 0 ? Math.round(netIncome / totalWorkHours) : 0;
+
+          return {
+            workDays, holidayDays, totalWorkMinutes, cardTotal, cashTotal, totalRevenue,
+            gasTotal, tollTotal, maintTotal, otherTotal, totalExpense, netIncome,
+            avgDailyMinutes, avgDailyRevenue, avgHourlyWage
+          };
         }
       }, [appData, activeType, currentYearMonth, totalFixedAllowances, totalFixedExpenses]);
 
@@ -633,25 +709,103 @@
         return cells;
       }, [currentYearMonth]);
 
-      const handleToggleHudMirror = () => {
-        const nextMirror = !isHudMirror;
-        setIsHudMirror(nextMirror);
+      // HUD 탭 핸들러 (5단계 순환)
+      const handleHudAreaClick = () => {
+        const now = Date.now();
 
-        setHudToastText(nextMirror ? '유리 반사 (거울 모드)' : '일반 정방향 모드');
-        if (hudToastTimer.current) clearTimeout(hudToastTimer.current);
-        hudToastTimer.current = setTimeout(() => {
-          setHudToastText('');
-        }, 1200);
+        tapTimesRef.current = [...tapTimesRef.current.filter(t => now - t < 1800), now];
+        if (tapTimesRef.current.length >= 5) {
+          tapTimesRef.current = [];
+          setIsHudToolbarVisible(true);
+          if (hudToolbarTimer.current) clearTimeout(hudToolbarTimer.current);
+          hudToolbarTimer.current = setTimeout(() => {
+            setIsHudToolbarVisible(false);
+          }, 5000);
+          return;
+        }
+
+        const timeSinceLast = now - lastTapTimeRef.current;
+        if (timeSinceLast < 400 && timeSinceLast > 40) {
+          const nextStep = (hudCycleStep % 5) + 1;
+          setHudCycleStep(nextStep);
+
+          let label = '1. 일반 세로 모드';
+          if (nextStep === 2) label = '2. 일반 가로 모드 (좌)';
+          if (nextStep === 3) label = '3. 일반 가로 모드 (우)';
+          if (nextStep === 4) label = '4. 유리 반사 (거울 세로)';
+          if (nextStep === 5) label = '5. 유리 반사 (거울 가로)';
+
+          setHudToastText(label);
+          if (hudToastTimer.current) clearTimeout(hudToastTimer.current);
+          hudToastTimer.current = setTimeout(() => {
+            setHudToastText('');
+          }, 2500);
+
+          lastTapTimeRef.current = 0;
+        } else {
+          lastTapTimeRef.current = now;
+        }
       };
+
+      const getSpeedFontSize = (speed) => {
+        const str = String(speed);
+        if (str.length === 1) return 'min(58vw, 65vh)';
+        if (str.length === 2) return 'min(44vw, 50vh)';
+        return 'min(32vw, 36vh)';
+      };
+
+      // 5개 모드 변환 스타일 정의
+      const hudNumberTransformStyle = useMemo(() => {
+        if (hudCycleStep === 1) {
+          return { transform: 'none' };
+        }
+        if (hudCycleStep === 2) {
+          // 일반 가로 (좌 회전 90도, 정방향)
+          return {
+            width: `${hudDims.h}px`,
+            height: `${hudDims.w}px`,
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%) rotate(90deg)'
+          };
+        }
+        if (hudCycleStep === 3) {
+          // 일반 가로 (우 회전 -90도, 정방향)
+          return {
+            width: `${hudDims.h}px`,
+            height: `${hudDims.w}px`,
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%) rotate(-90deg)'
+          };
+        }
+        if (hudCycleStep === 4) {
+          // 유리 반사 세로 (상하 반전)
+          return { transform: 'scaleY(-1)' };
+        }
+        if (hudCycleStep === 5) {
+          // 유리 반사 가로 (회전 + 상하 반전)
+          return {
+            width: `${hudDims.h}px`,
+            height: `${hudDims.w}px`,
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%) rotate(-90deg) scaleY(-1)'
+          };
+        }
+        return { transform: 'none' };
+      }, [hudCycleStep, hudDims]);
 
       const DAYS_NAME = ['일', '월', '화', '수', '목', '금', '토'];
 
       return (
         <div className="w-full h-full flex flex-col bg-black relative overflow-hidden">
           
-          {/* 상단 툴바 */}
-          {currentTab !== 'welcome' && (
-            <header className="flex-shrink-0 px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative">
+          {currentTab !== 'welcome' && (currentTab !== 'hud' || isHudToolbarVisible) && (
+            <header className="flex-shrink-0 px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative animate-fade-in">
               <div className="flex items-center gap-2 overflow-hidden">
                 <span className="bg-yellow-500 text-black text-xs font-black px-2.5 py-1 rounded shadow flex-shrink-0">K-TAXI</span>
                 <span className="text-sm font-bold text-white tracking-tight truncate max-w-[150px]">
@@ -681,13 +835,12 @@
             </header>
           )}
 
-          {/* 4대 핵심 메뉴 드롭다운 */}
           {isMenuOpen && (
             <div className="absolute top-12 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-lg border-b-2 border-yellow-500 shadow-2xl p-4 animate-fade-in space-y-3">
               <span className="text-xs font-bold text-slate-400 block">화면 이동</span>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
                 <button
-                  onClick={() => { setCurrentTab('hud'); setIsMenuOpen(false); }}
+                  onClick={() => { setCurrentTab('hud'); setIsMenuOpen(false); setIsHudToolbarVisible(false); }}
                   className={`py-4 px-3.5 rounded-2xl text-left border transition ${
                     currentTab === 'hud'
                       ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
@@ -719,7 +872,7 @@
                   }`}
                 >
                   <div className="text-base font-black">운행 기록 달력</div>
-                  <div className={`text-xs mt-0.5 ${currentTab === 'calendar' ? 'text-slate-800 font-bold' : 'text-slate-400'}`}>일별 매출 & 퇴근 정산</div>
+                  <div className={`text-xs mt-0.5 ${currentTab === 'calendar' ? 'text-slate-800 font-bold' : 'text-slate-400'}`}>일별 매출 & 평균 시급</div>
                 </button>
 
                 <button
@@ -739,7 +892,6 @@
 
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3.5 md:p-6 overflow-y-auto max-w-4xl mx-auto w-full'}`}>
             
-            {/* 1. 첫 출근 대기 화면 */}
             {currentTab === 'welcome' && (
               <div className="h-full flex flex-col justify-between p-6 md:p-12 text-center bg-gradient-to-b from-black via-slate-900 to-black">
                 <div className="w-full flex items-center justify-between pt-4">
@@ -772,7 +924,6 @@
               </div>
             )}
 
-            {/* 2. 오늘 & 건강 알림 탭 */}
             {currentTab === 'today' && (
               <div className="space-y-3.5 pb-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -811,7 +962,7 @@
                       <p className="text-xs text-slate-400 mt-0.5">
                         {isNapTimerActive
                           ? `쪽잠 진행 중 (${Math.floor(napTimerSeconds / 60)}분 ${String(napTimerSeconds % 60).padStart(2, '0')}초 남음)`
-                          : '터치하여 쪽잠 시간 설정 및 시작'}
+                          : '터치하여 쪽잠 시간 설정 및 시작 (알람음 포함)'}
                       </p>
                     </div>
                     <span className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow">
@@ -826,7 +977,12 @@
                       건강 & 휴식 알림 ({ (appData.healthRoutines || []).filter(r => r.done).length } / { (appData.healthRoutines || []).length })
                     </span>
                     <button
-                      onClick={() => setShowAddRoutineModal(true)}
+                      onClick={() => {
+                        setEditingRoutine(null);
+                        setRoutineTitleInput('');
+                        setRoutineTimeInput(getCurrentTimeStr());
+                        setShowAddRoutineModal(true);
+                      }}
                       className="text-xs text-yellow-400 font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700"
                     >
                       + 항목 추가
@@ -855,12 +1011,25 @@
                             <span className="font-bold">{routine.title}</span>
                           </div>
                         </div>
-                        <button
-                          onClick={() => handleDeleteRoutine(routine.id)}
-                          className="text-slate-500 hover:text-red-400 px-2 font-bold text-sm"
-                        >
-                          ✕
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingRoutine(routine);
+                              setRoutineTitleInput(routine.title);
+                              setRoutineTimeInput(routine.time);
+                              setShowAddRoutineModal(true);
+                            }}
+                            className="text-slate-400 hover:text-yellow-400 px-2 py-1 text-xs font-bold"
+                          >
+                            수정
+                          </button>
+                          <button
+                            onClick={() => handleDeleteRoutine(routine.id)}
+                            className="text-slate-500 hover:text-red-400 px-2 py-1 text-xs font-bold"
+                          >
+                            삭제
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -868,24 +1037,18 @@
               </div>
             )}
 
-            {/* 3. 초대형 HUD 속도계 */}
             {currentTab === 'hud' && (
               <div
-                onClick={handleToggleHudMirror}
-                className={`w-full h-full flex flex-col items-center justify-center select-none relative overflow-hidden bg-black cursor-pointer ${isHudMirror ? 'hud-mirror' : ''}`}
+                ref={hudAreaRef}
+                onClick={handleHudAreaClick}
+                className="w-full h-full flex flex-col items-center justify-center select-none relative overflow-hidden bg-black cursor-pointer"
               >
-                {hudToastText && (
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-slate-900/95 border-2 border-yellow-400 px-6 py-3 rounded-2xl shadow-2xl pointer-events-none animate-fade-in">
-                    <span className="text-base font-black text-yellow-300">{hudToastText}</span>
-                  </div>
-                )}
-
-                <div className="w-full h-full flex flex-col items-center justify-center p-2">
+                <div style={hudNumberTransformStyle} className="flex flex-col items-center justify-center p-2">
                   <span
                     className={`font-black tracking-tighter font-mono leading-none select-none ${
                       gpsSpeed > 0 ? 'font-speed-neon' : 'font-speed-zero'
                     }`}
-                    style={{ fontSize: 'min(50vw, 55vh)' }}
+                    style={{ fontSize: getSpeedFontSize(gpsSpeed) }}
                   >
                     {gpsSpeed}
                   </span>
@@ -897,15 +1060,20 @@
                   </span>
                 </div>
 
-                <div className="absolute bottom-3 left-0 right-0 text-center pointer-events-none">
-                  <span className="text-[11px] font-bold text-slate-600">
-                    화면 터치 시 유리 반사(거울) 모드가 켜집니다
-                  </span>
+                <div className="absolute bottom-5 left-0 right-0 text-center pointer-events-none z-50">
+                  {hudToastText ? (
+                    <span className="text-sm font-black text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] tracking-wide">
+                      {hudToastText}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-medium text-slate-600">
+                      화면 두 번 톡톡: 5대 모드 순환 / 다섯 번 톡톡: 메뉴 열기
+                    </span>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* 4. 운행 기록 달력 탭 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
@@ -937,6 +1105,27 @@
                       <span className="text-xs text-green-400 block font-semibold">{activeType === 'corporate' ? '통장 예상 월급' : '과세 소득금액'}</span>
                       <span className="text-lg font-black text-green-400 block mt-0.5">
                         {activeType === 'corporate' ? formatMoney(currentMonthStats.netSalaryFromCompany) : formatMoney(currentMonthStats.netIncome)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800 text-center">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-bold">일 평균 시간</span>
+                      <span className="text-xs font-black text-blue-300 mt-1 block">
+                        {formatMinutesToHours(currentMonthStats.avgDailyMinutes)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-bold">일 평균 수입</span>
+                      <span className="text-xs font-black text-yellow-400 mt-1 block">
+                        {formatMoney(currentMonthStats.avgDailyRevenue)}원
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-emerald-400 block font-bold">평균 시급</span>
+                      <span className="text-xs font-black text-emerald-300 mt-1 block">
+                        {formatMoney(currentMonthStats.avgHourlyWage)}원
                       </span>
                     </div>
                   </div>
@@ -992,7 +1181,6 @@
               </div>
             )}
 
-            {/* 5. 기본 설정 탭 */}
             {currentTab === 'settings' && (
               <div className="space-y-3.5 pb-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -1057,7 +1245,6 @@
                   </div>
                 </div>
 
-                {/* 백업 파일 수동 관리 */}
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-bold text-slate-200">장부 파일 수동 백업 & 복원</span>
@@ -1094,8 +1281,6 @@
               </div>
             )}
           </main>
-
-          {/* 모달 창 모음 */}
 
           {showNavModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
@@ -1175,7 +1360,7 @@
             <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-indigo-500/60 rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl text-center">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h3 className="text-sm font-black text-indigo-300">파워 쪽잠 타이머</h3>
+                  <h3 className="text-sm font-black text-indigo-300">파워 쪽잠 타이머 (종료 시 알람)</h3>
                   <button onClick={() => setShowNapVisualModal(false)} className="text-slate-400 font-bold text-base">✕</button>
                 </div>
 
@@ -1239,7 +1424,9 @@
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-5 space-y-3.5 shadow-2xl">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h3 className="text-sm font-black text-emerald-400">새 건강 루틴 추가</h3>
+                  <h3 className="text-sm font-black text-emerald-400">
+                    {editingRoutine ? '건강 루틴 수정' : '새 건강 루틴 추가'}
+                  </h3>
                   <button onClick={() => setShowAddRoutineModal(false)} className="text-slate-400 font-bold">✕</button>
                 </div>
                 <div className="space-y-2.5 text-xs">
@@ -1247,8 +1434,8 @@
                     <label className="text-slate-400 block mb-1">알림 시각</label>
                     <input
                       type="time"
-                      value={newRoutineTime}
-                      onChange={(e) => setNewRoutineTime(e.target.value)}
+                      value={routineTimeInput}
+                      onChange={(e) => setRoutineTimeInput(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-700 p-2 rounded-xl text-center text-sm font-bold text-yellow-400"
                     />
                   </div>
@@ -1257,14 +1444,16 @@
                     <input
                       type="text"
                       placeholder="예: 저녁 당뇨약 복용 / 허리 스트레칭"
-                      value={newRoutineTitle}
-                      onChange={(e) => setNewRoutineTitle(e.target.value)}
+                      value={routineTitleInput}
+                      onChange={(e) => setRoutineTitleInput(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-700 p-2.5 rounded-xl text-white font-bold text-sm"
                     />
                   </div>
                 </div>
                 <div className="flex gap-2 pt-2">
-                  <button onClick={handleAddRoutine} className="flex-1 py-2.5 bg-emerald-600 text-white font-black rounded-xl text-xs">추가 완료</button>
+                  <button onClick={handleSaveRoutine} className="flex-1 py-2.5 bg-emerald-600 text-white font-black rounded-xl text-xs">
+                    {editingRoutine ? '수정 완료' : '추가 완료'}
+                  </button>
                   <button onClick={() => setShowAddRoutineModal(false)} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
                 </div>
               </div>
