@@ -56,8 +56,16 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v5.4.0';
+    const APP_VERSION = 'v5.4.2';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V24';
+
+    const WELCOME_MESSAGES = [
+      "오늘도 안전운전 하실 거죠? 안전이 가장 큰 수입입니다!",
+      "즐거운 마음으로 오늘도 기분 좋게 달려봐요!",
+      "승객에게는 친절한 미소, 기사님에게는 무사고 완주!",
+      "조급할수록 천천히! 오늘도 안전하게 완주해요.",
+      "오늘도 매너 좋은 손님들과 함께하는 행복한 하루 되세요!"
+    ];
 
     const CLOSING_MESSAGES = [
       "오늘 하루도 정말 수고하셨습니다. 편안한 휴식을 푹 취하세요!",
@@ -215,7 +223,6 @@
       return DEFAULT_STORAGE;
     };
 
-    // 직관적인 터치식 시/분/오전오후 시간 설정 컴포넌트
     function DirectTimePickerModal({ initialTime = "12:00", title = "시간 설정", onSave, onClose }) {
       const parseTime = (tStr) => {
         if (!tStr || !tStr.includes(':')) return { ampm: '오후', hour: '12', min: '00' };
@@ -427,12 +434,21 @@
 
     function App() {
       const [appData, setAppData] = useState(loadSafeData);
-      const [currentTab, setCurrentTab] = useState('calendar');
+      
+      const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
+      const todayKey = getTodayKey();
+      const todayRecord = appData[activeType]?.records?.[todayKey] || {};
+
+      // 출근 기록이 없으면 처음 열릴 때 깔끔한 단독 출근 화면(welcome), 출근 중이면 달력(calendar)으로 자동 설정
+      const [currentTab, setCurrentTab] = useState(() => (todayRecord.startTime ? 'calendar' : 'welcome'));
+      
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       });
+
+      const [welcomeMsg] = useState(() => WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)]);
 
       const [isMenuOpen, setIsMenuOpen] = useState(false);
       const [isHudToolbarVisible, setIsHudToolbarVisible] = useState(false);
@@ -458,8 +474,8 @@
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
       
-      // 모달 상태
       const [showShiftTimePicker, setShowShiftTimePicker] = useState(false);
+      const [showRoutineTimePicker, setShowRoutineTimePicker] = useState(false);
       const [showRoutineModal, setShowRoutineModal] = useState(false);
       const [editingRoutine, setEditingRoutine] = useState(null);
       const [routineTitleInput, setRoutineTitleInput] = useState('');
@@ -471,10 +487,6 @@
       const [napTotalMinutes, setNapTotalMinutes] = useState(20);
       const [napTimerSeconds, setNapTimerSeconds] = useState(20 * 60);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
-
-      const activeType = appData?.activeType === 'private' ? 'private' : 'corporate';
-      const todayKey = getTodayKey();
-      const todayRecord = appData[activeType]?.records?.[todayKey] || {};
 
       useEffect(() => {
         try {
@@ -540,7 +552,6 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, []);
 
-      // 건강 알림 루틴 체크 (시간 일치 및 alarmEnabled인 경우 알람)
       useEffect(() => {
         const checkRoutineAlarm = () => {
           const nowStr = getCurrentTimeStr();
@@ -555,6 +566,7 @@
         return () => clearInterval(intv);
       }, [appData.healthRoutines]);
 
+      // 초대형 출근 버튼 클릭 시 운행 시작 및 속도계(HUD) 전환
       const handleStartShift = () => {
         const nowTime = getCurrentTimeStr();
         const updatedRec = {
@@ -572,6 +584,9 @@
             records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
           }
         }));
+
+        setCurrentTab('hud');
+        setIsHudToolbarVisible(false);
       };
 
       const handleSaveStartTime = (newTime) => {
@@ -662,7 +677,6 @@
         setShowNavModal(false);
       };
 
-      // 건강 알림 토글 (알람 켜기/끄기)
       const toggleRoutineAlarm = (id) => {
         setAppData(prev => ({
           ...prev,
@@ -836,7 +850,6 @@
         return cells;
       }, [currentYearMonth]);
 
-      // 터치 제어: 1초 꾹 누르면 메뉴 표시 / 톡톡 더블탭 시 6대 모드 순환
       const handleTouchStart = () => {
         isLongPressTriggered.current = false;
         longPressTimerRef.current = setTimeout(() => {
@@ -948,7 +961,8 @@
       return (
         <div className="w-full h-full flex flex-col bg-black relative overflow-hidden">
           
-          {(currentTab !== 'hud' || isHudToolbarVisible) && (
+          {/* 출근 대기 화면(welcome)이 아닐 때만 상단 툴바 표시 */}
+          {currentTab !== 'welcome' && (currentTab !== 'hud' || isHudToolbarVisible) && (
             <header className="flex-shrink-0 px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative animate-fade-in">
               <div className="flex items-center gap-2 overflow-hidden">
                 <span className="bg-yellow-500 text-black text-xs font-black px-2.5 py-1 rounded shadow flex-shrink-0">K-TAXI</span>
@@ -1034,37 +1048,78 @@
             </div>
           )}
 
-          <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' ? 'p-0' : 'p-3.5 md:p-6 overflow-y-auto max-w-4xl mx-auto w-full'}`}>
+          <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3.5 md:p-6 overflow-y-auto max-w-4xl mx-auto w-full'}`}>
             
+            {/* 0. 처음 열릴 때 출근 전 단독 출근 화면 (말씀해주신 그 깔끔한 화면) */}
+            {currentTab === 'welcome' && (
+              <div className="h-full flex flex-col justify-between p-6 md:p-12 text-center bg-gradient-to-b from-black via-slate-900 to-black select-none">
+                <div className="w-full flex items-center justify-between pt-4">
+                  <span className="bg-yellow-500 text-black text-xs font-black px-3.5 py-1.5 rounded-full shadow-lg">
+                    K-TAXI 스마트 파트너
+                  </span>
+                  <span className="text-xs font-bold text-slate-300 bg-slate-900 border border-slate-700 px-3.5 py-1.5 rounded-full">
+                    {appData[activeType]?.carNumber || '충남31바3238'} ({activeType === 'corporate' ? '법인' : '개인'})
+                  </span>
+                </div>
+
+                <div className="flex-1 flex flex-col items-center justify-center px-2 my-auto">
+                  <span className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">{todayKey}</span>
+                  <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-white leading-snug break-keep drop-shadow-xl max-w-xl">
+                    {welcomeMsg}
+                  </h1>
+                </div>
+
+                <div className="w-full max-w-md mx-auto pb-8">
+                  <button
+                    onClick={handleStartShift}
+                    className="w-full py-7 bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-500 hover:from-yellow-400 hover:to-amber-300 text-slate-950 font-black text-2xl rounded-3xl shadow-[0_0_45px_rgba(250,204,21,0.5)] border-2 border-yellow-200 flex items-center justify-center gap-3 active:scale-98 transition-transform"
+                  >
+                    <span>출근하기 (운행 시작)</span>
+                  </button>
+                  <p className="text-xs text-slate-500 mt-3 font-semibold">
+                    터치 시 출근 시간이 기록되고 속도계 화면이 즉시 열립니다.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* 1. 운행 기록 달력 탭 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
                   
-                  {/* 요청사항: "오늘의 운행상태" 및 "속도계보기" 삭제 ➔ "00:00 출근 [수정]" 또는 미출근시 직관적 출근 버튼 */}
+                  {/* 상단 출근 상태 박스 (출근 시간 + 수정 + 퇴근) */}
                   <div className="bg-slate-900 px-4 py-3 rounded-2xl border border-slate-800 flex items-center justify-between shadow">
                     {!todayRecord.startTime ? (
                       <button
                         onClick={handleStartShift}
-                        className="w-full py-3 bg-gradient-to-r from-yellow-500 to-amber-400 hover:from-yellow-400 text-black font-black text-base rounded-xl shadow-lg active:scale-98 transition flex items-center justify-center gap-2"
+                        className="w-full py-3.5 bg-gradient-to-r from-yellow-500 to-amber-400 hover:from-yellow-400 text-black font-black text-base rounded-xl shadow-lg active:scale-98 transition flex items-center justify-center gap-2"
                       >
                         <span>출근하기 (운행 시작)</span>
                         <span>▶</span>
                       </button>
                     ) : (
                       <div className="w-full flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <div className="flex items-center gap-2.5">
+                          <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
                           <span className="text-lg font-black text-yellow-400 font-mono tracking-wide">
                             {todayRecord.startTime} 출근
                           </span>
                         </div>
-                        <button
-                          onClick={() => setShowShiftTimePicker(true)}
-                          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 font-bold text-xs rounded-xl active:scale-95 transition"
-                        >
-                          수정
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowShiftTimePicker(true)}
+                            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 font-bold text-xs rounded-xl active:scale-95 transition"
+                          >
+                            수정
+                          </button>
+                          <button
+                            onClick={handleEndShift}
+                            className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-black text-xs rounded-xl shadow active:scale-95 transition"
+                          >
+                            퇴근
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1101,7 +1156,6 @@
                     </div>
                   </div>
 
-                  {/* 요청사항: 일 평균 수입 & 시급은 평소 가려두고 터치 시 '말일 확인' 안내 후 말일에만 공개 */}
                   <div className="grid grid-cols-3 gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800 text-center">
                     <div>
                       <span className="text-[10px] text-slate-400 block font-bold">일 평균 시간</span>
@@ -1134,7 +1188,6 @@
                   </div>
 
                   <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800">
-                    {/* 요청사항: 고정된 '월·휴'를 삭제하고 정상적인 요일로만 표기 */}
                     <div className="grid grid-cols-7 text-center text-xs font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
                       {DAYS_NAME.map((dName, idx) => (
                         <span key={dName} className={`${idx === 0 ? 'text-red-400' : idx === 6 ? 'text-blue-400' : 'text-slate-300'}`}>
@@ -1183,7 +1236,7 @@
               </div>
             )}
 
-            {/* 2. 휴식 & 건강 알림 탭 (중복된 오늘 출근 카드 제거) */}
+            {/* 2. 휴식 & 건강 알림 탭 (2줄 카드형 배열 & 알람 ON인 경우만 시간 노출) */}
             {currentTab === 'today' && (
               <div className="space-y-3.5 pb-6">
                 <div
@@ -1203,7 +1256,6 @@
                   </span>
                 </div>
 
-                {/* 요청사항: 체크박스/줄긋기 삭제 ➔ 알람(ON/OFF), 수정, 삭제 3개 버튼 구성 */}
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center pb-2 border-b border-slate-800">
                     <span className="text-sm font-bold text-emerald-400">
@@ -1222,32 +1274,37 @@
                     </button>
                   </div>
 
-                  <div className="space-y-2 pt-1">
+                  <div className="space-y-2.5 pt-1">
                     {(appData.healthRoutines || []).map((routine) => (
                       <div
                         key={routine.id}
-                        className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-sm gap-2"
+                        className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col gap-2.5 shadow-sm"
                       >
-                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                          <span className="text-xs text-yellow-400 font-mono font-black flex-shrink-0">
-                            [{routine.time}]
-                          </span>
-                          <span className="font-bold text-slate-200 truncate">
+                        <div className="flex items-center gap-2">
+                          {routine.alarmEnabled ? (
+                            <span className="text-xs text-yellow-400 font-mono font-black bg-yellow-500/10 border border-yellow-500/30 px-2 py-0.5 rounded-md flex-shrink-0">
+                              {routine.time}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded flex-shrink-0">
+                              알람 OFF
+                            </span>
+                          )}
+                          <span className="font-bold text-slate-100 text-sm break-keep leading-tight">
                             {routine.title}
                           </span>
                         </div>
 
-                        {/* 알람 / 수정 / 삭제 3대 버튼 */}
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-900">
                           <button
                             onClick={() => toggleRoutineAlarm(routine.id)}
-                            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${
+                            className={`px-3 py-1.5 rounded-xl text-xs font-black border transition ${
                               routine.alarmEnabled
-                                ? 'bg-amber-500/20 text-yellow-300 border-amber-500/50'
+                                ? 'bg-amber-500 text-black border-yellow-300 shadow'
                                 : 'bg-slate-900 text-slate-500 border-slate-800'
                             }`}
                           >
-                            {routine.alarmEnabled ? '알람 ON' : '알람 OFF'}
+                            {routine.alarmEnabled ? '🔔 알람 켜짐' : '🔕 알람 꺼짐'}
                           </button>
                           <button
                             onClick={() => {
@@ -1256,13 +1313,13 @@
                               setRoutineTimeInput(routine.time);
                               setShowRoutineModal(true);
                             }}
-                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-bold"
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 rounded-xl text-xs font-bold"
                           >
                             수정
                           </button>
                           <button
                             onClick={() => handleDeleteRoutine(routine.id)}
-                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-400 border border-slate-700 rounded-lg text-xs font-bold"
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-400 border border-slate-700 rounded-xl text-xs font-bold"
                           >
                             삭제
                           </button>
@@ -1418,9 +1475,6 @@
             )}
           </main>
 
-          {/* 모달 창 모음 */}
-
-          {/* 출근 시간 직접 수정 모달 (터치식 시/분/오전오후) */}
           {showShiftTimePicker && (
             <DirectTimePickerModal
               initialTime={todayRecord.startTime || getCurrentTimeStr()}
@@ -1430,7 +1484,18 @@
             />
           )}
 
-          {/* 건강 알림 추가/수정 모달 */}
+          {showRoutineTimePicker && (
+            <DirectTimePickerModal
+              initialTime={routineTimeInput}
+              title="알림 시각 설정"
+              onSave={(newTime) => {
+                setRoutineTimeInput(newTime);
+                setShowRoutineTimePicker(false);
+              }}
+              onClose={() => setShowRoutineTimePicker(false)}
+            />
+          )}
+
           {showRoutineModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl">
@@ -1457,13 +1522,10 @@
                     <label className="text-slate-400 block mb-1">알림 시각</label>
                     <button
                       type="button"
-                      onClick={() => {
-                        const newTime = prompt('알림 시각을 24시간 형식으로 입력하세요 (예: 18:30)', routineTimeInput);
-                        if (newTime) setRoutineTimeInput(newTime);
-                      }}
-                      className="w-full py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-yellow-400 font-mono font-black text-center text-sm"
+                      onClick={() => setShowRoutineTimePicker(true)}
+                      className="w-full py-3 bg-slate-950 border border-slate-700 rounded-xl text-yellow-400 font-mono font-black text-center text-base active:scale-98 transition"
                     >
-                      {routineTimeInput} (터치하여 시간 변경)
+                      {routineTimeInput} (터치하여 변경)
                     </button>
                   </div>
                 </div>
@@ -1623,7 +1685,6 @@
       );
     }
 
-    // 일별 상세 운행 기록 모달 (휴무일 지정 문구 변경 & 다건 기타경비 추가)
     function DailyRecordModal({ activeType, dateKey, existingData, onSave, onClose }) {
       const [isHoliday, setIsHoliday] = useState(existingData?.isHoliday || false);
       const [memo, setMemo] = useState(existingData?.memo || '');
@@ -1638,7 +1699,6 @@
       const [toll, setToll] = useState(existingData?.toll || 0);
       const [maint, setMaint] = useState(existingData?.maint || 0);
 
-      // 다건 기타 경비 목록 관리 (법인/개인 공통)
       const [driverExpenseItems, setDriverExpenseItems] = useState(() => {
         if (Array.isArray(existingData?.driverExpenseItems) && existingData.driverExpenseItems.length > 0) {
           return existingData.driverExpenseItems;
@@ -1708,7 +1768,6 @@
               <button onClick={onClose} className="text-slate-400 font-bold text-base">✕</button>
             </div>
 
-            {/* 요청사항: "이날은 휴무했읍니다" ➔ "휴무일로 지정" 으로 문구 변경 */}
             <label className="flex items-center gap-2.5 bg-slate-950 p-3 rounded-xl border border-slate-800 cursor-pointer">
               <input type="checkbox" checked={isHoliday} onChange={(e) => setIsHoliday(e.target.checked)} className="w-5 h-5 rounded text-yellow-500" />
               <span className="text-xs font-bold text-slate-300">휴무일로 지정 (미운행)</span>
@@ -1752,58 +1811,61 @@
                   </>
                 )}
 
-                {/* 요청사항: 항목과 금액을 따로 적을 수 있는 다건 기타경비 등록 영역 */}
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-orange-400">기타 경비 내역</span>
+                    <span className="text-xs font-black text-orange-400">기타 경비 내역</span>
                     <span className="text-xs font-mono font-bold text-orange-300">
-                      총 {formatMoney(totalDriverExpenseSum)}원
+                      합계 {formatMoney(totalDriverExpenseSum)}원
                     </span>
                   </div>
 
-                  <div className="space-y-1.5">
-                    {driverExpenseItems.map(item => (
-                      <div key={item.id} className="flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded-lg text-xs border border-slate-800">
-                        <span className="text-slate-300 font-medium">{item.name}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-yellow-400 font-mono font-bold">{formatMoney(item.amount)}원</span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveExpenseItem(item.id)}
-                            className="text-slate-500 hover:text-red-400 font-bold px-1"
-                          >
-                            ✕
-                          </button>
+                  {driverExpenseItems.length > 0 && (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {driverExpenseItems.map(item => (
+                        <div key={item.id} className="flex items-center justify-between bg-slate-900 px-3 py-2 rounded-xl text-xs border border-slate-800">
+                          <span className="text-slate-200 font-bold">{item.name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-yellow-400 font-mono font-bold">{formatMoney(item.amount)}원</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveExpenseItem(item.id)}
+                              className="text-slate-400 hover:text-red-400 font-black px-1 text-sm"
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
 
-                  <div className="flex gap-1.5 pt-1">
-                    <input
-                      type="text"
-                      placeholder="항목 (예: 세차/식대)"
-                      value={newExpenseName}
-                      onChange={(e) => setNewExpenseName(e.target.value)}
-                      className="w-1/2 bg-slate-900 border border-slate-700 px-2.5 py-2 text-xs rounded-xl text-white font-medium"
-                    />
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="금액"
-                      value={newExpenseAmount > 0 ? newExpenseAmount.toLocaleString('ko-KR') : ''}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/[^0-9]/g, '');
-                        setNewExpenseAmount(raw ? Number(raw) : 0);
-                      }}
-                      className="w-1/3 bg-slate-900 border border-slate-700 px-2 py-2 text-xs rounded-xl text-right text-orange-300 font-bold"
-                    />
+                  <div className="space-y-2 pt-1 border-t border-slate-900">
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="항목명 (세차/식대)"
+                        value={newExpenseName}
+                        onChange={(e) => setNewExpenseName(e.target.value)}
+                        className="bg-slate-900 border border-slate-700 px-3 py-2 text-xs rounded-xl text-white font-medium"
+                      />
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="금액(원)"
+                        value={newExpenseAmount > 0 ? newExpenseAmount.toLocaleString('ko-KR') : ''}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/[^0-9]/g, '');
+                          setNewExpenseAmount(raw ? Number(raw) : 0);
+                        }}
+                        className="bg-slate-900 border border-slate-700 px-3 py-2 text-xs rounded-xl text-right text-orange-300 font-bold"
+                      />
+                    </div>
                     <button
                       type="button"
                       onClick={handleAddExpenseItem}
-                      className="px-3 bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs rounded-xl"
+                      className="w-full py-2.5 bg-orange-600 hover:bg-orange-500 text-white font-black text-xs rounded-xl shadow transition active:scale-98"
                     >
-                      추가
+                      + 경비 항목 추가
                     </button>
                   </div>
                 </div>
