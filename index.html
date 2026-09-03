@@ -56,7 +56,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v5.4.3';
+    const APP_VERSION = 'v5.4.4';
     const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V24';
 
     const WELCOME_MESSAGES = [
@@ -223,7 +223,6 @@
       return DEFAULT_STORAGE;
     };
 
-    // 직관적인 터치식 시/분/오전오후 시간 설정 컴포넌트 (+ 지금 시각으로 갱신 원터치 버튼)
     function DirectTimePickerModal({ initialTime = "12:00", title = "시간 설정", onSave, onClose }) {
       const parseTime = (tStr) => {
         if (!tStr || !tStr.includes(':')) return { ampm: '오후', hour: '12', min: '00' };
@@ -457,7 +456,7 @@
 
       // 출근 기록(startTime)이 없거나 이미 퇴근 완료(endTime 존재) 상태라면 무조건 첫 출근 대기 화면(welcome)으로 시작
       const isShiftRunning = Boolean(appData.isShiftActive && todayRecord.startTime && !todayRecord.endTime);
-      const [currentTab, setCurrentTab] = useState(() => (isShiftRunning ? 'hud' : 'welcome'));
+      const [currentTab, setCurrentTab] = useState(() => (isShiftRunning ? 'calendar' : 'welcome'));
       
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
@@ -504,6 +503,23 @@
       const [napTotalMinutes, setNapTotalMinutes] = useState(20);
       const [napTimerSeconds, setNapTimerSeconds] = useState(20 * 60);
       const [isNapTimerActive, setIsNapTimerActive] = useState(false);
+
+      // 스마트폰 뒤로가기 버튼 실수 터치 방지 (종료 확인 알림)
+      useEffect(() => {
+        window.history.pushState({ page: 'ktaxi_main' }, '');
+
+        const handlePopState = (e) => {
+          const confirmExit = window.confirm("K-TAXI 앱을 정말 종료하고 나가시겠습니까?");
+          if (!confirmExit) {
+            window.history.pushState({ page: 'ktaxi_main' }, '');
+          } else {
+            window.history.back();
+          }
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+      }, []);
 
       useEffect(() => {
         try {
@@ -583,7 +599,7 @@
         return () => clearInterval(intv);
       }, [appData.healthRoutines]);
 
-      // 출근하기: 기존 출근 시간이 이미 있다면 보존하고 상태만 운행 중으로 전환
+      // 출근하기: 출근 시 첫 화면을 운행기록 달력(calendar)으로 전환
       const handleStartShift = () => {
         const nowTime = getCurrentTimeStr();
         const initialStart = todayRecord.startTime || nowTime;
@@ -604,7 +620,7 @@
           }
         }));
 
-        setCurrentTab('hud');
+        setCurrentTab('calendar');
         setIsHudToolbarVisible(false);
       };
 
@@ -1012,20 +1028,21 @@
             </header>
           )}
 
+          {/* 전체 메뉴: 달력 > 휴식건강 > 속도계 > 설정 순서로 재배치 */}
           {isMenuOpen && (
             <div className="absolute top-12 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-lg border-b-2 border-yellow-500 shadow-2xl p-4 animate-fade-in space-y-3">
               <span className="text-xs font-bold text-slate-400 block">화면 이동</span>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
                 <button
-                  onClick={() => { setCurrentTab('hud'); setIsMenuOpen(false); setIsHudToolbarVisible(false); }}
+                  onClick={() => { setCurrentTab('calendar'); setIsMenuOpen(false); }}
                   className={`py-4 px-3.5 rounded-2xl text-left border transition ${
-                    currentTab === 'hud'
+                    currentTab === 'calendar'
                       ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
                       : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <div className="text-base font-black">속도계 화면</div>
-                  <div className={`text-xs mt-0.5 ${currentTab === 'hud' ? 'text-slate-800 font-bold' : 'text-slate-400'}`}>초대형 야간 HUD 속도계</div>
+                  <div className="text-base font-black">운행 기록 달력</div>
+                  <div className={`text-xs mt-0.5 ${currentTab === 'calendar' ? 'text-slate-800 font-bold' : 'text-slate-400'}`}>일별 매출 & 평균 시급</div>
                 </button>
 
                 <button
@@ -1041,15 +1058,15 @@
                 </button>
 
                 <button
-                  onClick={() => { setCurrentTab('calendar'); setIsMenuOpen(false); }}
+                  onClick={() => { setCurrentTab('hud'); setIsMenuOpen(false); setIsHudToolbarVisible(false); }}
                   className={`py-4 px-3.5 rounded-2xl text-left border transition ${
-                    currentTab === 'calendar'
+                    currentTab === 'hud'
                       ? 'bg-yellow-500 text-slate-950 font-black border-yellow-300 shadow-lg'
                       : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <div className="text-base font-black">운행 기록 달력</div>
-                  <div className={`text-xs mt-0.5 ${currentTab === 'calendar' ? 'text-slate-800 font-bold' : 'text-slate-400'}`}>일별 매출 & 평균 시급</div>
+                  <div className="text-base font-black">속도계 화면</div>
+                  <div className={`text-xs mt-0.5 ${currentTab === 'hud' ? 'text-slate-800 font-bold' : 'text-slate-400'}`}>초대형 야간 HUD 속도계</div>
                 </button>
 
                 <button
@@ -1069,7 +1086,7 @@
 
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' || currentTab === 'welcome' ? 'p-0' : 'p-3.5 md:p-6 overflow-y-auto max-w-4xl mx-auto w-full'}`}>
             
-            {/* 0. 첫 화면: 출근 대기 화면 (초대형 출근 버튼) */}
+            {/* 0. 첫 화면: 출근 대기 화면 */}
             {currentTab === 'welcome' && (
               <div className="h-full flex flex-col justify-between p-6 md:p-12 text-center bg-gradient-to-b from-black via-slate-900 to-black select-none">
                 <div className="w-full flex items-center justify-between pt-4">
@@ -1099,7 +1116,7 @@
                     <span>출근하기 (운행 시작)</span>
                   </button>
                   <p className="text-xs text-slate-500 mt-3 font-semibold">
-                    터치 시 출근 시간이 기록되고 속도계 화면이 즉시 열립니다.
+                    터치 시 출근 시간이 기록되고 운행기록 달력 화면이 열립니다.
                   </p>
                 </div>
               </div>
@@ -1110,7 +1127,7 @@
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
                   
-                  {/* 상단 출근 상태 박스 (퇴근 버튼 삭제, [시간수정]으로 단일화) */}
+                  {/* 상단 출근 상태 박스 (퇴근 버튼 완전 삭제, [시간수정] 버튼만 깔끔히 배치) */}
                   <div className="bg-slate-900 px-4 py-3 rounded-2xl border border-slate-800 flex items-center justify-between shadow">
                     {!todayRecord.startTime ? (
                       <button
