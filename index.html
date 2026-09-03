@@ -11,6 +11,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#000000" />
+  <meta name="application-name" content="K-TAXI" />
+
+  <link rel="manifest" href="data:application/manifest+json;utf-8,%7B%22name%22%3A%22K-TAXI%22%2C%22short_name%22%3A%22K-TAXI%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23000000%22%2C%22theme_color%22%3A%22%23000000%22%7D" />
   
   <title>K-TAXI 스마트 속도계 & 운행기록</title>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -53,8 +56,8 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    const APP_VERSION = 'v5.3.0';
-    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V23';
+    const APP_VERSION = 'v5.4.0';
+    const CURRENT_STORAGE_KEY = 'K_TAXI_RECORD_DATA_V24';
 
     const CLOSING_MESSAGES = [
       "오늘 하루도 정말 수고하셨습니다. 편안한 휴식을 푹 취하세요!",
@@ -94,6 +97,13 @@
       return mins === 0 ? `${hours}시간` : `${hours}시간 ${mins}분`;
     };
 
+    const isLastDayOfMonth = (yearMonthStr) => {
+      const today = new Date();
+      const [y, m] = yearMonthStr.split('-').map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      return today.getFullYear() === y && (today.getMonth() + 1) === m && today.getDate() === lastDay;
+    };
+
     const playAlarmSound = () => {
       try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -114,13 +124,12 @@
     const DEFAULT_STORAGE = {
       isShiftActive: false,
       activeType: 'corporate',
-      defaultOffDay: 1,
       googleSheetUrl: '',
       healthRoutines: [
-        { id: 1, time: '18:00', title: '저녁 혈압/당뇨 약 복용', done: false },
-        { id: 2, time: '20:30', title: '간편 건강식 (감자/계란/샐러드)', done: false },
-        { id: 3, time: '23:00', title: '충전 시 허리 스트레칭', done: false },
-        { id: 4, time: '01:30', title: '새벽 20분 파워 쪽잠', done: false }
+        { id: 1, time: '18:00', title: '저녁 혈압/당뇨 약 복용', alarmEnabled: true },
+        { id: 2, time: '20:30', title: '간편 건강식 (감자/계란/샐러드)', alarmEnabled: false },
+        { id: 3, time: '23:00', title: '충전 시 허리 스트레칭', alarmEnabled: true },
+        { id: 4, time: '01:30', title: '새벽 20분 파워 쪽잠', alarmEnabled: true }
       ],
       corporate: {
         carNumber: '충남31바3238',
@@ -182,9 +191,10 @@
           return {
             isShiftActive: Boolean(p.isShiftActive),
             activeType: (p.activeType || p.activeTab || 'corporate') === 'private' ? 'private' : 'corporate',
-            defaultOffDay: Number(p.defaultOffDay !== undefined ? p.defaultOffDay : 1),
             googleSheetUrl: p.googleSheetUrl || '',
-            healthRoutines: Array.isArray(p.healthRoutines) && p.healthRoutines.length > 0 ? p.healthRoutines : DEFAULT_STORAGE.healthRoutines,
+            healthRoutines: Array.isArray(p.healthRoutines) && p.healthRoutines.length > 0
+              ? p.healthRoutines.map(r => ({ ...r, alarmEnabled: r.alarmEnabled !== undefined ? r.alarmEnabled : true }))
+              : DEFAULT_STORAGE.healthRoutines,
             corporate: {
               carNumber: p.corporate?.carNumber || '충남31바3238',
               dailyDeposit: Number(p.corporate?.dailyDeposit || p.corporate?.baseDeposit || 201000),
@@ -204,6 +214,122 @@
       }
       return DEFAULT_STORAGE;
     };
+
+    // 직관적인 터치식 시/분/오전오후 시간 설정 컴포넌트
+    function DirectTimePickerModal({ initialTime = "12:00", title = "시간 설정", onSave, onClose }) {
+      const parseTime = (tStr) => {
+        if (!tStr || !tStr.includes(':')) return { ampm: '오후', hour: '12', min: '00' };
+        const [hNum, mNum] = tStr.split(':').map(Number);
+        const ampm = hNum < 12 ? '오전' : '오후';
+        let h12 = hNum % 12;
+        if (h12 === 0) h12 = 12;
+        return {
+          ampm,
+          hour: String(h12).padStart(2, '0'),
+          min: String(mNum).padStart(2, '0')
+        };
+      };
+
+      const [initParsed] = useState(() => parseTime(initialTime));
+      const [ampm, setAmpm] = useState(initParsed.ampm);
+      const [hour, setHour] = useState(initParsed.hour);
+      const [min, setMin] = useState(initParsed.min);
+
+      const handleConfirm = () => {
+        let h = Number(hour) || 12;
+        if (h > 12) h = 12;
+        if (h < 1) h = 1;
+        let m = Number(min) || 0;
+        if (m > 59) m = 59;
+        if (m < 0) m = 0;
+
+        let h24 = h;
+        if (ampm === '오전') {
+          if (h === 12) h24 = 0;
+        } else {
+          if (h !== 12) h24 += 12;
+        }
+
+        const finalTime = `${String(h24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        onSave(finalTime);
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border-2 border-yellow-500/80 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl">
+            <h3 className="text-base font-black text-white text-center">{title}</h3>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setAmpm('오전')}
+                className={`py-3 rounded-xl font-black text-sm border transition ${
+                  ampm === '오전' ? 'bg-yellow-500 text-black border-yellow-300 shadow' : 'bg-slate-950 text-slate-400 border-slate-800'
+                }`}
+              >
+                오전
+              </button>
+              <button
+                type="button"
+                onClick={() => setAmpm('오후')}
+                className={`py-3 rounded-xl font-black text-sm border transition ${
+                  ampm === '오후' ? 'bg-yellow-500 text-black border-yellow-300 shadow' : 'bg-slate-950 text-slate-400 border-slate-800'
+                }`}
+              >
+                오후
+              </button>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 bg-slate-950 p-4 rounded-2xl border border-slate-800">
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] text-slate-500 mb-1 font-bold">시 (1~12)</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="1"
+                  max="12"
+                  value={hour}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setHour(e.target.value)}
+                  className="w-16 h-12 bg-slate-900 border border-slate-700 text-center text-2xl font-black font-mono text-yellow-400 rounded-xl focus:border-yellow-500 focus:outline-none"
+                />
+              </div>
+              <span className="text-2xl font-black text-slate-500 mt-3">:</span>
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] text-slate-500 mb-1 font-bold">분 (0~59)</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="0"
+                  max="59"
+                  value={min}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setMin(e.target.value)}
+                  className="w-16 h-12 bg-slate-900 border border-slate-700 text-center text-2xl font-black font-mono text-yellow-400 rounded-xl focus:border-yellow-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleConfirm}
+                className="flex-1 py-3.5 bg-yellow-500 hover:bg-yellow-400 text-black font-black text-sm rounded-xl shadow-lg"
+              >
+                저장
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-3.5 bg-slate-800 text-slate-400 font-bold text-xs rounded-xl"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     function SlideToUnlock({ onUnlock, text = "오른쪽으로 밀어서 퇴근하기" }) {
       const [dragX, setDragX] = useState(0);
@@ -301,10 +427,7 @@
 
     function App() {
       const [appData, setAppData] = useState(loadSafeData);
-      
-      // 요청 반영: 앱 실행 시 첫 화면을 '운행기록 달력(calendar)'으로 지정
       const [currentTab, setCurrentTab] = useState('calendar');
-      
       const [selectedDate, setSelectedDate] = useState(getTodayKey());
       const [currentYearMonth, setCurrentYearMonth] = useState(() => {
         const now = new Date();
@@ -318,19 +441,10 @@
       const [hudToastText, setHudToastText] = useState('');
       const hudToastTimer = useRef(null);
 
-      // 6대 HUD 모드 순환:
-      // 1: 일반 세로
-      // 2: 일반 가로 (좌)
-      // 3: 일반 가로 (우)
-      // 4: 유리 반사 (거울 세로)
-      // 5: 유리 반사 (거울 가로 좌)
-      // 6: 유리 반사 (거울 가로 우)
       const [hudCycleStep, setHudCycleStep] = useState(1);
-
       const hudAreaRef = useRef(null);
       const [hudDims, setHudDims] = useState({ w: 360, h: 600 });
 
-      // 더블탭(2회) 및 롱프레스(1초 꾹 누르기) 제어
       const lastTapTimeRef = useRef(0);
       const longPressTimerRef = useRef(null);
       const isLongPressTriggered = useRef(false);
@@ -343,14 +457,14 @@
       const [showNavModal, setShowNavModal] = useState(false);
       const [showDailyModal, setShowDailyModal] = useState(false);
       const [showTaxModal, setShowTaxModal] = useState(false);
-      const [showAddRoutineModal, setShowAddRoutineModal] = useState(false);
+      
+      // 모달 상태
+      const [showShiftTimePicker, setShowShiftTimePicker] = useState(false);
+      const [showRoutineModal, setShowRoutineModal] = useState(false);
       const [editingRoutine, setEditingRoutine] = useState(null);
-      const [showEditStartTimeModal, setShowEditStartTimeModal] = useState(false);
-      const [showNapVisualModal, setShowNapVisualModal] = useState(false);
-
-      const [tempStartTime, setTempStartTime] = useState('16:30');
       const [routineTitleInput, setRoutineTitleInput] = useState('');
       const [routineTimeInput, setRoutineTimeInput] = useState('12:00');
+      const [showNapVisualModal, setShowNapVisualModal] = useState(false);
 
       const [gpsSpeed, setGpsSpeed] = useState(0);
 
@@ -426,6 +540,21 @@
         return () => navigator.geolocation.clearWatch(watchId);
       }, []);
 
+      // 건강 알림 루틴 체크 (시간 일치 및 alarmEnabled인 경우 알람)
+      useEffect(() => {
+        const checkRoutineAlarm = () => {
+          const nowStr = getCurrentTimeStr();
+          const routines = appData.healthRoutines || [];
+          routines.forEach(r => {
+            if (r.alarmEnabled && r.time === nowStr) {
+              playAlarmSound();
+            }
+          });
+        };
+        const intv = setInterval(checkRoutineAlarm, 60000);
+        return () => clearInterval(intv);
+      }, [appData.healthRoutines]);
+
       const handleStartShift = () => {
         const nowTime = getCurrentTimeStr();
         const updatedRec = {
@@ -443,38 +572,23 @@
             records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
           }
         }));
-
-        setCurrentTab('hud');
-        setIsHudToolbarVisible(false);
       };
 
-      const handleResetShift = () => {
-        if (!confirm('오늘의 출근 기록을 초기화하시겠습니까?')) return;
-        const updatedRec = { ...todayRecord, startTime: '', endTime: '', workMinutes: 0 };
-        setAppData(prev => ({
-          ...prev,
-          isShiftActive: false,
-          [activeType]: {
-            ...prev[activeType],
-            records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
-          }
-        }));
-      };
-
-      const handleSaveCustomStartTime = () => {
+      const handleSaveStartTime = (newTime) => {
         const updatedRec = {
           ...todayRecord,
-          startTime: tempStartTime,
-          workMinutes: todayRecord.endTime ? calculateMinutes(tempStartTime, todayRecord.endTime) : 0
+          startTime: newTime,
+          workMinutes: todayRecord.endTime ? calculateMinutes(newTime, todayRecord.endTime) : 0
         };
         setAppData(prev => ({
           ...prev,
+          isShiftActive: true,
           [activeType]: {
             ...prev[activeType],
             records: { ...(prev[activeType]?.records || {}), [todayKey]: updatedRec }
           }
         }));
-        setShowEditStartTimeModal(false);
+        setShowShiftTimePicker(false);
       };
 
       const handleEndShift = () => {
@@ -515,7 +629,6 @@
                 workHours: formatMinutesToHours(workMins),
                 revenue: updatedRec.revenue || (Number(updatedRec.cardRev || 0) + Number(updatedRec.cashRev || 0)),
                 gas: updatedRec.gas || 0,
-                driverExpense: updatedRec.driverExpense || 0,
                 memo: updatedRec.memo || ''
               })
             }).catch(err => console.warn('Google Sheet Sync Error:', err));
@@ -549,10 +662,11 @@
         setShowNavModal(false);
       };
 
-      const toggleRoutineDone = (id) => {
+      // 건강 알림 토글 (알람 켜기/끄기)
+      const toggleRoutineAlarm = (id) => {
         setAppData(prev => ({
           ...prev,
-          healthRoutines: (prev.healthRoutines || []).map(r => r.id === id ? { ...r, done: !r.done } : r)
+          healthRoutines: (prev.healthRoutines || []).map(r => r.id === id ? { ...r, alarmEnabled: !r.alarmEnabled } : r)
         }));
       };
 
@@ -569,7 +683,7 @@
             id: Date.now(),
             time: routineTimeInput,
             title: routineTitleInput.trim(),
-            done: false
+            alarmEnabled: true
           };
           setAppData(prev => ({
             ...prev,
@@ -579,11 +693,11 @@
 
         setEditingRoutine(null);
         setRoutineTitleInput('');
-        setShowAddRoutineModal(false);
+        setShowRoutineModal(false);
       };
 
       const handleDeleteRoutine = (id) => {
-        if (!confirm('항목을 삭제하시겠습니까?')) return;
+        if (!confirm('해당 알림 항목을 삭제하시겠습니까?')) return;
         setAppData(prev => ({
           ...prev,
           healthRoutines: (prev.healthRoutines || []).filter(r => r.id !== id)
@@ -640,7 +754,15 @@
               const rev = Number(r?.revenue || 0);
               totalRevenue += rev;
               totalGasCompany += Number(r?.gas || 0);
-              totalDriverExpense += Number(r?.driverExpense || 0);
+
+              let itemExp = 0;
+              if (Array.isArray(r?.driverExpenseItems)) {
+                itemExp = r.driverExpenseItems.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+              } else {
+                itemExp = Number(r?.driverExpense || 0);
+              }
+              totalDriverExpense += itemExp;
+
               totalWorkMinutes += Number(r?.workMinutes || 0);
               totalIncentive += Math.round(Math.max(0, rev - dailyDeposit) * 0.7);
             }
@@ -674,7 +796,14 @@
               gasTotal += Number(r?.gas || 0);
               tollTotal += Number(r?.toll || 0);
               maintTotal += Number(r?.maint || 0);
-              otherTotal += Number(r?.other || 0);
+
+              let itemExp = 0;
+              if (Array.isArray(r?.driverExpenseItems)) {
+                itemExp = r.driverExpenseItems.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+              } else {
+                itemExp = Number(r?.other || 0);
+              }
+              otherTotal += itemExp;
               totalWorkMinutes += Number(r?.workMinutes || 0);
             }
           });
@@ -694,6 +823,8 @@
           };
         }
       }, [appData, activeType, currentYearMonth, totalFixedAllowances, totalFixedExpenses]);
+
+      const isEndOfMonthToday = isLastDayOfMonth(currentYearMonth);
 
       const calendarCells = useMemo(() => {
         const [y, m] = currentYearMonth.split('-').map(Number);
@@ -734,7 +865,6 @@
         const now = Date.now();
         const timeSinceLast = now - lastTapTimeRef.current;
 
-        // 더블 탭(400ms 이내 2회 탭) 감지 시 모드 변경
         if (timeSinceLast < 400 && timeSinceLast > 50) {
           const nextStep = (hudCycleStep % 6) + 1;
           setHudCycleStep(nextStep);
@@ -767,13 +897,9 @@
         return 'min(32vw, 36vh)';
       };
 
-      // 6대 속도계 모드 변환 스타일
       const hudNumberTransformStyle = useMemo(() => {
-        if (hudCycleStep === 1) {
-          return { transform: 'none' };
-        }
+        if (hudCycleStep === 1) return { transform: 'none' };
         if (hudCycleStep === 2) {
-          // 일반 가로 좌 (90도 정방향)
           return {
             width: `${hudDims.h}px`,
             height: `${hudDims.w}px`,
@@ -784,7 +910,6 @@
           };
         }
         if (hudCycleStep === 3) {
-          // 일반 가로 우 (-90도 정방향)
           return {
             width: `${hudDims.h}px`,
             height: `${hudDims.w}px`,
@@ -794,12 +919,8 @@
             transform: 'translate(-50%, -50%) rotate(-90deg)'
           };
         }
-        if (hudCycleStep === 4) {
-          // 유리 반사 세로 (상하 반전)
-          return { transform: 'scaleY(-1)' };
-        }
+        if (hudCycleStep === 4) return { transform: 'scaleY(-1)' };
         if (hudCycleStep === 5) {
-          // 유리 반사 가로 좌 (90도 회전 + 상하 반전)
           return {
             width: `${hudDims.h}px`,
             height: `${hudDims.w}px`,
@@ -810,7 +931,6 @@
           };
         }
         if (hudCycleStep === 6) {
-          // 유리 반사 가로 우 (-90도 회전 + 상하 반전)
           return {
             width: `${hudDims.h}px`,
             height: `${hudDims.w}px`,
@@ -828,7 +948,6 @@
       return (
         <div className="w-full h-full flex flex-col bg-black relative overflow-hidden">
           
-          {/* 상단 툴바: HUD 모드에서는 1초 꾹 누를 때만 일시 표시 */}
           {(currentTab !== 'hud' || isHudToolbarVisible) && (
             <header className="flex-shrink-0 px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-40 relative animate-fade-in">
               <div className="flex items-center gap-2 overflow-hidden">
@@ -860,7 +979,6 @@
             </header>
           )}
 
-          {/* 4대 핵심 메뉴 드롭다운 */}
           {isMenuOpen && (
             <div className="absolute top-12 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-lg border-b-2 border-yellow-500 shadow-2xl p-4 animate-fade-in space-y-3">
               <span className="text-xs font-bold text-slate-400 block">화면 이동</span>
@@ -918,36 +1036,37 @@
 
           <main className={`flex-1 relative w-full overflow-hidden ${currentTab === 'hud' ? 'p-0' : 'p-3.5 md:p-6 overflow-y-auto max-w-4xl mx-auto w-full'}`}>
             
-            {/* 1. 운행 기록 달력 탭 (첫 메인 화면) */}
+            {/* 1. 운행 기록 달력 탭 */}
             {currentTab === 'calendar' && (
               <div className="space-y-3 pb-6 flex flex-col justify-between min-h-full">
                 <div className="space-y-3">
                   
-                  {/* 상단 운행 상태 배너: 출근 전/출근 완료 전환 */}
-                  <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 flex items-center justify-between shadow">
-                    <div>
-                      <span className="text-xs text-slate-400 font-bold block">오늘 운행 상태</span>
-                      <div className="text-base font-black text-yellow-400 mt-0.5">
-                        {todayRecord.startTime ? `${todayRecord.startTime} 출근 완료` : '출근 전 (대기 중)'}
+                  {/* 요청사항: "오늘의 운행상태" 및 "속도계보기" 삭제 ➔ "00:00 출근 [수정]" 또는 미출근시 직관적 출근 버튼 */}
+                  <div className="bg-slate-900 px-4 py-3 rounded-2xl border border-slate-800 flex items-center justify-between shadow">
+                    {!todayRecord.startTime ? (
+                      <button
+                        onClick={handleStartShift}
+                        className="w-full py-3 bg-gradient-to-r from-yellow-500 to-amber-400 hover:from-yellow-400 text-black font-black text-base rounded-xl shadow-lg active:scale-98 transition flex items-center justify-center gap-2"
+                      >
+                        <span>출근하기 (운행 시작)</span>
+                        <span>▶</span>
+                      </button>
+                    ) : (
+                      <div className="w-full flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                          <span className="text-lg font-black text-yellow-400 font-mono tracking-wide">
+                            {todayRecord.startTime} 출근
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setShowShiftTimePicker(true)}
+                          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 font-bold text-xs rounded-xl active:scale-95 transition"
+                        >
+                          수정
+                        </button>
                       </div>
-                    </div>
-                    <div>
-                      {!todayRecord.startTime ? (
-                        <button
-                          onClick={handleStartShift}
-                          className="px-5 py-2.5 bg-yellow-500 hover:bg-yellow-400 text-black font-black text-sm rounded-xl shadow-lg active:scale-95 transition"
-                        >
-                          출근하기 ▶
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => { setCurrentTab('hud'); setIsHudToolbarVisible(false); }}
-                          className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-black text-sm rounded-xl shadow-lg active:scale-95 transition"
-                        >
-                          속도계 보기 ▶
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
 
                   <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 flex items-center justify-between">
@@ -982,6 +1101,7 @@
                     </div>
                   </div>
 
+                  {/* 요청사항: 일 평균 수입 & 시급은 평소 가려두고 터치 시 '말일 확인' 안내 후 말일에만 공개 */}
                   <div className="grid grid-cols-3 gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800 text-center">
                     <div>
                       <span className="text-[10px] text-slate-400 block font-bold">일 평균 시간</span>
@@ -989,25 +1109,36 @@
                         {formatMinutesToHours(currentMonthStats.avgDailyMinutes)}
                       </span>
                     </div>
-                    <div>
+                    <div
+                      onClick={() => {
+                        if (!isEndOfMonthToday) alert('일 평균 수입은 기본급 및 월말 정산 기준에 따라 매월 말일에 자동 계산되어 표시됩니다.');
+                      }}
+                      className="cursor-pointer active:opacity-75 transition"
+                    >
                       <span className="text-[10px] text-slate-400 block font-bold">일 평균 수입</span>
-                      <span className="text-xs font-black text-yellow-400 mt-1 block">
-                        {formatMoney(currentMonthStats.avgDailyRevenue)}원
+                      <span className={`text-xs font-black mt-1 block ${isEndOfMonthToday ? 'text-yellow-400' : 'text-slate-500 underline decoration-dotted'}`}>
+                        {isEndOfMonthToday ? `${formatMoney(currentMonthStats.avgDailyRevenue)}원` : '말일 확인'}
                       </span>
                     </div>
-                    <div>
+                    <div
+                      onClick={() => {
+                        if (!isEndOfMonthToday) alert('평균 시급은 기본급 및 월말 실지급액 확정 후 매월 말일에 자동 계산되어 공개됩니다.');
+                      }}
+                      className="cursor-pointer active:opacity-75 transition"
+                    >
                       <span className="text-[10px] text-emerald-400 block font-bold">평균 시급</span>
-                      <span className="text-xs font-black text-emerald-300 mt-1 block">
-                        {formatMoney(currentMonthStats.avgHourlyWage)}원
+                      <span className={`text-xs font-black mt-1 block ${isEndOfMonthToday ? 'text-emerald-300' : 'text-slate-500 underline decoration-dotted'}`}>
+                        {isEndOfMonthToday ? `${formatMoney(currentMonthStats.avgHourlyWage)}원` : '말일 확인'}
                       </span>
                     </div>
                   </div>
 
                   <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800">
+                    {/* 요청사항: 고정된 '월·휴'를 삭제하고 정상적인 요일로만 표기 */}
                     <div className="grid grid-cols-7 text-center text-xs font-bold text-slate-400 pb-2 border-b border-slate-800 mb-2">
                       {DAYS_NAME.map((dName, idx) => (
-                        <span key={dName} className={`${idx === 0 ? 'text-red-400' : idx === 6 ? 'text-blue-400' : idx === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>
-                          {dName}{idx === (appData.defaultOffDay || 1) ? '·휴' : ''}
+                        <span key={dName} className={`${idx === 0 ? 'text-red-400' : idx === 6 ? 'text-blue-400' : 'text-slate-300'}`}>
+                          {dName}
                         </span>
                       ))}
                     </div>
@@ -1018,19 +1149,17 @@
                         const dayOfWeek = (idx % 7);
                         const rec = appData[activeType]?.records?.[dateStr];
                         const isSelected = selectedDate === dateStr;
-                        const isDefaultOff = dayOfWeek === (appData.defaultOffDay || 1);
 
                         return (
                           <button
                             key={dateStr}
                             onClick={() => { setSelectedDate(dateStr); setShowDailyModal(true); }}
                             className={`h-12 p-1 rounded-xl flex flex-col justify-between items-start text-left border transition ${
-                              isSelected ? 'border-yellow-400 bg-yellow-500/20' : rec?.isHoliday ? 'border-emerald-800/60 bg-emerald-950/30' : rec ? 'border-slate-700 bg-slate-950/80' : isDefaultOff ? 'border-slate-800/80 bg-slate-900/40' : 'border-slate-800/60 bg-slate-950/30'
+                              isSelected ? 'border-yellow-400 bg-yellow-500/20' : rec?.isHoliday ? 'border-emerald-800/60 bg-emerald-950/30' : rec ? 'border-slate-700 bg-slate-950/80' : 'border-slate-800/60 bg-slate-950/30'
                             }`}
                           >
                             <div className="flex justify-between w-full items-center">
-                              <span className={`text-[11px] font-bold ${dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : dayOfWeek === (appData.defaultOffDay || 1) ? 'text-emerald-400' : 'text-slate-300'}`}>{dayNum}</span>
-                              {isDefaultOff && !rec && <span className="text-[8px] text-emerald-500/80 font-bold">휴무</span>}
+                              <span className={`text-[11px] font-bold ${dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : 'text-slate-300'}`}>{dayNum}</span>
                             </div>
                             {rec && (
                               rec.isHoliday ? (
@@ -1054,109 +1183,86 @@
               </div>
             )}
 
-            {/* 2. 오늘 & 건강 알림 탭 */}
+            {/* 2. 휴식 & 건강 알림 탭 (중복된 오늘 출근 카드 제거) */}
             {currentTab === 'today' && (
               <div className="space-y-3.5 pb-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-sm space-y-2 flex flex-col justify-between">
-                    <div>
-                      <span className="text-xs text-slate-400 font-bold block">오늘의 출근 기록</span>
-                      <div className="text-xl font-black text-yellow-400 mt-0.5">
-                        {todayRecord.startTime ? `${todayRecord.startTime} 출근 완료` : '출근 기록 없음'}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        onClick={() => {
-                          setTempStartTime(todayRecord.startTime || getCurrentTimeStr());
-                          setShowEditStartTimeModal(true);
-                        }}
-                        className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-slate-700 rounded-xl font-bold text-xs"
-                      >
-                        시간 수정
-                      </button>
-                      <button
-                        onClick={handleResetShift}
-                        className="px-4 py-2.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 border border-slate-700 rounded-xl font-bold text-xs"
-                      >
-                        초기화
-                      </button>
-                    </div>
+                <div
+                  onClick={() => setShowNapVisualModal(true)}
+                  className="bg-gradient-to-r from-indigo-950/90 via-slate-900 to-indigo-950/90 p-4 rounded-2xl border-2 border-indigo-500/50 shadow-xl flex items-center justify-between cursor-pointer active:scale-98 transition"
+                >
+                  <div>
+                    <h4 className="text-base font-black text-indigo-200">20분 파워 쪽잠 타이머</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {isNapTimerActive
+                        ? `쪽잠 진행 중 (${Math.floor(napTimerSeconds / 60)}분 ${String(napTimerSeconds % 60).padStart(2, '0')}초 남음)`
+                        : '터치하여 쪽잠 시간 설정 및 시작 (알람음 포함)'}
+                    </p>
                   </div>
-
-                  <div
-                    onClick={() => setShowNapVisualModal(true)}
-                    className="bg-gradient-to-r from-indigo-950/90 via-slate-900 to-indigo-950/90 p-4 rounded-2xl border-2 border-indigo-500/50 shadow-xl flex items-center justify-between cursor-pointer active:scale-98 transition"
-                  >
-                    <div>
-                      <h4 className="text-base font-black text-indigo-200">20분 파워 쪽잠 타이머</h4>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {isNapTimerActive
-                          ? `쪽잠 진행 중 (${Math.floor(napTimerSeconds / 60)}분 ${String(napTimerSeconds % 60).padStart(2, '0')}초 남음)`
-                          : '터치하여 쪽잠 시간 설정 및 시작 (알람음 포함)'}
-                      </p>
-                    </div>
-                    <span className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow">
-                      {isNapTimerActive ? '확인/취소' : '시작'}
-                    </span>
-                  </div>
+                  <span className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow">
+                    {isNapTimerActive ? '확인/취소' : '시작'}
+                  </span>
                 </div>
 
+                {/* 요청사항: 체크박스/줄긋기 삭제 ➔ 알람(ON/OFF), 수정, 삭제 3개 버튼 구성 */}
                 <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center pb-2 border-b border-slate-800">
                     <span className="text-sm font-bold text-emerald-400">
-                      건강 & 휴식 알림 ({ (appData.healthRoutines || []).filter(r => r.done).length } / { (appData.healthRoutines || []).length })
+                      건강 & 휴식 알림 관리 (총 { (appData.healthRoutines || []).length }개)
                     </span>
                     <button
                       onClick={() => {
                         setEditingRoutine(null);
                         setRoutineTitleInput('');
                         setRoutineTimeInput(getCurrentTimeStr());
-                        setShowAddRoutineModal(true);
+                        setShowRoutineModal(true);
                       }}
-                      className="text-xs text-yellow-400 font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700"
+                      className="text-xs text-yellow-400 font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 active:scale-95"
                     >
-                      + 항목 추가
+                      + 새 항목 추가
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+                  <div className="space-y-2 pt-1">
                     {(appData.healthRoutines || []).map((routine) => (
                       <div
                         key={routine.id}
-                        className={`p-3.5 rounded-xl border flex items-center justify-between text-sm transition ${
-                          routine.done
-                            ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 line-through'
-                            : 'bg-slate-950 border-slate-800 text-slate-200'
-                        }`}
+                        className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-sm gap-2"
                       >
-                        <div onClick={() => toggleRoutineDone(routine.id)} className="flex items-center gap-3 flex-1 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={routine.done}
-                            onChange={() => toggleRoutineDone(routine.id)}
-                            className="w-5 h-5 rounded text-emerald-500 cursor-pointer"
-                          />
-                          <div>
-                            <span className="text-xs text-yellow-400 font-black mr-2 font-mono">[{routine.time}]</span>
-                            <span className="font-bold">{routine.title}</span>
-                          </div>
+                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                          <span className="text-xs text-yellow-400 font-mono font-black flex-shrink-0">
+                            [{routine.time}]
+                          </span>
+                          <span className="font-bold text-slate-200 truncate">
+                            {routine.title}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-1">
+
+                        {/* 알람 / 수정 / 삭제 3대 버튼 */}
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={() => toggleRoutineAlarm(routine.id)}
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${
+                              routine.alarmEnabled
+                                ? 'bg-amber-500/20 text-yellow-300 border-amber-500/50'
+                                : 'bg-slate-900 text-slate-500 border-slate-800'
+                            }`}
+                          >
+                            {routine.alarmEnabled ? '알람 ON' : '알람 OFF'}
+                          </button>
                           <button
                             onClick={() => {
                               setEditingRoutine(routine);
                               setRoutineTitleInput(routine.title);
                               setRoutineTimeInput(routine.time);
-                              setShowAddRoutineModal(true);
+                              setShowRoutineModal(true);
                             }}
-                            className="text-slate-400 hover:text-yellow-400 px-2 py-1 text-xs font-bold"
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-bold"
                           >
                             수정
                           </button>
                           <button
                             onClick={() => handleDeleteRoutine(routine.id)}
-                            className="text-slate-500 hover:text-red-400 px-2 py-1 text-xs font-bold"
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-400 border border-slate-700 rounded-lg text-xs font-bold"
                           >
                             삭제
                           </button>
@@ -1168,7 +1274,7 @@
               </div>
             )}
 
-            {/* 3. 초대형 HUD 속도계 (더블탭: 6대 모드 순환 / 1초 꾹 누르기: 메뉴 표시) */}
+            {/* 3. 초대형 HUD 속도계 */}
             {currentTab === 'hud' && (
               <div
                 ref={hudAreaRef}
@@ -1314,6 +1420,66 @@
 
           {/* 모달 창 모음 */}
 
+          {/* 출근 시간 직접 수정 모달 (터치식 시/분/오전오후) */}
+          {showShiftTimePicker && (
+            <DirectTimePickerModal
+              initialTime={todayRecord.startTime || getCurrentTimeStr()}
+              title="출근 시간 설정"
+              onSave={handleSaveStartTime}
+              onClose={() => setShowShiftTimePicker(false)}
+            />
+          )}
+
+          {/* 건강 알림 추가/수정 모달 */}
+          {showRoutineModal && (
+            <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
+              <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <h3 className="text-sm font-black text-emerald-400">
+                    {editingRoutine ? '알림 항목 수정' : '새 알림 항목 추가'}
+                  </h3>
+                  <button onClick={() => setShowRoutineModal(false)} className="text-slate-400 font-bold">✕</button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="text-slate-400 block mb-1">알림 항목 내용</label>
+                    <input
+                      type="text"
+                      placeholder="예: 저녁 당뇨약 복용 / 허리 스트레칭"
+                      value={routineTitleInput}
+                      onChange={(e) => setRoutineTitleInput(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 p-2.5 rounded-xl text-white font-bold text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-slate-400 block mb-1">알림 시각</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newTime = prompt('알림 시각을 24시간 형식으로 입력하세요 (예: 18:30)', routineTimeInput);
+                        if (newTime) setRoutineTimeInput(newTime);
+                      }}
+                      className="w-full py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-yellow-400 font-mono font-black text-center text-sm"
+                    >
+                      {routineTimeInput} (터치하여 시간 변경)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button onClick={handleSaveRoutine} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs">
+                    저장
+                  </button>
+                  <button onClick={() => setShowRoutineModal(false)} className="px-4 py-3 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">
+                    취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {showNavModal && (
             <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
               <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl text-center">
@@ -1360,30 +1526,6 @@
                 >
                   확인 (달력으로 이동)
                 </button>
-              </div>
-            </div>
-          )}
-
-          {showEditStartTimeModal && (
-            <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xs p-5 space-y-4 shadow-2xl">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h3 className="text-sm font-black text-yellow-400">출근 시각 직접 수정</h3>
-                  <button onClick={() => setShowEditStartTimeModal(false)} className="text-slate-400 font-bold">✕</button>
-                </div>
-                <div className="space-y-2 text-center">
-                  <label className="text-xs text-slate-400">실제 출근 시각을 입력하세요</label>
-                  <input
-                    type="time"
-                    value={tempStartTime}
-                    onChange={(e) => setTempStartTime(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 p-3 rounded-2xl text-center text-xl font-mono font-black text-yellow-400"
-                  />
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <button onClick={handleSaveCustomStartTime} className="flex-1 py-2.5 bg-yellow-500 text-black font-black rounded-xl text-xs">수정 완료</button>
-                  <button onClick={() => setShowEditStartTimeModal(false)} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
-                </div>
               </div>
             </div>
           )}
@@ -1452,46 +1594,6 @@
             </div>
           )}
 
-          {showAddRoutineModal && (
-            <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-5 space-y-3.5 shadow-2xl">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <h3 className="text-sm font-black text-emerald-400">
-                    {editingRoutine ? '건강 루틴 수정' : '새 건강 루틴 추가'}
-                  </h3>
-                  <button onClick={() => setShowAddRoutineModal(false)} className="text-slate-400 font-bold">✕</button>
-                </div>
-                <div className="space-y-2.5 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-1">알림 시각</label>
-                    <input
-                      type="time"
-                      value={routineTimeInput}
-                      onChange={(e) => setRoutineTimeInput(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 p-2 rounded-xl text-center text-sm font-bold text-yellow-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-1">루틴 내용</label>
-                    <input
-                      type="text"
-                      placeholder="예: 저녁 당뇨약 복용 / 허리 스트레칭"
-                      value={routineTitleInput}
-                      onChange={(e) => setRoutineTitleInput(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 p-2.5 rounded-xl text-white font-bold text-sm"
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-2 pt-2">
-                  <button onClick={handleSaveRoutine} className="flex-1 py-2.5 bg-emerald-600 text-white font-black rounded-xl text-xs">
-                    {editingRoutine ? '수정 완료' : '추가 완료'}
-                  </button>
-                  <button onClick={() => setShowAddRoutineModal(false)} className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {showDailyModal && (
             <DailyRecordModal
               activeType={activeType}
@@ -1521,6 +1623,7 @@
       );
     }
 
+    // 일별 상세 운행 기록 모달 (휴무일 지정 문구 변경 & 다건 기타경비 추가)
     function DailyRecordModal({ activeType, dateKey, existingData, onSave, onClose }) {
       const [isHoliday, setIsHoliday] = useState(existingData?.isHoliday || false);
       const [memo, setMemo] = useState(existingData?.memo || '');
@@ -1528,22 +1631,72 @@
       const [endTime, setEndTime] = useState(existingData?.endTime || '');
       const [revenue, setRevenue] = useState(existingData?.revenue || 0);
       const [gas, setGas] = useState(existingData?.gas || 0);
-      const [driverExpense, setDriverExpense] = useState(existingData?.driverExpense || 0);
+      
       const [cardRev, setCardRev] = useState(existingData?.cardRev || 0);
       const [cashRev, setCashRev] = useState(existingData?.cashRev || 0);
       const [privGas, setPrivGas] = useState(existingData?.gas || 0);
       const [toll, setToll] = useState(existingData?.toll || 0);
       const [maint, setMaint] = useState(existingData?.maint || 0);
-      const [other, setOther] = useState(existingData?.other || 0);
+
+      // 다건 기타 경비 목록 관리 (법인/개인 공통)
+      const [driverExpenseItems, setDriverExpenseItems] = useState(() => {
+        if (Array.isArray(existingData?.driverExpenseItems) && existingData.driverExpenseItems.length > 0) {
+          return existingData.driverExpenseItems;
+        }
+        const legacyVal = activeType === 'corporate' ? Number(existingData?.driverExpense || 0) : Number(existingData?.other || 0);
+        return legacyVal > 0 ? [{ id: Date.now(), name: '기타경비', amount: legacyVal }] : [];
+      });
+
+      const [newExpenseName, setNewExpenseName] = useState('');
+      const [newExpenseAmount, setNewExpenseAmount] = useState(0);
 
       const calculatedMins = calculateMinutes(startTime, endTime);
 
+      const handleAddExpenseItem = () => {
+        if (!newExpenseName.trim() && Number(newExpenseAmount) <= 0) return;
+        const newItem = {
+          id: Date.now(),
+          name: newExpenseName.trim() || '경비항목',
+          amount: Number(newExpenseAmount) || 0
+        };
+        setDriverExpenseItems(prev => [...prev, newItem]);
+        setNewExpenseName('');
+        setNewExpenseAmount(0);
+      };
+
+      const handleRemoveExpenseItem = (id) => {
+        setDriverExpenseItems(prev => prev.filter(item => item.id !== id));
+      };
+
+      const totalDriverExpenseSum = driverExpenseItems.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
       const handleSave = () => {
-        const base = { isHoliday, memo, startTime, endTime, workMinutes: calculatedMins };
+        const base = {
+          isHoliday,
+          memo,
+          startTime,
+          endTime,
+          workMinutes: calculatedMins,
+          driverExpenseItems
+        };
+
         if (activeType === 'corporate') {
-          onSave({ ...base, revenue: Number(revenue) || 0, gas: Number(gas) || 0, driverExpense: Number(driverExpense) || 0 });
+          onSave({
+            ...base,
+            revenue: Number(revenue) || 0,
+            gas: Number(gas) || 0,
+            driverExpense: totalDriverExpenseSum
+          });
         } else {
-          onSave({ ...base, cardRev: Number(cardRev) || 0, cashRev: Number(cashRev) || 0, gas: Number(privGas) || 0, toll: Number(toll) || 0, maint: Number(maint) || 0, other: Number(other) || 0 });
+          onSave({
+            ...base,
+            cardRev: Number(cardRev) || 0,
+            cashRev: Number(cashRev) || 0,
+            gas: Number(privGas) || 0,
+            toll: Number(toll) || 0,
+            maint: Number(maint) || 0,
+            other: totalDriverExpenseSum
+          });
         }
       };
 
@@ -1554,10 +1707,13 @@
               <h3 className="text-sm font-bold text-yellow-400">{dateKey} 운행 기록</h3>
               <button onClick={onClose} className="text-slate-400 font-bold text-base">✕</button>
             </div>
+
+            {/* 요청사항: "이날은 휴무했읍니다" ➔ "휴무일로 지정" 으로 문구 변경 */}
             <label className="flex items-center gap-2.5 bg-slate-950 p-3 rounded-xl border border-slate-800 cursor-pointer">
               <input type="checkbox" checked={isHoliday} onChange={(e) => setIsHoliday(e.target.checked)} className="w-5 h-5 rounded text-yellow-500" />
-              <span className="text-xs font-bold text-slate-300">이 날은 휴무했습니다 (미운행)</span>
+              <span className="text-xs font-bold text-slate-300">휴무일로 지정 (미운행)</span>
             </label>
+
             {!isHoliday && (
               <div className="space-y-3">
                 <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
@@ -1576,11 +1732,11 @@
                     </div>
                   </div>
                 </div>
+
                 {activeType === 'corporate' ? (
                   <>
                     <div><label className="text-xs text-slate-300 block mb-1">당일 총매출</label><SmartMoneyInput value={revenue} onChange={setRevenue} colorClass="text-yellow-400" /></div>
                     <div><label className="text-xs text-blue-400 block mb-1">가스비</label><SmartMoneyInput value={gas} onChange={setGas} colorClass="text-blue-300" /></div>
-                    <div><label className="text-xs text-orange-400 block mb-1">기타 기사경비</label><SmartMoneyInput value={driverExpense} onChange={setDriverExpense} colorClass="text-orange-300" /></div>
                   </>
                 ) : (
                   <>
@@ -1592,14 +1748,73 @@
                       <div><label className="text-xs text-slate-300 block mb-1">가스비</label><SmartMoneyInput value={privGas} onChange={setPrivGas} /></div>
                       <div><label className="text-xs text-slate-300 block mb-1">통행료</label><SmartMoneyInput value={toll} onChange={setToll} /></div>
                     </div>
+                    <div><label className="text-xs text-slate-300 block mb-1">정비비</label><SmartMoneyInput value={maint} onChange={setMaint} /></div>
                   </>
                 )}
+
+                {/* 요청사항: 항목과 금액을 따로 적을 수 있는 다건 기타경비 등록 영역 */}
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-orange-400">기타 경비 내역</span>
+                    <span className="text-xs font-mono font-bold text-orange-300">
+                      총 {formatMoney(totalDriverExpenseSum)}원
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {driverExpenseItems.map(item => (
+                      <div key={item.id} className="flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded-lg text-xs border border-slate-800">
+                        <span className="text-slate-300 font-medium">{item.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-yellow-400 font-mono font-bold">{formatMoney(item.amount)}원</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveExpenseItem(item.id)}
+                            className="text-slate-500 hover:text-red-400 font-bold px-1"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex gap-1.5 pt-1">
+                    <input
+                      type="text"
+                      placeholder="항목 (예: 세차/식대)"
+                      value={newExpenseName}
+                      onChange={(e) => setNewExpenseName(e.target.value)}
+                      className="w-1/2 bg-slate-900 border border-slate-700 px-2.5 py-2 text-xs rounded-xl text-white font-medium"
+                    />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="금액"
+                      value={newExpenseAmount > 0 ? newExpenseAmount.toLocaleString('ko-KR') : ''}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                        setNewExpenseAmount(raw ? Number(raw) : 0);
+                      }}
+                      className="w-1/3 bg-slate-900 border border-slate-700 px-2 py-2 text-xs rounded-xl text-right text-orange-300 font-bold"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddExpenseItem}
+                      className="px-3 bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs rounded-xl"
+                    >
+                      추가
+                    </button>
+                  </div>
+                </div>
+
                 <div>
                   <label className="text-xs text-slate-300 block mb-1">운행 메모</label>
                   <input type="text" placeholder="특이사항 메모" value={memo} onChange={(e) => setMemo(e.target.value)} className="w-full bg-slate-950 border border-slate-700 p-2.5 text-xs rounded-xl text-white" />
                 </div>
               </div>
             )}
+
             <div className="flex gap-2 pt-2">
               <button onClick={handleSave} className="flex-1 py-3 bg-yellow-500 text-black font-bold rounded-xl text-xs">저장 완료</button>
               <button onClick={onClose} className="px-4 py-3 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs">취소</button>
